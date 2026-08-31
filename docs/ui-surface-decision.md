@@ -53,7 +53,8 @@ Co VS Code dává hotové a co z toho tenhle produkt opravdu potřebuje:
 
 | Primitivum | K čemu v Agency |
 |---|---|
-| `CommentController` | **Nálezy jako inline review komentáře u řádku**, s akcemi Accept / Reject / Defer. Desktopová aplikace to neumí. |
+| `CommentController` | **Nálezy jako inline review komentáře u řádku**, s akcemi Accept / Reject / Defer. Desktopová aplikace to neumí. **Ověřeno spikem 31. 8.** |
+| Panel *Comments* | Seznam všech nálezů napříč soubory, se skupinami a čísly řádků — **zadarmo, jako vedlejší efekt vláken**. Nečekal jsem to a ubírá to práci v kroku 4. |
 | `DiagnosticCollection` | Nálezy jako squiggles + Problems panel. Nutně za přepínačem, jinak šum. |
 | `TreeDataProvider` | Projekty, běhy, triage fronta. Zdarma klávesnice, ikony, badge s počtem, context menu. |
 | `vscode.diff` | Diff viewer pro evidence. Žádný vlastní syntax highlighting ani virtualizovaný scroll. |
@@ -186,7 +187,7 @@ Desktopová aplikace je správná odpověď na „uživatel nemá editor". To ne
 ## 9. Otevřené otázky
 
 1. ~~Jede `code-review-graph` na SQLite a přes jaký driver?~~ **Zodpovězeno 31. 8.** — SQLite ano, ale tool je **Python** v2.3.7 (uv, stdlib `sqlite3`, žádné native rozšíření) a `serve` je hotový MCP server. Viz §4.
-2. **Otevřené — jediná věc, která by tohle rozhodnutí mohla vrátit zpět.** Je `CommentController` použitelný nad nálezy z běhu proti *jinému* commitu, než je aktuální working tree? Pravděpodobně ano přes vlastní `CommentThread` na konkrétní `Uri`, ale chce to ověřit prototypem **už v kroku 1**, ne až v kroku 4. Když ne, padá se na webview-only variantu a §2.2 ztrácí hlavní argument.
+2. ~~Je `CommentController` použitelný nad nálezy z běhu proti *jinému* commitu, než je working tree?~~ **Zodpovězeno 31. 8. spikem — ano.** Postaveno na osmi nálezech, z toho pěti skutečných z PR #460, a ověřeno i na smazaném souboru a na posunu řádku 62 → 47. Webview-only varianta se nepoužije, **tohle rozhodnutí je tím potvrzené**. Výsledky a pět chyb v návrhu, které to odhalilo, jsou v [`implementation-plan-v0.md`](implementation-plan-v0.md) §3.6.
 3. ~~Kolik nálezů poteče do Problems panelu?~~ **Rozhodnuto:** `DiagnosticCollection` je **default vypnutá**, jen přepínač. Při 35+ nálezech na běh by Problems panel přestal být použitelný pro cokoli jiného.
 4. Nové: unese `agency.db` jako index nad `.agency/runs/**` i retrospektivní audit, kde jeden běh vyprodukuje desítky nálezů nad starými commity? Zjistí se v kroku 2 na `kvesteros-platform`.
 

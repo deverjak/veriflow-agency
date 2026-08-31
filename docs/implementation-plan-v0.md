@@ -13,6 +13,8 @@
 | „lokální SQLite" | `.agency/runs/` v repu = pravda, `agency.db` = přestavitelný index | deletion-safe persistence; `agency.db` smí kdykoli zaniknout |
 | Triage → GitHub Project | Lokální store je pravda, Project je **jednosměrný export** | ruší ruční přepis (35 z 36 nálezů) bez sync konfliktů |
 | Kroky 1–6 sekvenčně | Krok 1 je **vertikální řez** na `main-panelu` | mismatch se odhalí za tři dny, ne u kroku 4 |
+| Triage až v kroku 4 | **Sdílené úložiště rozhodnutí už v kroku 3** | triage musí umět i agent, takže rozhodnutí je operace nad úložištěm, ne příkaz UI — a to mění tvar kontraktu |
+| `CommentController` jako riziko | **Ověřeno spikem, riziko zavřené** | §3.6 — a odhalilo to pět chyb v návrhu, které by jinak vyšly najevo až u kroku 4 |
 
 > **Poznámka k původnímu oponentnímu review.** Dokument `second-opinion-veriflow-agency.md` (30. 8., role „devil's advocate" nad původním návrhem headless control plane + Agent Packs + desktop) byl 31. 8. rozpuštěn do tohoto plánu a do [`baseline.md`](baseline.md) a smazán. Přežilo z něj to, co je pořád platné a nikde jinde nebylo: pravidlo *trigger určuje credential* (§3.3), test ekonomické životaschopnosti (§3.3), princip *páteří je kontrakt* (§3.4), čtyřstavový lifecycle nálezu a deterministická brána (krok 3), kill criteria (§6) a čtyři otevřené otázky (§8). Zahozeno bylo to, co je buď splněné, nebo přebité pozdějšími rozhodnutími: doporučení stavět na bezobslužném běhu (attended-only to ruší), pořadí fází F0–F5 (nahrazeno kroky 0–6), a závěr „nejlepší verze je nudný CLI nástroj bez UI" (přebito rozhodnutím v [`ui-surface-decision.md`](ui-surface-decision.md)).
 
@@ -315,6 +317,44 @@ Tím se hranice ze §3.2 hlídá sama. Když někdo přidá pole jen na jedné s
 
 ---
 
+## 3.6 Co ověřil spike (31. 8.)
+
+Otevřená otázka §8.2 — *unese Comments API nález zakotvený na jiný commit, než je working tree?* — je **zodpovězená kladně**. Postaveno v `packages/extension` na osmi nálezech, z nichž pět jsou skutečné z `pr-review-graph` komentáře na PR #460 (commit `93dc76a`) a tři jsou hraniční případy z reálné historie `main-panelu`: posun řádku 62 → 47 v souboru s +1012/−865, smazaný soubor, číslo řádku za koncem souboru.
+
+| Co se ověřovalo | Výsledek |
+|---|---|
+| Vlákno na pracovní kopii (případ A) | ✅ 6 z 8 |
+| Vlákno na read-only dokumentu z commitu (případ B) | ✅ smazaný soubor se přesto zobrazí |
+| Akce v hlavičce vlákna včetně podnabídky s důvody | ✅ |
+| Text z pole odpovědi dorazí do příkazu | ✅ |
+| `vscode.diff` proti pracovní kopii | ✅ |
+| Kotva nad driftem | ✅ 62 → 47 |
+| Řádek za koncem souboru nepřistane tiše | ✅ odmítnuto |
+
+**Webview-only varianta se nepoužije, plán se nemění.**
+
+### Pět věcí, které z toho vypadly a v plánu nebyly
+
+Všechny jsou chyby v mém návrhu, ne omezení VS Code — což je přesně to, co spike měl najít, dokud oprava stojí hodinu:
+
+1. **Kotva, vrstva 1** — testovala `commit == HEAD`, musí testovat neměnnost souboru. Zapsáno u kroku 3, bodu 4.
+2. **Kotva, vrstva 2** — hledala jeden řádek, musí hledat blok. Tamtéž.
+3. **Rozhodnutí patří do sdíleného úložiště, ne do paměti extension.** Bez toho agent triage neumí. Přesunuto z kroku 4 do kroku 3, bod 6.
+4. **Rozhodnutí a poznámka jsou dvě různé věci** a nesmí sdílet jedno tlačítko ani jedno pole. Tamtéž.
+5. **Přestavba vláken potřebuje generační čítač.** `buildThreads()` je asynchronní a poběží ze tří míst — po doběhnutí runu, při změně větve, po reindexu. Když se dva běhy prolnou, druhý uklidí vlákna prvního, ale ta rozdělaná vzniknou až po úklidu a přežijí jako duplikáty. Ověřeno tím, že se to stalo. Patří do kroku 4.
+
+### Co se z prototypu přenese a co ne
+
+**Přenese se** tvar řešení, ne kód: čtyřvrstvá kotva, `agency:` scheme s `TextDocumentContentProvider` nad `git show`, `contextValue` na vlákně řídící nabídku akcí, rozdělení hlavička/pole odpovědi, enum důvodů.
+
+**Nepřenese se** implementace — spike je plain JS bez závislostí a bez build stepu, ostrá extension je TypeScript podle §3.5. A fixtures se zahodí, jakmile krok 1 vyrobí skutečný `findings.json`.
+
+### Jedna věc, která ubírá práci v kroku 4
+
+**Panel *Comments* agreguje vlákna napříč soubory sám**, se skupinami po souborech, čísly řádků a počtem odpovědí. Seznamový pohled přes všechny nálezy tedy nemusí stavět TreeView — ten zůstane na navigaci mezi projekty, běhy a triage frontou, což je míň, než §3 [`ui-surface-decision.md`](ui-surface-decision.md) předpokládal.
+
+---
+
 ## 4. Kroky
 
 Řazené podle poměru *co se dozvím / co to stojí*. Každý má pozorovatelné „hotovo".
@@ -340,11 +380,13 @@ Co v tom kroku **je**:
 2. rozpad `pr-review-graph` skillu podle §2.1 na jádro / konfiguraci / obsah projektu
 3. `run.json` + `findings.json` podle §2.2 — primární výstup, dnes neexistuje. **Včetně kotvy nálezu (krok 3, bod 4)** — ta musí být v datech od prvního zápisu, protože doplnit ji zpětně jde jen zahozením starých nálezů.
 4. `agency.db` jako index + `agency reindex`, který ho postaví z `.agency/runs/**`
-5. VS Code extension, minimální: activity bar ikona, **jeden** TreeView (nálezy posledního běhu), proklik na `file:line`, tři příkazy Accept / Reject / Defer
+5. VS Code extension, minimální: activity bar ikona, **jeden** TreeView (nálezy posledního běhu), proklik na `file:line`, rozhodnutí Přijmout / Odložit / Zamítnout ▸ důvod
 
-Co v tom kroku **není**: dedup, druhý projekt, druhý pack, `doctor`, webview panel, `CommentController`, GitHub Project export, retrospektivní audit. Všechno tohle přijde, ale ne teď.
+Co v tom kroku **není**: dedup, druhý projekt, druhý pack, `doctor`, webview panel, GitHub Project export, retrospektivní audit. Všechno tohle přijde, ale ne teď.
 
-**Hotovo, když:** proběhne celý řetězec bez ručního zásahu a rozhodnutí přežije restart VS Code.
+> **Část práce je hotová.** Spike z 31. 8. (§3.6) už má ověřený tvar kotvy, `agency:` scheme, rozdělení rozhodnutí/poznámka i sdílené úložiště, včetně CLI klienta. Nepřenáší se kód — spike je plain JS, ostrá extension je TypeScript — ale nepřenáší se ani žádná otevřená otázka. Bod 5 je tedy přepis, ne návrh, a bod 3 má hotovou specifikaci kotvy včetně dvou oprav, které by jinak vyšly najevo až na reálných datech.
+
+**Hotovo, když:** proběhne celý řetězec bez ručního zásahu, rozhodnutí přežije restart VS Code **a totéž rozhodnutí jde udělat z `agency triage` bez otevřeného editoru.**
 
 **Proč právě takhle a proč `main-panel`:** `main-panel` už má postavený graf (9 819 uzlů, 169 MB), má skill i historii běhů — nulová příprava. A ten řez odhalí přesně ty mismatche, kvůli kterým se plán 31. 8. přepisoval: jaký tvar musí mít nález, aby šel zobrazit; co potřebuje evidence pro proklik; jak vypadá idempotentní zápis rozhodnutí; co se stane při druhém běhu nad stejným commitem. Odhalí je v momentě, kdy oprava stojí hodinu, ne přepis schématu a migraci.
 
@@ -388,7 +430,7 @@ Každý záměrně láme jinou část konfigurace ze §2.1. Když projdou všech
 
 ---
 
-### Krok 3 — Kontrakt, kotva, dedup, metriky, export · **2½ dne**
+### Krok 3 — Kontrakt, kotva, rozhodnutí, dedup, metriky, export · **3 dny**
 
 `run.v1` a `finding.v1` jako formální schéma (JSON Schema, validované na obou stranách hranice ze §3.2), dedup přes existující fingerprint, a odvozené sinky.
 
@@ -398,7 +440,7 @@ agency metrics           # precision, dedup ratio, stáří, shoda severity
 agency export github     # jednosměrný push do GitHub Projectu
 ```
 
-Pět věcí, které do kontraktu patří hned a jinde by se doplňovaly draho:
+Šest věcí, které do kontraktu patří hned a jinde by se doplňovaly draho:
 
 **1. Lifecycle nálezu má čtyři stavy, ne sedm.**
 
@@ -424,8 +466,8 @@ Nález najdeš na commitu `abc123` a čteš ho o tři týdny později z pracovn�
 "anchor": {
   "file":   "src/auth.ts",
   "line":   142,
-  "commit": "abc123…",                    // 1. přesná shoda, když commit == HEAD
-  "snippet": "  const x = await getUser(id)",   // 2. text řádku — najde posunutý kód
+  "commit": "abc123…",                    // 1. přesná shoda, když se ten SOUBOR nezměnil
+  "snippet": "  const x = await getUser(id)",   // 2. text bloku — najde posunutý kód
   "symbol": { "name": "UserService.getUser", "range": [128, 171] },  // 3. dotaz do grafu
   "body":   "…celé tělo funkce v den analýzy, strop 8 kB…"           // 4. záchranná síť
 }
@@ -434,6 +476,11 @@ Nález najdeš na commitu `abc123` a čteš ho o tři týdny později z pracovn�
 Rozlišuje se shora dolů, zastaví se na první vrstvě, která uspěje. Selže-li všechno, vlákno se posadí na řádek 1 s poznámkou „původní umístění zaniklo" — **degraduje se, neztratí se.**
 
 Vrstvu 3 dostaneš z `code-review-graph` zadarmo (symbol i rozsah řádků pro `file:line`) a je to ta zajímavá: kotva na symbol přežije refaktor a přesun bloku, číslo řádku ne. Vrstva 4 řeší případ, kdy commit v lokálním klonu už není — squash-merge se smazanou větví je na GitHubu default. `git fetch origin <sha>` obvykle ještě pomůže (GitHub drží `refs/pull/<n>/head`), ale spoléhat se na to nedá. Nálezů budou stovky, ne miliony; 8 kB na nález je levná pojistka.
+
+> **Dvě opravy, které vypadly ze spiku** (§3.6) a bez nich kotva nefunguje:
+>
+> 1. **Vrstva 1 se ptá na neměnnost SOUBORU, ne repozitáře.** Původně jsem ji psal jako `commit == HEAD`. Jenže nález na souboru, na který od analýzy nikdo nesáhl, tím propadne přes všechny vrstvy až na `none` — protože HEAD je skoro vždy jiný commit. Správně je `git diff --quiet <commit>..HEAD -- <file>`. Ze spiku: takhle se chytnou 4 z 5 skutečných nálezů, předtím ani jeden.
+> 2. **Vrstva 2 hledá blok, ne řádek.** Jednořádkový snippet selže na `/**`, `}` a podobné boilerplatě — a docblok začíná přesně na tom. Hledá se nejcharakterističtější řádek bloku `line..endLine` (nejdelší s aspoň čtyřmi alfanumerickými znaky) a od nalezené pozice se odečte offset. Ověřeno na reálném posunu 62 → 47 v souboru s +1012/−865.
 
 **5. Test driftu při ingestu — automatický předtřídič.**
 
@@ -448,6 +495,26 @@ git diff abc123..HEAD -- src/auth.ts     # dotkly se hunky řádků 128–171?
 
 Deterministické, bez jediného LLM volání, a řeže přesně to úzké hrdlo, které `baseline.md` označil za největší ztrátu hodnoty v systému: ze 47 čekajících položek to oddělí živé od pravděpodobně vyřešených ještě předtím, než jedinou otevřeš.
 
+**6. Rozhodnutí je operace nad úložištěm, ne příkaz UI — a poznámka není rozhodnutí.**
+
+Přesunuto sem z kroku 4 na základě spiku. Důvod je jednořádkový: **triage musí umět i agent.** Když rozhodnutí vzniká jako příkaz VS Code, který mimochodem zapíše soubor, je agent druhořadý a celý §3.4 padá. Takže:
+
+```
+.agency/runs/<run-id>/decisions.jsonl     ← vlastník rozhodnutí
+     ▲                          ▲
+     │                          │
+  extension                agency triage
+  (člověk klikne)          (agent zavolá)
+```
+
+Ani jeden klient není privilegovaný, oba zapisují přes tutéž vrstvu jádra. Extension soubor sleduje, takže zápis z CLI se v UI projeví bez reloadu — a to je zároveň jediný poctivý důkaz, že vlastníkem není.
+
+Tři vlastnosti, které z toho plynou a patří do schématu:
+
+- **Append-only události, ne mutovaný stav.** Aktuální stav = přehrání. Konvence 1 ze §5, poprvé použitá na něco reálného; bez ní se dvě historie (tvoje a agentova) nedají sloučit.
+- **Rozhodnutí ≠ poznámka.** Rozhodnutí má strukturovaný důvod z pevného seznamu, protože z něj počítáš precision. Poznámka je volný text pro čtenáře („ověřeno na produkci, dva řádky"). Smíchat je znamená rozbít buď měření, nebo použitelnost — ve spiku jsem to zkusil a rozbil obojí.
+- **Důvod zamítnutí je enum, ne text:** `not-reproducible` · `by-design` · `wrong-diagnosis` · `duplicate-missed` · `out-of-scope`. Je to týchž pět hodnot jako pole `Reason` v Projectu z [`baseline.md`](baseline.md) §7.1, takže export ze §krok 3 nepotřebuje mapování. Validuje se na obou stranách hranice.
+
 **Jednosměrnost exportu je rozhodnutí, ne zjednodušení** (31. 8.): pravda o rozhodnutí je lokální run record, GitHub Project je publikační cíl pro stakeholdery a měření precision. Žádný zpětný sync, žádné mapování stavů oběma směry, žádné konflikty. Kdyby někdo změnil stav přímo v Projectu, další export ho přepíše — a to je zamýšlené chování, ne bug.
 
 **Hotovo, když:** metriky, které jsem v `baseline.md` počítal ručně, vypadnou z jednoho příkazu, a nález se do Projectu dostane bez toho, aby ho člověk přepsal.
@@ -456,14 +523,16 @@ Deterministické, bez jediného LLM volání, a řeže přesně to úzké hrdlo,
 
 ---
 
-### Krok 4 — Extension v2 a rozhýbaná triage fronta · **2 dny**
+### Krok 4 — Extension v2 a rozhýbaná triage fronta · **1½ dne**
 
-Teprve teď se z minimálního TreeView stává použitelné UI. Detaily rozvržení v [`ui-surface-decision.md`](ui-surface-decision.md) §3.
+Teprve teď se z minimálního TreeView stává použitelné UI. Detaily rozvržení v [`ui-surface-decision.md`](ui-surface-decision.md) §3. Tvar většiny z toho už je ověřený spikem (§3.6), takže tenhle krok je z velké části přepis prototypu do TypeScriptu, ne návrh.
 
-- **`CommentController`** — nálezy jako inline review komentáře u řádku, s akcemi Accept / Reject / Defer. Tohle je nosná feature celého UI rozhodnutí; pokud se ukáže, že nejde použít nad jiným commitem než working tree (viz §8 otázka 2), je to jediné místo, kde se plán mění.
+- **`CommentController`** — nálezy jako inline review komentáře u řádku. **Hlavička vlákna = rozhodnutí** (Přijmout · Odložit · Zamítnout ▸ pět důvodů), **pole odpovědi = poznámka** s vlastním tlačítkem. Ta dvě se nesmí míchat ani sdílet tlačítko: rozhodnutí je strukturované kvůli měření, poznámka je volný text. Zápis jde přes jádro do run recordu (krok 3, bod 6), ne do paměti extension.
+- **`contextValue` na vlákně řídí nabídku akcí.** Diff proti pracovní kopii se nabízí jen u nálezů, kde test driftu hlásí změnu — u nezměněného souboru by ukázal tentýž obsah dvakrát. Přítomnost toho tlačítka je tím pádem tentýž signál jako předtřídění fronty.
+- **Generační čítač při přestavbě vláken.** Poběží po doběhnutí runu, při změně větve i po reindexu; bez něj vznikají duplicitní vlákna (§3.6, bod 5).
 - **`WebviewPanel`** v editoru — detail nálezu s evidencí, dedup porovnání dvou nálezů vedle sebe, timeline běhu, portfolio přehled přes projekty
 - **Pohled „kód v den analýzy"** — `TextDocumentContentProvider` pro scheme `agency:`, plněný z `git show <commit>:<path>` a oříznutý na rozsah symbolu z kotvy (krok 3, bod 4). Dvě použití z jedné implementace: read-only vlákna pro retrospektivní audit a `vscode.diff` proti pracovní kopii, když test driftu hlásí změnu. Fallback na `anchor.body`, když commit v klonu není.
-- **další TreeViews** — projekty a specialisté, běhy, triage fronta s badge počtu
+- **TreeViews jen na navigaci** — projekty a specialisté, běhy, triage fronta s badge počtu. **Seznam nálezů se nestaví** — panel *Comments* ho dělá sám (§3.6).
 - **`DiagnosticCollection`** — **default vypnuto**. Při 35+ nálezech na běh by Problems panel přestal být použitelný pro cokoli jiného.
 - **distribuce: VSIX**, žádný marketplace. Instaluje se ručně, publikování je zbytečná režie, dokud jsi uživatel ty a případně teammates.
 
@@ -553,8 +622,8 @@ Sepsáno předem, dokud k projektu nejsi upsaný. Vyhodnocení proti stavu k 30.
 | 0 | ½ d | stav `Rejected` | precision je poprvé měřitelná |
 | 1 | **3 d** | **vertikální řez** CLI → store → sidebar → rozhodnutí | sedí tvar dat na to, co UI potřebuje? |
 | 2 | 1½–2 d | pack #1 dotažený, 4 projekty, `doctor` | funguje instalace packu do cizího projektu? obstojí UX? |
-| 3 | 2½ d | kontrakt, 4stavový lifecycle, kotva, evidence gate, test driftu, cost per run, metriky, export do GH | jsou nálezy dohledatelné a dohledané i po měsíci? kolik běh stojí? |
-| 4 | 2 d | extension v2, triage fronta | klesne 47 `Observed` pod 15? jaká je **skutečná** precision? |
+| 3 | 3 d | kontrakt, lifecycle, kotva, evidence gate, test driftu, cost per run, **sdílené úložiště rozhodnutí**, metriky, export do GH | jsou nálezy dohledatelné i po měsíci? umí triage i agent? kolik běh stojí? |
+| 4 | 1½ d | extension v2, triage fronta | klesne 47 `Observed` pod 15? jaká je **skutečná** precision? |
 | 5 | 2 d | QA jako pack #2 | je pack formát správný, nebo ho druhý tvar rozbil? |
 | 6 | ½–1 d | attended triggery | drží hranice attended v kódu? |
 
@@ -575,7 +644,7 @@ Když tohle funguje, „nový nápad → nové repo" přestane být problém —
 **Technické — zodpoví se během kroků 1–2:**
 
 1. ~~Jede `code-review-graph` na SQLite a přes jaký driver?~~ **Zodpovězeno 31. 8.** — Python, stdlib `sqlite3`, v2.3.7, bez native rozšíření. Viz §3.1.
-2. Je `CommentController` použitelný nad nálezy z běhu proti **jinému commitu**, než je aktuální working tree? Pravděpodobně ano přes vlastní `CommentThread` na konkrétní `Uri`, ale chce to ověřit prototypem **v kroku 1**, ne až v kroku 4 — je to nosná feature UI rozhodnutí a její selhání je jediná věc, která by plán vrátila k webview-only variantě.
+2. ~~Je `CommentController` použitelný nad nálezy z běhu proti jinému commitu?~~ **Zodpovězeno 31. 8. spikem** — ano, včetně smazaných souborů a read-only pohledu z historie. Výsledky a pět věcí, které z toho vypadly, jsou v §3.6.
 3. Unese `agency.db` jako index nad `.agency/runs/**` i retrospektivní audit, kde jeden běh vyprodukuje desítky nálezů nad starými commity? Zjistí se v kroku 2 na `kvesteros-platform`.
 4. Kolik nálezů týdně unese tvoje triage kapacita? **To je skutečný strop propustnosti systému, ne rychlost agenta.** Změří se v kroku 4 při rozpouštění fronty 47 → pod 15.
 5. Jak naložit s `veriflow-architecture/packages/{agent-session,workspace,store}`, které Python jádro nemůže importovat? Tři varianty jsou v §3.4, rozhodnout v kroku 1.
