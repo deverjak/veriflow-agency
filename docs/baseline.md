@@ -12,6 +12,8 @@
 
 **Precision se spočítat NEDÁ. Ale ne proto, že by chyběla data — chybí stav.**
 
+*(Stav k 30. 8. Instrumentace popsaná v §7.1 byla mezitím 31. 8. provedena — viz tam.)*
+
 Workflow Projectu má stavy `New`, `Observed`, `Worth exploring`, `Converted to issue`, `Archived`. **Nemá stav pro zamítnutý nález.** `Archived` (definovaný jako „nepokračovat nebo historická evidence") má **0 položek**. Za celou dobu tedy nebyl explicitně odmítnut ani jeden z 51 agentních nálezů.
 
 Jmenovatel pro „kolik jich bylo špatně" v systému neexistuje.
@@ -154,7 +156,7 @@ Kritéria dnes žijí v [`implementation-plan-v0.md`](implementation-plan-v0.md)
 
 | Kritérium | Verdikt | Data |
 |---|---|---|
-| Precision < 25 % → zastavit | **NELZE VYHODNOTIT** | chybí stav pro zamítnutí; 0 explicitních zamítnutí z 51 |
+| Precision < 25 % → zastavit | **NELZE VYHODNOTIT** | od 31. 8. měřitelné **dopředu** (§7.1), zpětně ale není co — v Projectu není potvrzený falešný pozitiv (§7.2) |
 | — proxy: shoda severity | **PROŠLO** | 6/6, žádné snížení člověkem |
 | — proxy: míra duplicit | **PROŠLO výrazně** | 80 % shod, 0 založených duplikátů |
 | — proxy: sebekorekce | **PROŠLO** | 1 kontaminovaný nález opraven, 1 falzifikován, 3 nejisté nezaloženy |
@@ -168,19 +170,37 @@ Kritéria dnes žijí v [`implementation-plan-v0.md`](implementation-plan-v0.md)
 
 ## 7. Co udělat — čtyři drobnosti, ne projekt
 
-### 7.1 Přidat do Projectu stav pro zamítnutí *(15 minut)*
+### 7.1 Přidat do Projectu stav pro zamítnutí — ✅ **hotovo 31. 8.**
 
-Do pole `Stav feedbacku` přidat `Rejected` + textové pole `Reason` (`not-reproducible` / `by-design` / `wrong-diagnosis` / `duplicate-missed` / `out-of-scope`).
+Do pole `Stav` přidána volba `Rejected` (červená, id `513adc60`) a založeno nové pole `Reason` — **single-select, ne textové**, s hodnotami `not-reproducible` · `by-design` · `wrong-diagnosis` · `duplicate-missed` · `out-of-scope`.
 
-Bez toho zůstane precision navždy nespočitatelná — a **každá další automatizace ten slepý bod zvětší**.
+Single-select proto, že se z něj dá počítat; volný text by dal stejnou práci a žádné číslo. Je to týchž pět hodnot jako enum v [`implementation-plan-v0.md`](implementation-plan-v0.md) kroku 3, takže export z Agency nepotřebuje mapování.
 
-Field IDs pro `project-findings.mjs` už znáš: `feedbackState` = `PVTSSF_lADOEBAhWs4BhkDWzhgfVmw`.
+```
+Stav    PVTSSF_lADOEBAhWs4BhkDWzhgfVmw   + Rejected (513adc60)
+Reason  PVTSSF_lADOEBAhWs4BhkDWzhg4xJY   (nové)
+projekt PVT_kwDOEBAhWs4BhkDW
+```
 
-### 7.2 Zpětně doplnit známé falešné pozitivy *(30 minut)*
+> **Pozor při dalších zásazích do voleb.** `updateProjectV2Field` nahrazuje **celý** seznam voleb single-select pole. Existující volby se musí poslat zpátky **i s jejich `id`** (vstup `ProjectV2SingleSelectFieldOptionInput` ho přijímá jako volitelné) — jinak vzniknou nové volby a přiřazení na položkách zaniknou. Ověřeno: po zásahu si všech pět původních voleb nechalo svoje id a hodnota `Stav` se nezměnila ani na jedné ze 71 položek.
 
-Přenést 2 položky z `known-regressions.md` § „Must be reverified in clean isolation" a poznámku o #348 do Projectu jako `Rejected` / `wrong-diagnosis`. Tím vznikne první nenulový jmenovatel.
+### 7.2 Zpětně doplnit známé falešné pozitivy — ❌ **neprovedeno, a je to správně**
 
-**Aktuální nejlepší odhad:** ~2–3 vadné nálezy z 51 agentních = **precision ≳ 94 %**, s tím, že 47 položek je stále `Observed` a neprozkoumaných. Realistický interval po dokončení triage: **60–95 %**. Ani spodní hranice nesahá k 25 % killu.
+**Původní předpis byl chybný.** Zněl: přenést dvě položky z `known-regressions.md` § „Must be reverified in clean isolation" plus poznámku o #348 jako `Rejected / wrong-diagnosis`. Při pokusu o provedení 31. 8. se ukázaly tři důvody, proč to nejde:
+
+1. **Dva ze tří kandidátů v Projectu vůbec nejsou** — žijí jen v markdownu. Musely by se založit jen proto, aby se vzápětí zamítly. To není měření, to je výroba jmenovatele.
+2. **Ani jeden ze tří není prokázaný falešný pozitiv.** Zdroj u všech tří říká „musí se přeověřit", ne „je špatně". Označit je `Rejected` znamená tvrdit něco, co evidence neříká, a **zkreslit precision směrem dolů** — udělat agenta horším, než je.
+3. **Ten třetí kandidát v Projectu je ve skutečnosti opravená verze, ne vadná.** Položka `[QA] Google Calendar connect always fails: Supabase manual identity link` je výstup té korekční smyčky popsané v §4: kontaminovaný byl nález `401 no_authorization`, následující běh ho v čisté izolaci přeověřil a nahradil diagnózou `404 manual_linking_disabled`, **100% reprodukovatelnou na dvou nezávislých implementacích**. V Projectu je ta správná verze. Zamítnout ji by znamenalo zahodit platný nález — a započítat vlastní chybu jako chybu agenta.
+
+> **Tohle je nejdůležitější řádek celé sekce.** Při provádění jsem tu položku podle titulku spároval s kontaminovaným nálezem a na pár minut ji označil `Rejected`. Vráceno, data ověřena proti záloze na nulu odchylek. Ale kdyby se to nechalo, precision by spadla na 86 % **kvůli chybě měřicího, ne měřeného** — a nikdo by to už nerozpletl.
+
+**Závěr: v Projectu není žádný potvrzený falešný pozitiv.** Jmenovatel zůstává nula, dokud nezačne skutečná triage. To není selhání kroku 0 — instrumentace z §7.1 stojí, takže **od 31. 8. je precision měřitelná dopředu**, jen ne zpětně.
+
+**Tři pravidla, která z toho plynou pro triage v kroku 4:**
+
+1. Zpětné doplnění smí použít jen nálezy, které už v evidenci jsou. Zakládat položku kvůli jejímu zamítnutí je výroba jmenovatele.
+2. Zamítá se jen tam, kde zdroj tvrdí „je to špatně", ne „musí se přeověřit". Rozdíl mezi tím dvojím je celý rozdíl mezi měřením a jeho výrobou.
+3. **Nikdy nepárovat nález podle titulku.** Titulek přežije korekci diagnózy — obsah ne. Párovat se musí přes `anchor` a `run-id`, což je přesně to, k čemu je kontrakt v [`implementation-plan-v0.md`](implementation-plan-v0.md) kroku 3.
 
 ### 7.3 Zaznamenávat cost per run *(1 hodina)*
 

@@ -359,12 +359,14 @@ Všechny jsou chyby v mém návrhu, ne omezení VS Code — což je přesně to,
 
 Řazené podle poměru *co se dozvím / co to stojí*. Každý má pozorovatelné „hotovo".
 
-### Krok 0 — Stav `Rejected` v Projectu · **½ dne**
+### Krok 0 — Stav `Rejected` v Projectu · **½ dne** · ✅ **hotovo 31. 8.**
 
 Z `baseline.md` §7.1–7.2. Přidat `Rejected` + `Reason`, zpětně doplnit 2–3 známé vadné nálezy z `known-regressions.md`.
 
-**Hotovo, když:** precision má poprvé nenulový jmenovatel.
+**Hotovo, když:** precision je měřitelná. → **Splněno pro měření dopředu, ne zpětně.**
 **Proč první:** je to 45 minut a bez toho zůstaneš měřicky slepý napořád — každý další krok ten slepý bod zvětší.
+
+Provedeno: volba `Rejected` v poli `Stav`, nové single-select pole `Reason` s pěti hodnotami shodnými s enumem z kroku 3. **Zpětné doplnění neproběhlo vůbec** — dva ze tří kandidátů v Projectu nejsou a třetí je ve skutečnosti opravená verze nálezu, ne vadná. V Projectu není žádný potvrzený falešný pozitiv, takže jmenovatel zůstává nula až do triage v kroku 4. Rozbor a tři pravidla, která z toho plynou pro triage, jsou v [`baseline.md`](baseline.md) §7.2.
 
 ---
 
@@ -619,7 +621,7 @@ Sepsáno předem, dokud k projektu nejsi upsaný. Vyhodnocení proti stavu k 30.
 
 | Krok | Doba | Výstup | Co se dozvíš |
 |---|---|---|---|
-| 0 | ½ d | stav `Rejected` | precision je poprvé měřitelná |
+| 0 | ½ d ✅ | stav `Rejected` + pole `Reason` | precision je měřitelná dopředu; zpětně není co měřit |
 | 1 | **3 d** | **vertikální řez** CLI → store → sidebar → rozhodnutí | sedí tvar dat na to, co UI potřebuje? |
 | 2 | 1½–2 d | pack #1 dotažený, 4 projekty, `doctor` | funguje instalace packu do cizího projektu? obstojí UX? |
 | 3 | 3 d | kontrakt, lifecycle, kotva, evidence gate, test driftu, cost per run, **sdílené úložiště rozhodnutí**, metriky, export do GH | jsou nálezy dohledatelné i po měsíci? umí triage i agent? kolik běh stojí? |
