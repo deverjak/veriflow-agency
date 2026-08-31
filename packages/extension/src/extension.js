@@ -280,7 +280,12 @@ async function buildThreads() {
       const thread = controller.createCommentThread(uri, range, [head, ...historyComments(f.id)]);
       thread.collapsibleState = vscode.CommentThreadCollapsibleState.Collapsed;
       thread.canReply = true;
-      thread.contextValue = 'agencyFinding';
+      // Kontext řídí, které akce se vůbec nabídnou. U nezměněného souboru je
+      // diff proti pracovní kopii bezcenný — ukázal by tentýž obsah dvakrát.
+      // Přítomnost toho tlačítka je tedy tentýž signál jako test driftu.
+      thread.contextValue = drift === 'touched' ? 'agencyFinding.drifted'
+        : drift === 'deleted' ? 'agencyFinding.deleted'
+          : 'agencyFinding';
       // vlastní data pro handlery příkazů
       thread._agency = { finding: f, resolution, drift, repo, placed, head, baseLabel: f.title.slice(0, 70) };
       threads.push(thread);

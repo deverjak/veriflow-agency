@@ -196,7 +196,7 @@
         {
           "command": "agency.finding.diffAgainstHead",
           "group": "inline@5",
-          "when": "commentController == agency.findings"
+          "when": "commentController == agency.findings && commentThread == agencyFinding.drifted"
         }
       ],
       "agency.rejectMenu": [
