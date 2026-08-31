@@ -91,16 +91,25 @@ async function pickAndRun(cwd, log) {
   const d = result.data;
   log.appendLine(`[run] ${d.runId} · PR #${pr.number} · ${d.files} souborů · worktree ${d.worktree}`);
 
+  // Tvar spuštění vlastní CLI, ne extension — model i provider si projekt
+  // konfiguruje v .agency/, a kdyby si příkaz skládala i extension, byly by
+  // dvě místa, kde se to dá nastavit různě.
+  const argv = d.launch && d.launch.length ? d.launch : ['claude', d.prompt];
+  const cmd = argv
+    .map((a, i) => (i === 0 || /^[-\w./:@=]+$/.test(a) ? a : JSON.stringify(a)))
+    .join(' ');
+
+  const model = (d.agent && d.agent.model) || 'výchozí model';
   const term = vscode.window.createTerminal({
-    name: `Agency · PR #${pr.number}`,
+    name: `Agency · PR #${pr.number} · ${model}`,
     cwd: d.worktree,
     iconPath: new vscode.ThemeIcon('search'),
   });
   term.show(true);
-  term.sendText(`claude ${JSON.stringify(d.prompt)}`);
+  term.sendText(cmd);
 
   vscode.window.showInformationMessage(
-    `Agency: běh ${d.runId.slice(0, 8)} připraven, recenze běží v terminálu.`,
+    `Agency: běh ${d.runId.slice(0, 8)} připraven, recenze běží v terminálu (${model}).`,
     'Otevřít běh',
   ).then((choice) => {
     if (choice === 'Otevřít běh') {

@@ -19,6 +19,15 @@
     "$comment_path": "Jednorázový worktree. Nikdy se nečekoutuje do pracovní kopie uživatele — jeho větev i rozdělaná práce zůstanou netknuté."
   },
 
+  "agent": {
+    "$comment": "Kdo a čím recenzi odbaví. Model je vlastnost úkolu, ne uživatele — kódování si můžeš držet na tom nejsilnějším a recenzi pustit levněji. Přebít jednorázově jde přes `agency run review-graph --model <m>`.",
+    "provider": "claude",
+    "model": "sonnet",
+    "$comment_model": "null = nech výchozí model providera. Volba se zapisuje do run recordu, aby šlo změřit, jaký model dává lepší nálezy.",
+    "extraArgs": [],
+    "$comment_extraArgs": "Další přepínače pro spuštění, např. [\"--permission-mode\", \"acceptEdits\"]."
+  },
+
   "review": {
     "dimensions": ["correctness", "tests", "reuse", "errors"],
     "$comment_dimensions": "repo-rules se přidá, až vyplníš `rules` níže. Bez projektových pravidel běží 4 z 5 dimenzí — to je legitimní výstup, ne selhání.",

@@ -14,6 +14,7 @@
 | Triage → GitHub Project | Lokální store je pravda, Project je **jednosměrný export** | ruší ruční přepis (35 z 36 nálezů) bez sync konfliktů |
 | Kroky 1–6 sekvenčně | Krok 1 je **vertikální řez** na `main-panelu` | mismatch se odhalí za tři dny, ne u kroku 4 |
 | Triage až v kroku 4 | **Sdílené úložiště rozhodnutí už v kroku 3** | triage musí umět i agent, takže rozhodnutí je operace nad úložištěm, ne příkaz UI — a to mění tvar kontraktu |
+| Model jako globální nastavení | **`agent.model` v konfiguraci packu**, zapsaný do run recordu | §3.3b — recenze je čtení, ne psaní; a bez záznamu modelu se precision nedá porovnat mezi modely |
 | `CommentController` jako riziko | **Ověřeno spikem, riziko zavřené** | §3.6 — a odhalilo to pět chyb v návrhu, které by jinak vyšly najevo až u kroku 4 |
 
 > **Poznámka k původnímu oponentnímu review.** Dokument `second-opinion-veriflow-agency.md` (30. 8., role „devil's advocate" nad původním návrhem headless control plane + Agent Packs + desktop) byl 31. 8. rozpuštěn do tohoto plánu a do [`baseline.md`](baseline.md) a smazán. Přežilo z něj to, co je pořád platné a nikde jinde nebylo: pravidlo *trigger určuje credential* (§3.3), test ekonomické životaschopnosti (§3.3), princip *páteří je kontrakt* (§3.4), čtyřstavový lifecycle nálezu a deterministická brána (krok 3), kill criteria (§6) a čtyři otevřené otázky (§8). Zahozeno bylo to, co je buď splněné, nebo přebité pozdějšími rozhodnutími: doporučení stavět na bezobslužném běhu (attended-only to ruší), pořadí fází F0–F5 (nahrazeno kroky 0–6), a závěr „nejlepší verze je nudný CLI nástroj bez UI" (přebito rozhodnutím v [`ui-surface-decision.md`](ui-surface-decision.md)).
@@ -183,6 +184,12 @@ Konfigurace (`<pack>.json`) se nepřepisuje nikdy; při novém povinném poli to
 
 > **Ruční úprava packu je diagnóza, ne problém.** Když sáhneš do souboru skillu, znamená to, že ti v konfiguraci chybí pole. Hash pojistka ti to řekne nahlas místo toho, aby změnu tiše přepsala — a je to přesně ten signál pro pravidlo ze §2.1: *další pole se do manifestu přidá, až ho vyžádá konkrétní pack.*
 
+**A ještě jedno místo, na které se snadno zapomene: worktree.** Recenze neběží v projektu, ale v jednorázovém worktree na hlavičce PR — a ten je *čistý checkout*, vidí jen commitnuté soubory. Skill packu commitnutý není a být nemá (metoda patří nástroji, ne recenzovanému repu), takže se v něm metoda vůbec nenajde: `Skill(agency-review-graph)` → *Unknown skill*, agent začne hádat a běh se rozpadne dřív, než přečte `context.json`.
+
+Proto `agency run` po založení worktree **přenese nainstalované soubory packu dovnitř** — z pracovní kopie projektu, ne z packu, aby do worktree šlo přesně to, co je nainstalované včetně případné blokované ruční úpravy. Zkopírované soubory se zároveň zapíšou do worktree-lokálního `info/exclude`, aby se netvářily jako změna, kterou přinesl PR; nález *„PR přidal skill"* by byl artefakt nástroje.
+
+Ze stejné rodiny je druhá past: `findings.json` se zapisuje do `RUN_DIR`, který leží **v projektu, tedy mimo worktree**. Agent se proto ptá na zápis ven z pracovního adresáře — attended to přežije, ale je to překážka v každém běhu. Řeší to `--add-dir RUN_DIR` v `launch` argv (§3.3b).
+
 **Jedna věc, kterou to odhaluje pro krok 2:** `main-panel` má dnes v skillu **zašitá projektová pravidla** (dimenze „repo-rule compliance" — Supabase fence, RLS, migrace). Ta se musí vystěhovat do `review-graph.json` **dřív**, než na main-panel poprvé pustíš `agency add`, jinak je první upgrade buď přepíše, nebo se o ně navždy zasekne na hash pojistce.
 
 ---
@@ -261,6 +268,31 @@ Důvod není jen technický. Anthropic omezuje použití subscription OAuth v ap
 > Když **ne** → stavíš obal kolem slevy, a ta sleva ti nepatří.
 
 Test dnes **nejde zodpovědět**, protože žádný běh nezaznamenává cost ([`baseline.md`](baseline.md) §7.3). Proto je záznam ceny součástí kroku 3, ne „až bude čas".
+
+---
+
+## 3.3b Model je vlastnost úkolu, ne uživatele
+
+Výchozí model si člověk volí pro to, co dělá nejčastěji — u tebe kódování, tedy ten nejsilnější. Recenze je ale jiná práce: čtení, klasifikace a zápis JSONu, ne psaní kódu. Nutit ji do stejné volby znamená platit psací sazbu za čtecí úkol.
+
+Proto je volba agenta součástí **konfigurace packu v projektu**, ne globálního nastavení editoru:
+
+```jsonc
+// <projekt>/.agency/review-graph.json
+"agent": {
+  "provider": "claude",     // claude | codex
+  "model": "sonnet",        // null = výchozí model providera
+  "extraArgs": []
+}
+```
+
+Jednorázově to přebije `agency run review-graph --pr 466 --model opus`.
+
+Tvar spouštěcího příkazu **vlastní CLI**, ne klient. `agency run --json` vrací hotové `launch` argv a extension ho jen pošle do terminálu — kdyby si příkaz skládala i ona, vzniklo by druhé místo, kde se model dá nastavit jinak, a `run.json` by lhal.
+
+A právě proto se `agent.provider` / `agent.model` **zapisuje do run recordu**. Bez toho je otázka *„dává silnější model lepší nálezy, nebo jen dražší?"* nezodpověditelná — a je to přesně ta otázka, kterou má tenhle nástroj umět zodpovědět čísly, ne dojmem. Spolu s cost záznamem ze §3.3 tvoří dvojici, na které stojí test životaschopnosti: precision per model per koruna.
+
+Tabulka providerů je **data, ne větvení** (`runs.PROVIDER_DEFAULTS`) — `bin`, `modelFlag`, `dirFlag`. Ověřený je zatím jen `claude`; přidat další nevyžaduje zásah do kódu, stačí přepsat ty tři klíče v konfiguraci projektu.
 
 ---
 

@@ -284,6 +284,11 @@ def cmd_run(args) -> int:
         wt = runs.make_worktree(project, cfg, target)
         out.done(posix(wt))
 
+        out.step("kopíruji metodu packu do worktree")
+        carried = runs.materialize_pack(project, pack, wt)
+        out.done(f"{len(carried)} souborů" if carried
+                 else "pack v projektu nic neinstaluje")
+
         out.step("aktualizuji graf")
         ginfo = runs.prepare_graph(project, wt, cfg)
         out.done(f"graf: {ginfo['action']}" + (f"  {out.dim(ginfo['tool'] or '')}" if ginfo.get("tool") else ""))
@@ -308,11 +313,22 @@ def cmd_run(args) -> int:
         run.save_record(rec)
         raise
 
+    # Skill se ve worktree najde jen díky materialize_pack výše. Kdyby pack
+    # do projektu nic neinstaloval, odkaž na metodu cestou — jinak by běh
+    # skončil na Unknown skill a uživatel by neměl kam sáhnout.
+    how = ("Použij skill agency-review-graph."
+           if any(str(c).endswith("SKILL.md") for c in carried)
+           else f"Přečti si metodu v {posix(project.root)}/.claude/skills/agency-review-graph/SKILL.md.")
     prompt = (
-        f"Použij skill agency-review-graph. RUN_DIR je {posix(run.dir)}. "
-        f"Přečti si {posix(run.dir)}/context.json a postupuj podle skillu. "
-        f"Povinný výstup je {posix(run.findings_path)} podle finding.v1."
+        f"{how} RUN_DIR={posix(run.dir)} — začni jeho context.json. "
+        f"Povinný výstup je RUN_DIR/findings.json podle finding.v1."
     )
+    launch, agent_info = runs.launch_argv(
+        cfg, posix(run.dir), prompt,
+        provider=getattr(args, "provider", None), model=getattr(args, "model", None))
+    rec = run.record()
+    rec["agent"] = agent_info
+    run.save_record(rec)
     (run.dir / "prompt.txt").write_text(prompt + "\n", encoding="utf-8")
 
     if out.quiet:
@@ -323,6 +339,9 @@ def cmd_run(args) -> int:
             "runDir": posix(run.dir),
             "worktree": posix(wt),
             "prompt": prompt,
+            # Hotový příkaz — tvar spuštění vlastní CLI, ne klient.
+            "launch": launch,
+            "agent": agent_info,
             "target": {k: v for k, v in target.items() if not k.startswith("_")},
             "files": len(files),
             "filesSkipped": skipped,
@@ -340,11 +359,12 @@ def cmd_run(args) -> int:
     if args.launch:
         os.chdir(wt)
         out.say(f"  {out.bold('spouštím claude…')}\n")
-        os.execvp("claude", ["claude", prompt])
+        os.execvp(launch[0], launch)
 
     print(f"  {out.bold('Spusť recenzi:')}")
     print(f"    cd {posix(wt)}")
-    print(f"    claude {json.dumps(prompt, ensure_ascii=False)}")
+    print("    " + " ".join(
+        json.dumps(a, ensure_ascii=False) if " " in a else a for a in launch))
     print()
     print(f"  {out.dim('Až doběhne:')}  agency validate --run {run.id[:8]}")
     print(f"  {out.dim('Úklid:')}        agency cleanup --run {run.id[:8]}")
@@ -587,7 +607,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--pr", type=int, help="číslo PR (výchozí: PR aktuální větve)")
     s.add_argument("--latest-merged", action="store_true",
                    help="poslední mergnutý PR — retrospektivní audit")
-    s.add_argument("--launch", action="store_true", help="rovnou spustit claude")
+    s.add_argument("--launch", action="store_true", help="rovnou spustit agenta")
+    s.add_argument("--model", help="model pro tenhle běh (přebije agent.model z konfigurace)")
+    s.add_argument("--provider", help="claude | codex (přebije agent.provider)")
     s.add_argument("--force", action="store_true", help="i draft nebo už recenzovaný commit")
     s.set_defaults(fn=cmd_run)
 

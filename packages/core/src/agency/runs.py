@@ -146,6 +146,44 @@ def already_reviewed(target: dict, login: str | None) -> bool:
     return False
 
 
+# Tvar spuštění agenta. Ověřený je `claude`; ostatní se dají popsat
+# v konfiguraci bez zásahu do kódu — proto je to tabulka dat, ne větvení.
+PROVIDER_DEFAULTS = {
+    "claude": {"bin": "claude", "modelFlag": "--model", "dirFlag": "--add-dir"},
+    "codex": {"bin": "codex", "modelFlag": "--model", "dirFlag": None},
+}
+
+
+def launch_argv(cfg: dict, run_dir: str, prompt: str,
+                provider: str | None = None,
+                model: str | None = None) -> tuple[list[str], dict]:
+    """Čím běh dokončit.
+
+    Model je vlastnost úkolu, ne uživatele. Kódování si můžeš držet na tom
+    nejsilnějším a recenzi pustit levněji — je to čtení a klasifikace, ne
+    psaní. Volba se zapisuje do run recordu, protože „jaký model dává lepší
+    nálezy" je otázka, kterou tenhle nástroj má umět zodpovědět čísly.
+    """
+    a = dict(cfg.get("agent") or {})
+    name = provider or a.get("provider") or "claude"
+    spec = dict(PROVIDER_DEFAULTS.get(name, {"bin": name}))
+    for k in ("bin", "modelFlag", "dirFlag"):
+        if k in a:
+            spec[k] = a[k]
+
+    argv = [spec.get("bin") or name]
+    m = model or a.get("model")
+    if m and spec.get("modelFlag"):
+        argv += [spec["modelFlag"], m]
+    # RUN_DIR leží mimo worktree, a právě tam se zapisuje findings.json.
+    # Bez tohohle se agent ptá na zápis ven z pracovního adresáře v každém běhu.
+    if spec.get("dirFlag"):
+        argv += [spec["dirFlag"], run_dir]
+    argv += [str(x) for x in (a.get("extraArgs") or [])]
+    argv.append(prompt)
+    return argv, {"provider": name, "model": m, "bin": argv[0]}
+
+
 def make_worktree(project: Project, cfg: dict, target: dict) -> Path:
     """Jednorázový worktree na hlavičce PR.
 
@@ -166,6 +204,47 @@ def make_worktree(project: Project, cfg: dict, target: dict) -> Path:
     if not r.ok:
         raise SystemExit(f"Worktree se nepodařilo vytvořit:\n{r.stderr.strip()}")
     return wt
+
+
+def materialize_pack(project: Project, pack, wt: Path) -> list[str]:
+    """Přenese nainstalované soubory packu do worktree.
+
+    Worktree je čistý checkout hlavičky PR — vidí jen to, co je commitnuté.
+    Skill packu commitnutý typicky není a být nemá: metoda patří nástroji, ne
+    recenzovanému repu. Bez tohohle kroku se ve worktree metoda prostě nenajde
+    a běh skončí na `Skill(...)` → Unknown skill.
+
+    Kopíruje se z pracovní kopie projektu, ne z packu — do worktree má jít
+    přesně to, co je v projektu nainstalované, včetně ruční úpravy, kterou
+    upgrade označil jako blocked.
+    """
+    copied: list[str] = []
+    for item in pack.manifest.get("installs", []):
+        src = project.root / item["to"]
+        if not src.is_file():
+            continue
+        dst = wt / item["to"]
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+        copied.append(item["to"])
+
+    if copied:
+        # Ať se zkopírované soubory netváří jako změna, kterou přinesl PR.
+        # Recenzent i `git status` by je jinak viděly jako nové untracked
+        # soubory — a nález „PR přidal skill" by byl artefakt nástroje.
+        r = proc.git("rev-parse", "--absolute-git-dir", cwd=wt)
+        if r.ok:
+            info = Path(r.stdout.strip()) / "info"
+            info.mkdir(parents=True, exist_ok=True)
+            excl = info / "exclude"
+            have = excl.read_text(encoding="utf-8") if excl.is_file() else ""
+            add = [c for c in copied if c not in have]
+            if add:
+                with open(excl, "a", encoding="utf-8", newline="\n") as f:
+                    f.write("\n# agency: soubory packu, nejsou součástí PR\n")
+                    f.write("\n".join("/" + c for c in add) + "\n")
+
+    return copied
 
 
 def remove_worktree(project: Project, wt: Path) -> None:
