@@ -42,6 +42,12 @@
     ],
     "commands": [
       {
+        "command": "agency.review.pick",
+        "title": "Zrecenzovat pull request…",
+        "category": "Agency",
+        "icon": "$(git-pull-request)"
+      },
+      {
         "command": "agency.spike.run",
         "title": "Spustit všechny kontroly",
         "category": "Agency",
@@ -236,6 +242,11 @@
         }
       ],
       "view/title": [
+        {
+          "command": "agency.review.pick",
+          "group": "navigation@0",
+          "when": "view == agency.findings.view"
+        },
         {
           "command": "agency.spike.run",
           "group": "navigation@1",

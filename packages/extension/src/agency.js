@@ -55,6 +55,29 @@ async function triage(cwd, findingId, action, { reason, note } = {}) {
   return call(cwd, args);
 }
 
+/** PR k recenzi — otevřené i prošlé. Podklad pro klikací výběr. */
+async function prs(cwd, { state = 'all', limit = 30 } = {}) {
+  const r = await call(cwd, ['prs', '--state', state, '--limit', String(limit)]);
+  return r.ok ? (r.data || []) : [];
+}
+
+/**
+ * Deterministická příprava běhu. Vrací kde běh leží, kde je worktree a jakým
+ * promptem ho dokončit — vlastní recenzi pouští uživatel v terminálu, protože
+ * attended je vlastnost systému, ne úmysl.
+ */
+async function run(cwd, pack, { pr, latestMerged, force } = {}) {
+  const args = ['run', pack];
+  if (pr) args.push('--pr', String(pr));
+  if (latestMerged) args.push('--latest-merged');
+  if (force) args.push('--force');
+  const r = await call(cwd, args);
+  if (r.ok && r.data && r.data.ok === false) {
+    return { ok: false, error: r.data.message, reason: r.data.reason, data: null };
+  }
+  return r;
+}
+
 /** Obsah souboru v den analýzy — `git show <commit>:<path>` v projektu. */
 function showAtCommit(repo, commit, relPath) {
   return new Promise((resolve) => {
@@ -64,4 +87,4 @@ function showAtCommit(repo, commit, relPath) {
   });
 }
 
-module.exports = { call, available, findings, status, triage, showAtCommit };
+module.exports = { call, available, findings, status, triage, prs, run, showAtCommit };

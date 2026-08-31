@@ -84,6 +84,9 @@ class Out:
 
     def __init__(self) -> None:
         self.tty = os.isatty(1) and os.environ.get("NO_COLOR") is None
+        # Průběh se v --json režimu potlačuje, jinak by se mísil s JSONem
+        # a konzument (extension, agent) by ho neuparsoval.
+        self.quiet = False
 
     def _c(self, code: str, s: str) -> str:
         return f"\033[{code}m{s}\033[0m" if self.tty else s
@@ -104,16 +107,24 @@ class Out:
         return self._c("31", s)
 
     def step(self, msg: str) -> None:
-        print(f"  {self.dim('·')} {msg}")
+        if not self.quiet:
+            print(f"  {self.dim('·')} {msg}")
 
     def done(self, msg: str) -> None:
-        print(f"  {self.ok('✓')} {msg}")
+        if not self.quiet:
+            print(f"  {self.ok('✓')} {msg}")
 
     def fail(self, msg: str) -> None:
-        print(f"  {self.err('✗')} {msg}")
+        if not self.quiet:
+            print(f"  {self.err('✗')} {msg}")
 
     def note(self, msg: str) -> None:
-        print(f"  {self.warn('!')} {msg}")
+        if not self.quiet:
+            print(f"  {self.warn('!')} {msg}")
+
+    def say(self, msg: str = "") -> None:
+        if not self.quiet:
+            print(msg)
 
 
 out = Out()

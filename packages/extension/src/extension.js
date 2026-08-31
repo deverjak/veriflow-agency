@@ -17,6 +17,7 @@ const path = require('path');
 const fs = require('fs');
 const store = require('./store.js');
 const agency = require('./agency.js');
+const review = require('./review.js');
 
 const SCHEME = 'agency';
 const CONTROLLER_ID = 'agency.findings';
@@ -685,6 +686,23 @@ function activate(context) {
     }
     await vscode.commands.executeCommand('vscode.diff', left, right,
       `${path.basename(a.file)} — ${a.commit.slice(0, 8)} ↔ pracovní kopie`);
+  });
+
+  reg('agency.review.pick', async () => {
+    const folder = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders[0];
+    if (!folder) {
+      vscode.window.showWarningMessage('Agency: otevři nejdřív složku projektu.');
+      return;
+    }
+    const cwd = folder.uri.fsPath;
+    if (!(await agency.available(cwd))) {
+      vscode.window.showErrorMessage(
+        'Agency: `agency` není v PATH nebo tenhle projekt není git repo. '
+        + 'Nainstaluj: uv tool install --editable <veriflow-agency>/packages/core');
+      return;
+    }
+    const d = await review.pickAndRun(cwd, log);
+    if (d) setTimeout(() => buildThreads().catch(() => {}), 1500);
   });
 
   reg('agency.spike.reveal', async (idx) => {

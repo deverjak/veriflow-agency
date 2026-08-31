@@ -180,6 +180,61 @@ def _dig(d: dict, dotted: str):
     return cur
 
 
+# ---------------------------------------------------------------- prs
+
+def cmd_prs(args) -> int:
+    """Seznam PR k recenzi.
+
+    Existuje kvůli extension: výběr PR má být klikací, ne opisování čísla.
+    Mergnuté jsou v seznamu záměrně — retrospektivní audit je plnohodnotný
+    režim, ne výjimka.
+    """
+    project = _project(args)
+    rows = []
+    seen: set[int] = set()
+
+    states = ["open", "merged"] if args.state == "all" else [args.state]
+    for st in states:
+        for pr in proc.pr_list(project.root, state=st, limit=args.limit):
+            if pr["number"] in seen:
+                continue
+            seen.add(pr["number"])
+            rows.append({
+                "number": pr["number"],
+                "title": pr.get("title"),
+                "state": st,
+                "kind": "merged-pull-request" if st == "merged" else "pull-request",
+                "headRefOid": pr.get("headRefOid"),
+                "mergedAt": pr.get("mergedAt"),
+                "updatedAt": pr.get("updatedAt"),
+                "author": (pr.get("author") or {}).get("login"),
+                "reviewed": _reviewed(project, pr.get("headRefOid")),
+            })
+
+    def human():
+        if not rows:
+            print("\n  " + out.dim("Žádné PR.") + "\n")
+            return
+        print()
+        for r in rows:
+            tag = out.dim("mergnutý") if r["state"] == "merged" else out.ok("otevřený")
+            mark = out.dim(" · už recenzovaný") if r["reviewed"] else ""
+            print(f"  #{r['number']:<5} {tag:20} {(r['title'] or '')[:58]:60}{mark}")
+        print()
+
+    return _emit(args, rows, human)
+
+
+def _reviewed(project: config.Project, head: str | None) -> bool:
+    """Byl tenhle přesný commit už recenzovaný? Klíč je (repo, PR, headRefOid)."""
+    if not head:
+        return False
+    for run in runs.load_runs(project):
+        if ((run.record().get("target") or {}).get("headRefOid")) == head:
+            return True
+    return False
+
+
 # ---------------------------------------------------------------- run
 
 def cmd_run(args) -> int:
@@ -187,19 +242,30 @@ def cmd_run(args) -> int:
     cfg = _pack_cfg(project, args.pack)
     pack = packs.load(args.pack)
 
-    print(f"\n  {out.bold(pack.ref)} → {project.name}\n")
+    # V --json režimu se průběh potlačí, jinak by se mísil s výstupem
+    # a extension by ho neuparsovala.
+    out.quiet = bool(getattr(args, "json", False))
+
+    out.say(f"\n  {out.bold(pack.ref)} → {project.name}\n")
 
     out.step("hledám PR")
     target = runs.resolve_target(project, args.pr, args.latest_merged)
     kind = "mergnutý (retrospektivní audit)" if target["kind"] == "merged-pull-request" else "otevřený"
     out.done(f"PR #{target['pr']} — {target['title'][:58]}  {out.dim(kind)}")
 
+    def refuse(reason: str, code: str) -> int:
+        out.note(reason)
+        if out.quiet:
+            print(json.dumps({"ok": False, "reason": code, "message": reason},
+                             ensure_ascii=False, indent=2))
+        return 1
+
     if target["_isDraft"] and not args.force:
-        out.note("PR je draft. Pokračuj s --force, jestli to je záměr.")
-        return 1
+        return refuse("PR je draft. Pokračuj s --force, jestli to je záměr.", "draft")
     if runs.already_reviewed(target, proc.gh_login()) and not args.force:
-        out.note(f"Commit {target['headRefOid'][:8]} už recenzovaný — marker je na PR. Znovu: --force.")
-        return 1
+        return refuse(
+            f"Commit {target['headRefOid'][:8]} už recenzovaný — marker je na PR. Znovu: --force.",
+            "already-reviewed")
 
     skip = (cfg.get("review") or {}).get("skipPatterns") or []
     all_files = target.pop("_files", [])
@@ -207,8 +273,7 @@ def cmd_run(args) -> int:
     skipped = len(all_files) - len(files)
     out.done(f"{len(files)} souborů k recenzi  {out.dim(f'({skipped} odfiltrováno)')}")
     if not files:
-        out.note("Po odfiltrování nezbyl žádný soubor — není co recenzovat.")
-        return 0
+        return refuse("Po odfiltrování nezbyl žádný soubor — není co recenzovat.", "no-files")
 
     run = runs.start(project, pack.ref, cfg, target)
     out.step(f"běh {run.id}")
@@ -250,16 +315,31 @@ def cmd_run(args) -> int:
     )
     (run.dir / "prompt.txt").write_text(prompt + "\n", encoding="utf-8")
 
-    print()
+    if out.quiet:
+        # Kontrakt pro extension: kde běh leží, kde je worktree a čím ho dokončit.
+        print(json.dumps({
+            "ok": True,
+            "runId": run.id,
+            "runDir": posix(run.dir),
+            "worktree": posix(wt),
+            "prompt": prompt,
+            "target": {k: v for k, v in target.items() if not k.startswith("_")},
+            "files": len(files),
+            "filesSkipped": skipped,
+            "graph": {**ginfo, **stats},
+        }, ensure_ascii=False, indent=2))
+        return 0
+
+    out.say()
     out.done("příprava hotová — deterministická část skončila")
-    print()
-    print(f"  {out.dim('Worktree zůstává, dokud běh nedokončíš:')}")
-    print(f"  {out.dim(posix(wt))}")
-    print()
+    out.say()
+    out.say(f"  {out.dim('Worktree zůstává, dokud běh nedokončíš:')}")
+    out.say(f"  {out.dim(posix(wt))}")
+    out.say()
 
     if args.launch:
         os.chdir(wt)
-        print(f"  {out.bold('spouštím claude…')}\n")
+        out.say(f"  {out.bold('spouštím claude…')}\n")
         os.execvp("claude", ["claude", prompt])
 
     print(f"  {out.bold('Spusť recenzi:')}")
@@ -496,6 +576,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("doctor", parents=[common], help="ověří předpoklady DŘÍV, než začne běh")
     s.set_defaults(fn=cmd_doctor)
+
+    s = sub.add_parser("prs", parents=[common], help="PR k recenzi — otevřené i prošlé")
+    s.add_argument("--state", choices=["open", "merged", "all"], default="all")
+    s.add_argument("--limit", type=int, default=20)
+    s.set_defaults(fn=cmd_prs)
 
     s = sub.add_parser("run", parents=[common], help="připraví běh packu nad PR")
     s.add_argument("pack")
