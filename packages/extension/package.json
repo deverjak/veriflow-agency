@@ -103,6 +103,10 @@
         "title": "Zamítnout (vybrat důvod ze seznamu)"
       },
       {
+        "command": "agency.finding.addNote",
+        "title": "Uložit poznámku"
+      },
+      {
         "command": "agency.finding.openAtCommit",
         "title": "Ukázat kód v den analýzy",
         "icon": "$(history)"
@@ -125,6 +129,10 @@
         },
         {
           "command": "agency.finding.rejectPick",
+          "when": "false"
+        },
+        {
+          "command": "agency.finding.addNote",
           "when": "false"
         },
         {
@@ -211,6 +219,13 @@
         {
           "command": "agency.finding.reject.out-of-scope",
           "group": "1_reasons@5"
+        }
+      ],
+      "comments/commentThread/context": [
+        {
+          "command": "agency.finding.addNote",
+          "group": "inline@1",
+          "when": "commentController == agency.findings"
         }
       ],
       "comments/comment/context": [

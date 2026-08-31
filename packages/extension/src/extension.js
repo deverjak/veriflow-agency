@@ -271,17 +271,18 @@ async function buildThreads() {
       if (gen !== generation) return { fx, results, cancelled: true };
       const safeLine = Math.min(Math.max(line, 1), doc.lineCount) - 1;
       const range = new vscode.Range(safeLine, 0, safeLine, 0);
-      const thread = controller.createCommentThread(uri, range, [{
+      const head = {
         body: makeBody(f, resolution, drift),
         mode: vscode.CommentMode.Preview,
         author: { name: `${severityIcon(f.severity)} review-graph` },
         contextValue: 'agencyFinding',
-      }]);
+      };
+      const thread = controller.createCommentThread(uri, range, [head, ...historyComments(f.id)]);
       thread.collapsibleState = vscode.CommentThreadCollapsibleState.Collapsed;
       thread.canReply = true;
       thread.contextValue = 'agencyFinding';
       // vlastní data pro handlery příkazů
-      thread._agency = { finding: f, resolution, drift, repo, placed, baseLabel: f.title.slice(0, 70) };
+      thread._agency = { finding: f, resolution, drift, repo, placed, head, baseLabel: f.title.slice(0, 70) };
       threads.push(thread);
     }
 
@@ -439,6 +440,21 @@ function threadOf(arg) {
   return null;
 }
 
+/** Historie nálezu jako komentáře pod tím hlavním — rozhodnutí i poznámky. */
+function historyComments(findingId) {
+  return store.historyFor(findingId).map((e) => {
+    const md = new vscode.MarkdownString();
+    if ((e.kind || 'decision') === 'note') {
+      md.appendMarkdown(e.text);
+      return { body: md, mode: vscode.CommentMode.Preview, author: { name: `📝 ${e.by}` } };
+    }
+    const mark = e.state === 'accepted' ? '✔ Přijato' : e.state === 'rejected' ? '✘ Zamítnuto' : '⏱ Odloženo';
+    md.appendMarkdown(`**${mark}**${e.reason ? ` — \`${e.reason}\`` : ''}`);
+    if (e.note) md.appendMarkdown(`\n\n${e.note}`);
+    return { body: md, mode: vscode.CommentMode.Preview, author: { name: `⚖ ${e.by}` } };
+  });
+}
+
 /** Přečte úložiště a promítne stav do vláken i stromu. Volá se i po zápisu z CLI. */
 function refreshDecisions() {
   decisions = store.current();
@@ -448,6 +464,7 @@ function refreshDecisions() {
     const d = decisions.get(m.finding.id);
     const mark = !d ? '' : d.state === 'accepted' ? '✔ ' : d.state === 'rejected' ? '✘ ' : '⏱ ';
     t.label = mark + m.baseLabel;   // z baseLabel, ne z t.label — jinak se značky hromadí
+    t.comments = [m.head, ...historyComments(m.finding.id)];
     t.state = d && d.state === 'accepted'
       ? vscode.CommentThreadState.Resolved
       : vscode.CommentThreadState.Unresolved;
@@ -546,6 +563,26 @@ function activate(context) {
       applyDecision(id, 'rejected', { reason, note: replyTextOf(arg) || undefined });
     });
   }
+
+  // Pole odpovědi = poznámka, ne rozhodnutí. Má vlastní tlačítko, aby nebylo mrtvé.
+  reg('agency.finding.addNote', (arg) => {
+    const id = findingIdOf(arg);
+    const text = replyTextOf(arg);
+    if (!id) return;
+    if (!text) {
+      vscode.window.showWarningMessage('Poznámka je prázdná — napiš text a klikni znovu.');
+      return;
+    }
+    try {
+      store.appendNote(id, text, 'vscode');
+      log.appendLine(`[poznámka] ${id}: ${text}`);
+      const t = threadOf(arg);
+      if (t) t.comments = [...t.comments];  // donutí VS Code překreslit
+      refreshDecisions();
+    } catch (e) {
+      vscode.window.showErrorMessage(`Agency: ${e.message}`);
+    }
+  });
 
   // Záloha pro případ, že se podnabídka někde nevykreslí, a cesta z „…" u komentáře.
   reg('agency.finding.rejectPick', async (arg) => {

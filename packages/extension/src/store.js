@@ -36,11 +36,37 @@ function readRaw() {
   }
 }
 
-/** Aktuální stav = přehrání událostí. Poslední zápis k danému id vyhrává. */
+/** Aktuální stav = přehrání ROZHODNUTÍ. Poslední zápis k danému id vyhrává. */
 function current() {
   const out = new Map();
-  for (const e of readRaw().events) out.set(e.findingId, e);
+  for (const e of readRaw().events) {
+    if ((e.kind || 'decision') === 'decision') out.set(e.findingId, e);
+  }
   return out;
+}
+
+/** Všechny události k jednomu nálezu v pořadí, jak vznikly. */
+function historyFor(findingId) {
+  return readRaw().events.filter(e => e.findingId === findingId);
+}
+
+/**
+ * Poznámka NENÍ rozhodnutí. Je to volný text, kterým člověk doplňuje kontext
+ * ("ověřeno na produkci, 0 řádků"). Rozhodnutí má strukturovaný důvod kvůli
+ * měření precision; poznámka je pro čtenáře. Nikdy jedno místo druhého.
+ */
+function appendNote(findingId, text, by = 'unknown') {
+  const t = String(text || '').trim();
+  if (!t) throw new Error('prázdnou poznámku neukládám');
+  return writeEvent({ kind: 'note', findingId, text: t, by, at: new Date().toISOString() });
+}
+
+function writeEvent(event) {
+  const data = readRaw();
+  data.events.push(event);
+  fs.mkdirSync(STATE_DIR, { recursive: true });
+  fs.writeFileSync(FILE, JSON.stringify(data, null, 2) + '\n', 'utf8');
+  return event;
 }
 
 /**
@@ -58,19 +84,17 @@ function append(findingId, state, opts = {}) {
   if (opts.reason && !REASONS.includes(opts.reason)) {
     throw new Error(`neznámý důvod "${opts.reason}", povolené: ${REASONS.join(', ')}`);
   }
-  const event = {
+  return writeEvent({
+    kind: 'decision',
     findingId,
     state,
     reason: opts.reason || null,
     note: opts.note || null,
     by: opts.by || 'unknown',
     at: new Date().toISOString(),
-  };
-  const data = readRaw();
-  data.events.push(event);
-  fs.mkdirSync(STATE_DIR, { recursive: true });
-  fs.writeFileSync(FILE, JSON.stringify(data, null, 2) + '\n', 'utf8');
-  return event;
+  });
 }
 
-module.exports = { REASONS, STATES, storePath, readRaw, current, append };
+module.exports = {
+  REASONS, STATES, storePath, readRaw, current, append, appendNote, historyFor,
+};
