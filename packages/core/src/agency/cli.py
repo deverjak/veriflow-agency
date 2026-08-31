@@ -82,7 +82,17 @@ def cmd_packs(args) -> int:
     for p in packs.available():
         entry = {"name": p.name, "version": p.version, "title": p.manifest.get("title"),
                  "description": p.manifest.get("description"),
+                 # Dimenze a predpoklady jsou soucast odpovedi na „co ten
+                 # specialista umi" — klient je jinak nema odkud vzit a musel by
+                 # cist pack.json sam, cimz by obesel hranici.
+                 "dimensions": p.manifest.get("dimensions") or [],
+                 "requires": p.manifest.get("requires") or {},
                  "installed": packs.installed_ref(project, p.name) if project else None}
+        cfg = project.pack_config(p.name) if project else None
+        if cfg:
+            a = cfg.get("agent") or {}
+            entry["agent"] = {"provider": a.get("provider"), "model": a.get("model")}
+            entry["configPath"] = posix(project.pack_config_path(p.name))
         data.append(entry)
 
     def human():

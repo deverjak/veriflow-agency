@@ -199,6 +199,16 @@ class ToolsTree extends Tree {
           })),
         }));
       }
+      if (p.installed && p.agent) {
+        children.push(node('Kdo to odbaví', {
+          description: [p.agent.provider, p.agent.model].filter(Boolean).join(' · ')
+            || 'výchozí model providera',
+          iconId: 'rocket',
+          tooltip: 'Model je vlastnost úkolu, ne uživatele. Recenze je čtení '
+            + 'a klasifikace, ne psaní — dá se pustit levněji než kódování. Volba se '
+            + 'zapisuje do run recordu, aby šlo změřit, který model dává lepší nálezy.',
+        }));
+      }
       if (p.installed) {
         children.push(node('Konfigurace', {
           description: `.agency/${p.name}.json`,
@@ -212,7 +222,10 @@ class ToolsTree extends Tree {
 
       return node(p.title || p.name, {
         id: `pack:${p.name}`,
-        description: p.installed ? p.installed.split('@')[1] || p.version : 'neinstalován',
+        description: p.installed
+          ? [p.installed.split('@')[1] || p.version, p.agent && p.agent.model]
+            .filter(Boolean).join(' · ')
+          : 'neinstalován',
         iconId: p.installed ? 'person' : 'person-add',
         color: p.installed ? 'charts.green' : undefined,
         contextValue: p.installed ? 'agencyPack.installed' : 'agencyPack.available',
