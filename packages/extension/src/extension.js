@@ -15,6 +15,7 @@ const vscode = require('vscode');
 const cp = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const store = require('./store.js');
 
 const SCHEME = 'agency';
 const CONTROLLER_ID = 'agency.findings';
@@ -29,8 +30,9 @@ let log;
 let status;
 /** poslední výsledek buildThreads(), krmí strom v sidebaru */
 let lastResults = [];
-/** rozhodnutí drží spike v paměti; v ostrém nástroji jde do .agency/runs/ */
-const decisions = new Map();
+/** Rozhodnutí NEDRŽÍ extension. Vlastníkem je soubor ve store.js, do kterého
+ *  zapisuje i CLI (tools/triage.js) — viz §3.4 plánu. Tohle je jen cache. */
+let decisions = new Map();
 
 // ---------------------------------------------------------------- git helpers
 
@@ -275,12 +277,11 @@ async function buildThreads() {
         author: { name: `${severityIcon(f.severity)} review-graph` },
         contextValue: 'agencyFinding',
       }]);
-      thread.label = f.title.slice(0, 70);
       thread.collapsibleState = vscode.CommentThreadCollapsibleState.Collapsed;
       thread.canReply = true;
       thread.contextValue = 'agencyFinding';
       // vlastní data pro handlery příkazů
-      thread._agency = { finding: f, resolution, drift, repo, placed };
+      thread._agency = { finding: f, resolution, drift, repo, placed, baseLabel: f.title.slice(0, 70) };
       threads.push(thread);
     }
 
@@ -438,19 +439,61 @@ function threadOf(arg) {
   return null;
 }
 
-function record(thread, state, reason) {
-  const meta = thread && thread._agency;
-  const id = meta ? meta.finding.id : '?';
-  decisions.set(id, { state, reason: reason || null, at: new Date().toISOString() });
-  log.appendLine(`[rozhodnutí] ${id} → ${state}${reason ? ' · ' + reason : ''}`);
-  if (thread) {
-    thread.state = state === 'accepted'
+/** Přečte úložiště a promítne stav do vláken i stromu. Volá se i po zápisu z CLI. */
+function refreshDecisions() {
+  decisions = store.current();
+  for (const t of threads) {
+    const m = t._agency;
+    if (!m) continue;
+    const d = decisions.get(m.finding.id);
+    const mark = !d ? '' : d.state === 'accepted' ? '✔ ' : d.state === 'rejected' ? '✘ ' : '⏱ ';
+    t.label = mark + m.baseLabel;   // z baseLabel, ne z t.label — jinak se značky hromadí
+    t.state = d && d.state === 'accepted'
       ? vscode.CommentThreadState.Resolved
       : vscode.CommentThreadState.Unresolved;
-    thread.label = `${state === 'accepted' ? '✔' : state === 'rejected' ? '✘' : '⏱'} ${thread.label}`;
   }
-  vscode.window.setStatusBarMessage(`Agency: ${id} → ${state}`, 4000);
+  if (tree) tree.refresh();
 }
+
+/**
+ * JEDINÁ cesta, jak vzniká rozhodnutí uvnitř extension. Zapisuje do téhož
+ * úložiště jako `node tools/triage.js`, takže člověk i agent jsou rovnocenní.
+ */
+function applyDecision(findingId, state, opts = {}) {
+  try {
+    const ev = store.append(findingId, state, { ...opts, by: opts.by || 'vscode' });
+    log.appendLine(`[rozhodnutí] ${findingId} → ${ev.state}` +
+      `${ev.reason ? ' · ' + ev.reason : ''}${ev.note ? ' · ' + ev.note : ''} (${ev.by})`);
+    refreshDecisions();
+    vscode.window.setStatusBarMessage(`Agency: ${findingId} → ${ev.state}`, 4000);
+    return ev;
+  } catch (e) {
+    vscode.window.showErrorMessage(`Agency: ${e.message}`);
+    log.appendLine(`[rozhodnutí] ODMÍTNUTO ${findingId}: ${e.message}`);
+    return null;
+  }
+}
+
+function findingIdOf(arg) {
+  const t = threadOf(arg);
+  return t && t._agency ? t._agency.finding.id : null;
+}
+
+/** Text z pole odpovědi. VS Code ho předá jen když je editor odpovědi rozbalený,
+ *  takže může chybět — bere se jako bonus, ne jako vstup, na kterém se stojí. */
+function replyTextOf(arg) {
+  if (!arg || typeof arg.text !== 'string') return null;
+  const t = arg.text.trim();
+  return t.length ? t : null;
+}
+
+const REASON_HINTS = {
+  'not-reproducible': 'nepodařilo se zopakovat',
+  'by-design': 'chová se tak záměrně',
+  'wrong-diagnosis': 'problém existuje, ale příčina je jinde',
+  'duplicate-missed': 'duplicita, kterou dedup nechytil',
+  'out-of-scope': 'mimo rozsah projektu',
+};
 
 function activate(context) {
   log = vscode.window.createOutputChannel('Agency Spike');
@@ -484,16 +527,37 @@ function activate(context) {
   });
   reg('agency.spike.clear', () => { clearThreads(); vscode.window.showInformationMessage('Agency: vlákna zahozena.'); });
 
-  reg('agency.finding.accept', (arg) => record(threadOf(arg), 'accepted'));
-  reg('agency.finding.defer', (arg) => record(threadOf(arg), 'deferred'));
-  reg('agency.finding.reject', (arg) => {
-    const t = threadOf(arg);
-    const reason = (arg && arg.text) ? String(arg.text).trim() : '';
-    if (!reason) {
-      vscode.window.showWarningMessage('Zamítnutí chce důvod — napiš ho do pole odpovědi a klikni znovu.');
-      return;
+  reg('agency.finding.accept', (arg) => {
+    const id = findingIdOf(arg);
+    if (id) applyDecision(id, 'accepted', { note: replyTextOf(arg) });
+  });
+  reg('agency.finding.defer', (arg) => {
+    const id = findingIdOf(arg);
+    if (id) applyDecision(id, 'deferred', { note: replyTextOf(arg) });
+  });
+
+  reg('agency.finding.reject', async (arg) => {
+    const id = findingIdOf(arg);
+    if (!id) return;
+    const typed = replyTextOf(arg);
+    log.appendLine(`[reject] arg.text = ${typed === null ? '(nepřišel)' : JSON.stringify(typed)}`);
+
+    // Důvod je enum z baseline.md §7.1, ne volný text — jinak precision nejde spočítat.
+    // Text z pole odpovědi se použije jako poznámka, když dorazí; nespoléhá se na něj.
+    const pick = await vscode.window.showQuickPick(
+      store.REASONS.map(r => ({ label: r, description: REASON_HINTS[r] || '' })),
+      { title: `Zamítnout ${id} — důvod`, placeHolder: 'Vyber důvod zamítnutí' });
+    if (!pick) return;
+    applyDecision(id, 'rejected', { reason: pick.label, note: typed || undefined });
+  });
+
+  // Programatická cesta pro cokoli uvnitř extension hostu. Agent mimo VS Code
+  // volá `node tools/triage.js` — obojí končí ve stejném úložišti.
+  reg('agency.decision.apply', (payload) => {
+    if (!payload || !payload.findingId || !payload.state) {
+      throw new Error('agency.decision.apply čeká { findingId, state, reason?, note?, by? }');
     }
-    record(t, 'rejected', reason);
+    return applyDecision(payload.findingId, payload.state, payload);
   });
 
   reg('agency.finding.openAtCommit', async (arg) => {
@@ -534,6 +598,25 @@ function activate(context) {
     ed.revealRange(new vscode.Range(l, 0, l, 0), vscode.TextEditorRevealType.InCenter);
     ed.selection = new vscode.Selection(l, 0, l, 0);
   });
+
+  // Úložiště sleduj, ať se zápis z CLI projeví v UI bez reloadu.
+  // Tohle je vlastní důkaz, že extension není vlastník rozhodnutí.
+  try {
+    const dir = path.dirname(store.storePath());
+    fs.mkdirSync(dir, { recursive: true });
+    let debounce = null;
+    const watcher = fs.watch(dir, () => {
+      clearTimeout(debounce);
+      debounce = setTimeout(() => {
+        log.appendLine('[store] změna zvenčí — přenačítám rozhodnutí');
+        refreshDecisions();
+      }, 120);
+    });
+    context.subscriptions.push({ dispose: () => { clearTimeout(debounce); watcher.close(); } });
+  } catch (e) {
+    log.appendLine(`[store] sledování selhalo: ${e && e.message}`);
+  }
+  refreshDecisions();
 
   // Vlákna se staví hned po aktivaci — jinak vypadá spike jako by se nenačetl.
   buildThreads().then(({ results }) => {

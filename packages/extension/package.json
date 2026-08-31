@@ -52,6 +52,11 @@
         "category": "Agency"
       },
       {
+        "command": "agency.decision.apply",
+        "title": "Zapsat rozhodnutí (programaticky)",
+        "category": "Agency"
+      },
+      {
         "command": "agency.spike.clear",
         "title": "Zahodit vlákna",
         "category": "Agency"
@@ -105,6 +110,10 @@
         },
         {
           "command": "agency.spike.reveal",
+          "when": "false"
+        },
+        {
+          "command": "agency.decision.apply",
           "when": "false"
         }
       ],

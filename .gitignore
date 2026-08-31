@@ -16,3 +16,4 @@ dist/
 # POZOR: .agency/ se NEignoruje. Run recordy jsou zdroj pravdy (docs §2.2)
 # a commitují se. Zahoditelný je jen index ~/.agency/agency.db, který leží
 # mimo repozitář.
+.spike-state/
