@@ -380,6 +380,47 @@ def append_decision(run: Run, finding_id: str, state: str,
     return ev
 
 
+def append_note(run: Run, finding_id: str, text: str, by: str = "cli") -> dict:
+    """Poznámka NENÍ rozhodnutí.
+
+    Rozhodnutí má strukturovaný důvod z pevného seznamu, protože se z něj počítá
+    precision. Poznámka je volný text pro čtenáře („ověřeno na produkci, dva
+    řádky"). Smíchat je znamená rozbít buď měření, nebo použitelnost — ve spiku
+    to bylo zkoušené a rozbilo to obojí.
+
+    Jde do téhož append-only proudu, aby historie nálezu byla jedna, ne dvě.
+    """
+    text = (text or "").strip()
+    if not text:
+        raise SystemExit("Prázdná poznámka. Napiš text, nebo nic nezapisuj.")
+    ev = {"kind": "note", "findingId": finding_id, "text": text, "by": by, "at": now()}
+    with open(run.decisions_path, "a", encoding="utf-8", newline="\n") as f:
+        f.write(json.dumps(ev, ensure_ascii=False) + "\n")
+    return ev
+
+
+def history(run: Run) -> dict[str, list[dict]]:
+    """Všechny události po nálezech, v pořadí zápisu — rozhodnutí i poznámky.
+
+    Aktuální stav dá `decisions()`. Tohle je to, co se ukazuje ve vlákně:
+    proč se rozhodlo tak, jak se rozhodlo, a co k tomu kdo dopsal.
+    """
+    out: dict[str, list[dict]] = {}
+    if not run.decisions_path.is_file():
+        return out
+    with open(run.decisions_path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                ev = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            out.setdefault(ev.get("findingId"), []).append(ev)
+    return out
+
+
 def decisions(run: Run) -> dict[str, dict]:
     """Aktuální stav = přehrání událostí. Poslední zápis k danému id vyhrává."""
     cur: dict[str, dict] = {}

@@ -1,26 +1,26 @@
-// Klikací spuštění recenze.
+// Spuštění recenze — od výběru PR po běžícího agenta.
 //
-// Tok: vyber PR → CLI udělá deterministickou přípravu → recenze se pustí
-// v integrovaném terminálu.
+// Recenze se pouští v integrovaném terminálu, ne na pozadí. Není to lenost:
+// attended má být vlastnost systému, ne úmysl. Když běh vidíš běžet a můžeš do
+// něj mluvit, je to attended provoz. Kdyby ho extension pustila na pozadí,
+// hranice attended/unattended by byla jen na tvojí paměti.
 //
-// Ten terminál není lenost. Attended má být vlastnost systému, ne úmysl —
-// když běh vidíš běžet a můžeš do něj mluvit, je to attended provoz. Kdyby
-// extension pustila recenzi na pozadí, byla by hranice attended/unattended
-// jen na tvojí paměti.
+// Tvar spouštěcího příkazu vlastní CLI. `agency run --json` vrací hotové
+// `launch` argv a extension ho jen pošle do terminálu — kdyby si ho skládala
+// i ona, vzniklo by druhé místo, kde se dá nastavit model, a run record by lhal.
 
 const vscode = require('vscode');
-const agency = require('./agency.js');
+const cli = require('./cli.js');
 
-const SEV = { open: '$(git-pull-request)', merged: '$(git-merge)' };
+const STATE_ICON = { open: '$(git-pull-request)', merged: '$(git-merge)' };
 
-/** Sestaví položky QuickPicku ze seznamu PR. */
 function items(prs) {
   const open = prs.filter((p) => p.state === 'open');
   const merged = prs.filter((p) => p.state === 'merged');
   const list = [];
 
   const push = (p) => list.push({
-    label: `${SEV[p.state]} #${p.number}  ${p.title || ''}`,
+    label: `${STATE_ICON[p.state]} #${p.number}  ${p.title || ''}`,
     description: p.reviewed ? '$(check) už recenzovaný' : undefined,
     detail: p.state === 'merged'
       // Retrospektivní audit je plnohodnotný režim, ne výjimka — na projektu
@@ -41,18 +41,25 @@ function items(prs) {
   return list;
 }
 
+/**
+ * Vybere PR, nechá CLI udělat deterministickou přípravu a pustí agenta.
+ * Vrací data běhu, nebo null, když uživatel odešel.
+ */
 async function pickAndRun(cwd, log) {
+  const cfg = vscode.workspace.getConfiguration('agency');
+  const pack = cfg.get('pack') || 'review-graph';
+
   const picked = await vscode.window.withProgress(
     { location: vscode.ProgressLocation.Window, title: 'Agency: načítám PR…' },
     async () => {
-      const prs = await agency.prs(cwd, { state: 'all', limit: 30 });
+      const prs = await cli.prs(cwd, { state: 'all', limit: 30 });
       if (!prs.length) {
         vscode.window.showWarningMessage(
           'Agency: žádné PR. Ověř `gh auth status` a že jsi v repu s remote.');
         return null;
       }
       return vscode.window.showQuickPick(items(prs), {
-        title: 'Který PR zrecenzovat?',
+        title: 'Který pull request zrecenzovat?',
         placeHolder: 'Otevřené i prošlé — u prošlých se udělá retrospektivní audit',
         matchOnDescription: true,
         matchOnDetail: true,
@@ -62,62 +69,62 @@ async function pickAndRun(cwd, log) {
   if (!picked || !picked.pr) return null;
   const pr = picked.pr;
 
-  let result = await vscode.window.withProgress(
+  const result = await vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.Notification,
       title: `Agency: připravuji recenzi PR #${pr.number}`,
       cancellable: false,
     },
     async (progress) => {
-      progress.report({ message: 'worktree, graf, grafový signál…' });
-      return agency.run(cwd, 'review-graph', { pr: pr.number });
+      progress.report({ message: 'worktree, graf, evidence…' });
+      return cli.run(cwd, pack, {
+        pr: pr.number,
+        force: pr.reviewed || undefined,
+        model: cfg.get('model') || undefined,
+        provider: cfg.get('provider') || undefined,
+      });
     });
 
-  // Odmítnutí kvůli už recenzovanému commitu není chyba — je to idempotence.
-  // Nabídni opakování místo hlášky, kterou uživatel neumí obejít.
-  if (!result.ok && result.reason === 'already-reviewed') {
-    const again = await vscode.window.showWarningMessage(
-      `${result.error}`, 'Přesto spustit', 'Zrušit');
-    if (again !== 'Přesto spustit') return null;
-    result = await agency.run(cwd, 'review-graph', { pr: pr.number, force: true });
-  }
-
   if (!result.ok) {
-    vscode.window.showErrorMessage(`Agency: ${result.error || 'příprava selhala'}`);
-    log.appendLine(`[run] selhalo: ${result.error}`);
+    const msg = result.error || 'příprava selhala';
+    if (result.reason === 'already-reviewed') {
+      const again = await vscode.window.showWarningMessage(msg, 'Přesto spustit');
+      if (again) {
+        const forced = await cli.run(cwd, pack, { pr: pr.number, force: true });
+        if (forced.ok) return launch(forced.data, log);
+      }
+      return null;
+    }
+    vscode.window.showErrorMessage(`Agency: ${msg}`);
+    if (log) log.appendLine(`[běh] selhalo: ${msg}`);
     return null;
   }
 
-  const d = result.data;
-  log.appendLine(`[run] ${d.runId} · PR #${pr.number} · ${d.files} souborů · worktree ${d.worktree}`);
+  return launch(result.data, log);
+}
 
-  // Tvar spuštění vlastní CLI, ne extension — model i provider si projekt
-  // konfiguruje v .agency/, a kdyby si příkaz skládala i extension, byly by
-  // dvě místa, kde se to dá nastavit různě.
-  const argv = d.launch && d.launch.length ? d.launch : ['claude', d.prompt];
-  const cmd = argv
-    .map((a, i) => (i === 0 || /^[-\w./:@=]+$/.test(a) ? a : JSON.stringify(a)))
-    .join(' ');
-
-  const model = (d.agent && d.agent.model) || 'výchozí model';
-  const term = vscode.window.createTerminal({
-    name: `Agency · PR #${pr.number} · ${model}`,
-    cwd: d.worktree,
-    iconPath: new vscode.ThemeIcon('search'),
-  });
+/** Pošle hotový příkaz od CLI do terminálu. Sestavovat ho tady by byla chyba. */
+function launch(data, log) {
+  const agent = data.agent || {};
+  const name = `Agency · PR #${data.target && data.target.pr}`
+    + (agent.model ? ` · ${agent.model}` : '');
+  const term = vscode.window.createTerminal({ name, cwd: data.worktree });
   term.show(true);
-  term.sendText(cmd);
+  term.sendText(data.launch.map(quote).join(' '));
 
+  if (log) {
+    log.appendLine(`[běh] ${data.runId} · worktree ${data.worktree}`);
+    log.appendLine(`[běh] ${data.launch.join(' ')}`);
+  }
   vscode.window.showInformationMessage(
-    `Agency: běh ${d.runId.slice(0, 8)} připraven, recenze běží v terminálu (${model}).`,
-    'Otevřít běh',
-  ).then((choice) => {
-    if (choice === 'Otevřít běh') {
-      vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(d.runDir));
-    }
-  });
+    `Agency: běh ${String(data.runId).slice(0, 10)} připraven — recenze běží v terminálu. `
+    + 'Až doběhne, spusť „Agency: Zpracovat výsledek běhu".');
+  return data;
+}
 
-  return d;
+function quote(arg) {
+  const s = String(arg);
+  return /[\s"']/.test(s) ? JSON.stringify(s) : s;
 }
 
 module.exports = { pickAndRun, items };

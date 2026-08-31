@@ -1,20 +1,31 @@
 {
-  "name": "agency-spike",
-  "displayName": "Agency — CommentController spike",
-  "description": "Zjišťovací spike: unese VS Code Comments API nálezy zakotvené na jiný commit než working tree?",
-  "version": "0.0.1",
+  "name": "veriflow-agency",
+  "displayName": "Agency",
+  "description": "Specialisté, které si najmeš do repozitáře. Recenze pull requestů s doloženými nálezy, triage přímo u kódu a měřitelná precision.",
+  "version": "0.1.0",
   "publisher": "veriflow",
+  "license": "UNLICENSED",
   "private": true,
   "engines": {
     "vscode": "^1.85.0"
   },
   "categories": [
-    "Other"
+    "Other",
+    "Linters"
+  ],
+  "keywords": [
+    "code review",
+    "pull request",
+    "triage"
   ],
   "main": "./src/extension.js",
   "activationEvents": [
     "onStartupFinished"
   ],
+  "scripts": {
+    "package": "node -e \"require('fs').mkdirSync('../../dist',{recursive:true})\" && npx --yes @vscode/vsce package --no-dependencies --allow-missing-repository --out ../../dist/",
+    "test": "node test/harness.js"
+  },
   "contributes": {
     "viewsContainers": {
       "activitybar": [
@@ -28,10 +39,117 @@
     "views": {
       "agency": [
         {
-          "id": "agency.findings.view",
-          "name": "Nálezy"
+          "id": "agency.overview",
+          "name": "Přehled",
+          "icon": "$(dashboard)"
+        },
+        {
+          "id": "agency.findings",
+          "name": "Nálezy",
+          "icon": "$(inbox)"
+        },
+        {
+          "id": "agency.runs",
+          "name": "Běhy",
+          "icon": "$(history)",
+          "visibility": "collapsed"
+        },
+        {
+          "id": "agency.tools",
+          "name": "Specialisté",
+          "icon": "$(person)",
+          "visibility": "collapsed"
         }
       ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "agency.overview",
+        "when": "!agency.ready && agency.reason == no-folder",
+        "contents": "Agency pracuje uvnitř projektu.\n\nOtevři složku s git repozitářem a panel se naplní sám.\n\n[Otevřít složku](command:vscode.openFolder)"
+      },
+      {
+        "view": "agency.overview",
+        "when": "!agency.ready && agency.reason == no-cli",
+        "contents": "Chybí jádro.\n\nExtension je jen klient — všechnu práci dělá příkaz `agency`, ten samý, který volá agent z terminálu.\n\nNainstaluj ho:\n\n```\nuv tool install --editable <veriflow-agency>/packages/core\n```\n\n[Nastavit cestu k agency](command:agency.openSettings)\n[Zkusit znovu](command:agency.refresh)"
+      },
+      {
+        "view": "agency.overview",
+        "when": "!agency.ready && agency.reason == no-repo",
+        "contents": "Tady není git repozitář.\n\nNálezy se ukládají do `.agency/` uvnitř projektu, aby přežily přeinstalaci i nové naklonování — bez repozitáře nemá kam.\n\n[Zkusit znovu](command:agency.refresh)"
+      },
+      {
+        "view": "agency.overview",
+        "when": "!agency.ready && agency.reason == error",
+        "contents": "Agency se nepodařilo spustit. Detail je v Output → Agency.\n\n[Ověřit předpoklady](command:agency.doctor)\n[Zkusit znovu](command:agency.refresh)"
+      },
+      {
+        "view": "agency.findings",
+        "when": "agency.ready && !agency.hasRuns",
+        "contents": "Zatím žádný běh.\n\nRecenzent projde pull request, zkříží změny se skutečnou strukturou kódu a napíše nálezy — každý s evidencí a s odkazem na řádek, který přežije i pozdější změny.\n\n[Zrecenzovat pull request](command:agency.review.pick)\n\nBěh se pouští ve viditelném terminálu, ne na pozadí: attended je vlastnost systému, ne úmysl."
+      },
+      {
+        "view": "agency.findings",
+        "when": "agency.ready && agency.hasRuns && !agency.hasFindings",
+        "contents": "Běh proběhl, ale nálezy tu ještě nejsou.\n\nAgent zapisuje `findings.json` na konci práce. Pak je potřeba je protáhnout bránou — ta ověří kontrakt, existenci souborů a duplicitu.\n\n[Zpracovat výsledek běhu](command:agency.ingest)\n[Zrecenzovat další PR](command:agency.review.pick)"
+      },
+      {
+        "view": "agency.tools",
+        "when": "agency.ready",
+        "contents": "Specialista (pack) je metoda práce, ne obsah. Instalací dostane projekt jeho postup a konfiguraci; pravidla a dokumentace zůstávají projektu.\n\n[Najmout specialistu](command:agency.pack.add)"
+      }
+    ],
+    "configuration": {
+      "title": "Agency",
+      "properties": {
+        "agency.cliPath": {
+          "type": "string",
+          "default": "agency",
+          "markdownDescription": "Cesta k příkazu `agency`. Nech `agency`, když je v PATH; `uv tool install` ho umí položit i mimo něj.",
+          "order": 1
+        },
+        "agency.pack": {
+          "type": "string",
+          "default": "review-graph",
+          "description": "Kterého specialistu spouští „Zrecenzovat pull request“.",
+          "order": 2
+        },
+        "agency.model": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null,
+          "markdownDescription": "Model pro tenhle projekt. Prázdné = použije se `agent.model` z konfigurace packu.\n\nModel je vlastnost úkolu, ne uživatele: recenze je čtení a klasifikace, ne psaní, takže se dá pustit levněji než kódování. Volba se zapisuje do run recordu, aby šlo změřit, který model dává lepší nálezy.",
+          "order": 3
+        },
+        "agency.provider": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            null,
+            "claude",
+            "codex"
+          ],
+          "default": null,
+          "markdownDescription": "Čím běh spustit. Prázdné = `agent.provider` z konfigurace packu.",
+          "order": 4
+        },
+        "agency.commentThreads": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Ukazovat nálezy jako komentáře přímo u řádku kódu. Vypnutím zůstane jen panel Agency.",
+          "order": 5
+        },
+        "agency.autoRefresh": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Přenačíst, když se `.agency/runs/` změní zvenčí — tedy když rozhodne agent nebo terminál. Vypnutím se změny projeví až po ručním obnovení.",
+          "order": 6
+        }
+      }
     },
     "submenus": [
       {
@@ -45,34 +163,60 @@
         "command": "agency.review.pick",
         "title": "Zrecenzovat pull request…",
         "category": "Agency",
-        "icon": "$(git-pull-request)"
-      },
-      {
-        "command": "agency.spike.run",
-        "title": "Spustit všechny kontroly",
-        "category": "Agency",
         "icon": "$(play)"
       },
       {
-        "command": "agency.spike.showThreads",
-        "title": "Vytvořit vlákna nálezů",
+        "command": "agency.ingest",
+        "title": "Zpracovat výsledek běhu",
+        "category": "Agency",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "agency.refresh",
+        "title": "Přenačíst",
         "category": "Agency",
         "icon": "$(refresh)"
       },
       {
-        "command": "agency.spike.reveal",
-        "title": "Otevřít nález",
+        "command": "agency.doctor",
+        "title": "Ověřit předpoklady",
+        "category": "Agency",
+        "icon": "$(pulse)"
+      },
+      {
+        "command": "agency.metrics",
+        "title": "Metriky — precision, dedup, fronta",
+        "category": "Agency",
+        "icon": "$(graph)"
+      },
+      {
+        "command": "agency.openSettings",
+        "title": "Nastavení",
+        "category": "Agency",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "agency.pack.add",
+        "title": "Najmout specialistu…",
+        "category": "Agency",
+        "icon": "$(person-add)"
+      },
+      {
+        "command": "agency.pack.openConfig",
+        "title": "Otevřít konfiguraci packu",
         "category": "Agency"
       },
       {
-        "command": "agency.decision.apply",
-        "title": "Zapsat rozhodnutí (programaticky)",
-        "category": "Agency"
+        "command": "agency.finding.open",
+        "title": "Otevřít detail nálezu",
+        "category": "Agency",
+        "icon": "$(book)"
       },
       {
-        "command": "agency.spike.clear",
-        "title": "Zahodit vlákna",
-        "category": "Agency"
+        "command": "agency.finding.reveal",
+        "title": "Ukázat v kódu",
+        "category": "Agency",
+        "icon": "$(go-to-file)"
       },
       {
         "command": "agency.finding.accept",
@@ -106,7 +250,8 @@
       },
       {
         "command": "agency.finding.rejectPick",
-        "title": "Zamítnout (vybrat důvod ze seznamu)"
+        "title": "Zamítnout…",
+        "icon": "$(circle-slash)"
       },
       {
         "command": "agency.finding.addNote",
@@ -114,13 +259,23 @@
       },
       {
         "command": "agency.finding.openAtCommit",
-        "title": "Ukázat kód v den analýzy (read-only z commitu)",
+        "title": "Ukázat kód v den analýzy",
         "icon": "$(history)"
       },
       {
         "command": "agency.finding.diffAgainstHead",
         "title": "Porovnat s pracovní kopií",
         "icon": "$(git-compare)"
+      },
+      {
+        "command": "agency.decision.apply",
+        "title": "Zapsat rozhodnutí (programaticky)",
+        "category": "Agency"
+      },
+      {
+        "command": "agency.view.findings.focus",
+        "title": "Přejít na frontu nálezů",
+        "category": "Agency"
       }
     ],
     "menus": {
@@ -170,12 +325,98 @@
           "when": "false"
         },
         {
-          "command": "agency.spike.reveal",
+          "command": "agency.finding.open",
+          "when": "false"
+        },
+        {
+          "command": "agency.finding.reveal",
+          "when": "false"
+        },
+        {
+          "command": "agency.pack.openConfig",
           "when": "false"
         },
         {
           "command": "agency.decision.apply",
           "when": "false"
+        },
+        {
+          "command": "agency.view.findings.focus",
+          "when": "false"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "agency.review.pick",
+          "group": "navigation@1",
+          "when": "view == agency.overview || view == agency.runs"
+        },
+        {
+          "command": "agency.ingest",
+          "group": "navigation@2",
+          "when": "view == agency.runs"
+        },
+        {
+          "command": "agency.metrics",
+          "group": "navigation@1",
+          "when": "view == agency.findings"
+        },
+        {
+          "command": "agency.refresh",
+          "group": "navigation@8",
+          "when": "view == agency.overview || view == agency.findings"
+        },
+        {
+          "command": "agency.pack.add",
+          "group": "navigation@1",
+          "when": "view == agency.tools"
+        },
+        {
+          "command": "agency.doctor",
+          "group": "1_check@1",
+          "when": "view == agency.overview"
+        },
+        {
+          "command": "agency.openSettings",
+          "group": "9_config@1",
+          "when": "view == agency.overview || view == agency.tools"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "agency.finding.accept",
+          "group": "inline@1",
+          "when": "viewItem == agencyFinding.open"
+        },
+        {
+          "command": "agency.finding.rejectPick",
+          "group": "inline@2",
+          "when": "viewItem == agencyFinding.open"
+        },
+        {
+          "command": "agency.finding.reveal",
+          "group": "inline@3",
+          "when": "viewItem =~ /^agencyFinding/"
+        },
+        {
+          "command": "agency.finding.defer",
+          "group": "1_decide@1",
+          "when": "viewItem == agencyFinding.open"
+        },
+        {
+          "command": "agency.finding.openAtCommit",
+          "group": "2_look@1",
+          "when": "viewItem =~ /^agencyFinding/"
+        },
+        {
+          "command": "agency.finding.diffAgainstHead",
+          "group": "2_look@2",
+          "when": "viewItem =~ /^agencyFinding/"
+        },
+        {
+          "command": "agency.pack.add",
+          "group": "inline@1",
+          "when": "viewItem == agencyPack.available"
         }
       ],
       "comments/commentThread/title": [
@@ -195,13 +436,18 @@
           "when": "commentController == agency.findings"
         },
         {
-          "command": "agency.finding.openAtCommit",
+          "command": "agency.finding.open",
           "group": "inline@4",
           "when": "commentController == agency.findings"
         },
         {
-          "command": "agency.finding.diffAgainstHead",
+          "command": "agency.finding.openAtCommit",
           "group": "inline@5",
+          "when": "commentController == agency.findings"
+        },
+        {
+          "command": "agency.finding.diffAgainstHead",
+          "group": "inline@6",
           "when": "commentController == agency.findings && commentThread == agencyFinding.drifted"
         }
       ],
@@ -239,23 +485,6 @@
           "command": "agency.finding.rejectPick",
           "group": "inline@1",
           "when": "commentController == agency.findings"
-        }
-      ],
-      "view/title": [
-        {
-          "command": "agency.review.pick",
-          "group": "navigation@0",
-          "when": "view == agency.findings.view"
-        },
-        {
-          "command": "agency.spike.run",
-          "group": "navigation@1",
-          "when": "view == agency.findings.view"
-        },
-        {
-          "command": "agency.spike.showThreads",
-          "group": "navigation@2",
-          "when": "view == agency.findings.view"
         }
       ]
     }

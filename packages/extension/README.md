@@ -1,49 +1,89 @@
-# CommentController spike
+# Agency — VS Code extension
 
-Zjišťuje jedinou věc, na které stojí rozhodnutí v [`docs/ui-surface-decision.md`](../../docs/ui-surface-decision.md) §9 otázka 2:
+Klient nad příkazem `agency`. Sám o sobě neumí nic: všechnu práci dělá jádro,
+extension ji jen zobrazuje a zadává. Ta hranice je záměr, ne provizorium —
+díky ní může tutéž věc udělat člověk klikem, ty v terminálu i agent, a všichni
+tři píšou do stejného místa.
 
-> Unese VS Code Comments API nález zakotvený na **jiný commit**, než je working tree?
+## Co je v panelu
 
-Je to spike, ne základ extension — plain JS, nula závislostí, žádný build step. Až odpoví, zahodí se nebo přepíše do TypeScriptu podle [`implementation-plan-v0.md`](../../docs/implementation-plan-v0.md) §3.5.
+Ikona **Agency** v activity baru, čtyři stromy podle otázek, které si kladeš
+v tomhle pořadí:
 
-## Data
+| Pohled | Odpovídá na |
+|---|---|
+| **Přehled** | Co se tu děje a je to v pořádku? Předpoklady, poslední běh, fronta, precision. |
+| **Nálezy** | Co ode mě čeká rozhodnutí? Fronta, rozhodnuté, duplicity. |
+| **Běhy** | Co proběhlo a jak to dopadlo? |
+| **Specialisté** | Koho si můžu najmout a na co se dívá? |
 
-Nejsou vymyšlená. `src/fixtures.json` se generuje z reálného gitu `main-panelu`:
+Detail nálezu se otevírá **jako tab v editoru**, ne v panelu — tvrzení,
+evidence, kotva, historie a tlačítka rozhodnutí se do 300 px nevejdou.
 
-| # | případ | zdroj |
-|---|---|---|
-| f1–f5 | `no-drift` | skutečné nálezy z `pr-review-graph` komentáře na PR #460, commit `93dc76a` |
-| f6 | `drifted` | `BookingsTabPanel.tsx`, řádek 62 → 47 v souboru s +1012/−865 od 18. 8. |
-| f7 | `deleted` | `src/app/[locale]/account/page.tsx`, od té doby smazaný |
-| f8 | `out-of-bounds` | číslo řádku 99999 |
+Nálezy jsou navíc **inline komentáře u řádku kódu** (panel *Comments*). To je
+jediná věc, kterou desktopová aplikace fyzicky neumí, a hlavní důvod, proč UI
+Agency žije tady.
 
-## Spuštění
+## Celý průchod
 
-**Strojová část** — kotva a test driftu, bez VS Code:
+1. **Zrecenzovat pull request…** — vybereš PR (otevřený i mergnutý; u mergnutého
+   se udělá retrospektivní audit). CLI připraví worktree, graf a evidenci a
+   spustí agenta ve **viditelném terminálu**.
+2. Agent dopíše `findings.json` a skončí.
+3. **Zpracovat výsledek běhu** — brána ověří kontrakt, existenci souborů na
+   analyzovaném commitu a duplicitu proti starším nálezům.
+4. Nálezy se objeví ve frontě a u řádků kódu. Rozhoduješ **Přijmout ·
+   Odložit · Zamítnout ▸ důvod**.
+5. **Metriky** ukážou precision — a její rozpad po dimenzích, severitě a modelech.
+
+Fronta je seřazená tak, aby nahoře byly nálezy na kódu, na který od analýzy
+nikdo nesáhl. Ty platí doslova a rozhodnou se nejrychleji.
+
+## Rozhodnutí ≠ poznámka
+
+Rozhodnutí má důvod z pevného seznamu, protože se z něj počítá precision.
+Poznámka je volný text a má vlastní tlačítko. Nesdílí se — smíchat je znamená
+rozbít buď měření, nebo použitelnost.
+
+## Nastavení
+
+`Ctrl+,` → hledej `agency`, nebo z panelu ikonou ozubeného kola.
+
+| Klíč | K čemu |
+|---|---|
+| `agency.cliPath` | Cesta k `agency`, když není v PATH. |
+| `agency.pack` | Kterého specialistu spouští recenze. |
+| `agency.model`, `agency.provider` | Přebijí konfiguraci packu pro tenhle projekt. |
+| `agency.commentThreads` | Vypnout komentáře u řádků. |
+| `agency.autoRefresh` | Přenačíst, když `.agency/` změní agent nebo terminál. |
+
+## Instalace
+
+Nejdřív jádro, bez něj je extension prázdná:
 
 ```
-node packages/extension/test/harness.js
+uv tool install --editable <cesta>/veriflow-agency/packages/core
 ```
 
-**Vizuální část** — F5 v tomhle repu (`.vscode/launch.json` otevře Extension Development Host nad `main-panelem`), pak z palety:
+Pak extension — buď VSIX:
 
 ```
-Agency Spike: Spustit všechny kontroly
+npm --prefix packages/extension run package
+code --install-extension dist/veriflow-agency-0.1.0.vsix
 ```
 
-Otevře se markdown report a vytvoří se vlákna.
+…nebo `F5` z tohohle repa (spustí Extension Development Host).
 
-## Co harness NEOVĚŘÍ — tohle musíš odkliknout
+## Vývoj
 
-1. **Vlákno je vidět u řádku.** Otevři `src/application/marketplace/getMyBookings.ts` → u řádku 517 má být vlákno.
-2. **Čtyři ikony v hlavičce vlákna:** Přijmout · Odložit · Historie · Porovnat. Tohle je vlastní test menu příspěvků — když se neobjeví, `when` klauzule `commentController == agency.findings` nesedí.
-3. **Zamítnutí s důvodem.** Napiš text do pole odpovědi a klikni „Zamítnout s důvodem" — příkaz musí ten text dostat (jde do Output → *Agency Spike*). Tohle je jediná cesta, jak sebrat důvod zamítnutí bez vlastního dialogu.
-4. **Read-only pohled z commitu** (ikona Historie u f7 — smazaný soubor). Musí se otevřít obsah z `git show`, ne prázdno.
-5. **Diff proti pracovní kopii** (ikona Porovnat u f6).
-6. **Reload okna** (`Developer: Reload Window`) — vlákna musí zmizet, ne se zdvojit. VS Code komentáře nepersistuje, takže se po aktivaci vytvářejí znovu z dat.
+```
+node packages/extension/test/harness.js     # smoke test bez VS Code
+```
 
-## Co spike už našel
+Harness podstrčí falešný `vscode` a ověří, co ověřit lze strojově: stavbu
+stromů, escapování vstupu do HTML a to, že se diff nabízí jen u nálezů dotčených
+driftem. Renderování vláken a tlačítka chtějí `F5`.
 
-Chybu v návrhu kotvy, ne v API: **vrstva 1 nesmí testovat `commit == HEAD`, ale neměnnost konkrétního souboru.** Nález na netknutém souboru jinak propadne přes všechny vrstvy až na `none`. A vrstva 2 nesmí hledat jediný řádek — docblok začíná na `/**`, což je k nalezení k ničemu; hledá se nejcharakterističtější řádek bloku a odečte se offset.
-
-Obojí je opravené a patří do `finding.v1`.
+Falešný `vscode` je záměrně hloupý. Kdyby se do něj musela dopisovat logika,
+znamenalo by to, že se logika stěhuje z jádra do extension — a tím padá celá
+hranice, na které nástroj stojí.

@@ -2,13 +2,24 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Spike: CommentController nad main-panelem",
+      "name": "Agency: extension nad main-panelem",
       "type": "extensionHost",
       "request": "launch",
       "args": [
         "--extensionDevelopmentPath=${workspaceFolder}/packages/extension",
         "--disable-extensions",
-        "C:\\Users\\kubad\\Documents\\coding\\chytre-digital\\main-panel"
+        "C:\Users\kubad\Documents\coding\chytre-digital\main-panel"
+      ],
+      "outFiles": []
+    },
+    {
+      "name": "Agency: extension nad tímhle repem (dogfooding)",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/packages/extension",
+        "--disable-extensions",
+        "${workspaceFolder}"
       ],
       "outFiles": []
     }

@@ -1,0 +1,6 @@
+# Do VSIXu patří jen to, co extension za běhu potřebuje.
+test/**
+.vscode/**
+**/*.map
+.gitignore
+.vscodeignore

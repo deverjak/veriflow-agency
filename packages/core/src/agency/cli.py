@@ -655,6 +655,7 @@ def cmd_findings(args) -> int:
     rows = []
     for run in selected:
         dec = runs.decisions(run)
+        hist = runs.history(run)
         rec = run.record()
         for f in run.findings():
             d = dec.get(f.get("id"))
@@ -675,6 +676,11 @@ def cmd_findings(args) -> int:
                 row["anchor"] = a
                 row["evidence"] = f.get("evidence") or []
                 row["target"] = rec.get("target") or {}
+                row["history"] = hist.get(f.get("id"), [])
+                row["state"] = f.get("state")
+                row["duplicateOf"] = f.get("duplicateOf")
+                row["score"] = f.get("score")
+                row["pack"] = f.get("pack")
                 if a.get("file"):
                     row["drift"] = anchor.drift(project.root, a)
                     r = anchor.resolve(project.root, a)
@@ -701,15 +707,16 @@ def cmd_findings(args) -> int:
     return _emit(args, rows, human)
 
 
+def _run_with_finding(project: config.Project, finding_id: str) -> runs.Run:
+    for r in runs.load_runs(project):
+        if any(f.get("id") == finding_id for f in r.findings()):
+            return r
+    raise SystemExit(f"Nález „{finding_id}“ jsem v žádném běhu nenašel.")
+
+
 def cmd_triage(args) -> int:
     project = _project(args)
-    run = None
-    for r in runs.load_runs(project):
-        if any(f.get("id") == args.finding for f in r.findings()):
-            run = r
-            break
-    if run is None:
-        raise SystemExit(f"Nález „{args.finding}“ jsem v žádném běhu nenašel.")
+    run = _run_with_finding(project, args.finding)
 
     state = {"accept": "accepted", "reject": "rejected", "defer": "deferred"}[args.action]
     ev = runs.append_decision(run, args.finding, state, args.reason, args.note, args.by)
@@ -718,6 +725,18 @@ def cmd_triage(args) -> int:
         print(f"  {args.finding} → {ev['state']}"
               + (f" · {ev['reason']}" if ev["reason"] else "")
               + (f" · {ev['note']}" if ev["note"] else ""))
+
+    return _emit(args, ev, human)
+
+
+def cmd_note(args) -> int:
+    """Poznámka k nálezu. Vlastní příkaz, protože poznámka není rozhodnutí."""
+    project = _project(args)
+    run = _run_with_finding(project, args.finding)
+    ev = runs.append_note(run, args.finding, args.text, args.by)
+
+    def human():
+        print(f"  {args.finding}: {ev['text']}")
 
     return _emit(args, ev, human)
 
@@ -852,6 +871,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--note")
     s.add_argument("--by", default="cli")
     s.set_defaults(fn=cmd_triage)
+
+    s = sub.add_parser("note", parents=[common], help="poznámka k nálezu — volný text, ne rozhodnutí")
+    s.add_argument("finding")
+    s.add_argument("text")
+    s.add_argument("--by", default="cli")
+    s.set_defaults(fn=cmd_note)
 
     s = sub.add_parser("status", parents=[common], help="přehled běhů projektu")
     s.add_argument("--limit", type=int, default=10)
