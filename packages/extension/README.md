@@ -20,6 +20,15 @@ v tomhle pořadí:
 Detail nálezu se otevírá **jako tab v editoru**, ne v panelu — tvrzení,
 evidence, kotva, historie a tlačítka rozhodnutí se do 300 px nevejdou.
 
+U specialisty, který zadání bere, je v **Specialistech** uzel **Brief**: trvalé
+zadání projektu a uložené scénáře. Klik ho změní — a protože bydlí v konfiguraci
+projektu, platí pak i pro běh z terminálu a pro agenta.
+
+Uzel **Browser** otevře nastavení prohlížeče: jestli sezení jede přes Playwright,
+kam se ukládají reprodukční specy a co se smí založit v projektu, když Playwright
+zatím nemá. Je to jediné místo v Agency, kde se nastavení mění formulářem — a i to
+se ukládá přes `agency config`, do konfigurace projektu.
+
 Nálezy jsou navíc **inline komentáře u řádku kódu** (panel *Comments*). To je
 jediná věc, kterou desktopová aplikace fyzicky neumí, a hlavní důvod, proč UI
 Agency žije tady.
@@ -29,6 +38,10 @@ Agency žije tady.
 1. **Zrecenzovat pull request…** — vybereš PR (otevřený i mergnutý; u mergnutého
    se udělá retrospektivní audit). CLI připraví worktree, graf a evidenci a
    spustí agenta ve **viditelném terminálu**.
+   Nebo **Spustit QA sezení…** — místo výběru PR se zeptá na zadání: uložený
+   scénář, nebo nový text. Na co se pack ptá, říká jeho manifest, ne jméno
+   packu; kdyby extension větvila podle jména, byl by každý další specialista
+   zásahem do klienta.
 2. Agent dopíše `findings.json` a skončí.
 3. **Zpracovat výsledek běhu** — brána ověří kontrakt, existenci souborů na
    analyzovaném commitu a duplicitu proti starším nálezům.
@@ -52,10 +65,14 @@ rozbít buď měření, nebo použitelnost.
 | Klíč | K čemu |
 |---|---|
 | `agency.cliPath` | Cesta k `agency`, když není v PATH. |
-| `agency.pack` | Kterého specialistu spouští recenze. |
+| `agency.pack` | Kterého specialistu spouští tlačítko recenze. Packy, které pracují nad běžícím projektem, spouští **Spustit QA sezení…** |
 | `agency.model`, `agency.provider` | Přebijí konfiguraci packu pro tenhle projekt. |
 | `agency.commentThreads` | Vypnout komentáře u řádků. |
 | `agency.autoRefresh` | Přenačíst, když `.agency/` změní agent nebo terminál. |
+
+Nastavení **specialisty** (zadání, prohlížeč, model, práh skóre) tady není
+schválně: patří projektu, ne editoru. Mění se v panelu Specialisté nebo příkazy
+`agency brief` a `agency config` — a platí pak pro všechny tři klienty stejně.
 
 ## Instalace
 

@@ -56,9 +56,10 @@
           "enum": [
             "pull-request",
             "merged-pull-request",
-            "commit-range"
+            "commit-range",
+            "workspace"
           ],
-          "description": "merged-pull-request je retrospektivní audit — bez něj nemá pack co dělat na projektu s jediným mergnutým PR."
+          "description": "merged-pull-request je retrospektivní audit — bez něj nemá pack co dělat na projektu s jediným mergnutým PR. workspace je běh bez pull requestu: projekt tak, jak je právě teď, včetně rozdělané práce — na tom stojí QA, které zkouší běžící aplikaci."
         },
         "pr": {
           "type": [
@@ -105,6 +106,17 @@
           "type": "integer",
           "minimum": 0,
           "description": "Lockfily, generované soubory, snapshoty — šum pro graf i pro dimenze."
+        },
+        "ref": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Větev cíle u workspace běhu. U PR běhu se neplní."
+        },
+        "dirty": {
+          "type": "boolean",
+          "description": "Byla v pracovní kopii při startu nezacommitovaná změna? Nález z takového běhu může ukazovat na kód, který nikde jinde neexistuje."
         }
       }
     },
@@ -183,6 +195,24 @@
         "untestedFunctions": {
           "type": [
             "integer",
+            "null"
+          ]
+        },
+        "changedFiles": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "affectedFlows": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "updateError": {
+          "type": [
+            "string",
             "null"
           ]
         }
@@ -316,6 +346,61 @@
         "bin": {
           "type": "string"
         }
+      }
+    },
+    "brief": {
+      "type": "object",
+      "description": "Zadání běhu. Dvě vrstvy, protože každá platí jinak dlouho: standing je konfigurace projektu a platí pořád, focus je tenhle jeden běh. Zapisuje se do run recordu proto, že „které zadání vyrábí lepší nálezy“ je otázka, kterou má nástroj umět zodpovědět čísly.",
+      "additionalProperties": false,
+      "properties": {
+        "standing": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "focus": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scenario": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "prompt | scenario:<name> | scenario:<name>+prompt | config"
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "description": "Deterministický signál nasbíraný před během u packu, který nejede nad grafem — kolik souborů se změnilo, kolik commitů přibylo, kolik nálezů projekt už zná.",
+      "additionalProperties": {
+        "type": [
+          "integer",
+          "number",
+          "string",
+          "null"
+        ]
+      }
+    },
+    "gatedBy": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Kolik nálezů zahodila brána a proč — schema, phantom-file, phantom-line, below-score. Píše to ingest; bez rozpadu po důvodech se nedá poznat, čím pack nejčastěji plýtvá.",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
       }
     }
   }

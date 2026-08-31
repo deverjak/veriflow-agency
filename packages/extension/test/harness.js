@@ -130,17 +130,17 @@ check('markdown escapuje HTML ze vstupu', () => {
 check('detail nálezu vykreslí tvrzení, evidenci i kotvu', () => {
   const html = panel.findingHtml(FINDING);
   assert.ok(html.includes('Návrh adresy přežije'), 'chybí titulek');
-  assert.ok(html.includes('Čím to dokládá'), 'chybí sekce evidence');
+  assert.ok(html.includes('What backs it up'), 'chybí sekce evidence');
   assert.ok(html.includes('early returny'), 'chybí text evidence');
   assert.ok(html.includes('InstructorVenueLocationFields'), 'chybí symbol z kotvy');
   assert.ok(html.includes('185') && html.includes('170'), 'chybí posun kotvy');
-  assert.ok(html.includes('Porovnat s dneškem'),
+  assert.ok(html.includes('Compare with today'),
     'u dotčeného nálezu chybí diff — přítomnost toho tlačítka JE signál driftu');
 });
 
 check('u nedotčeného nálezu se diff nenabízí', () => {
   const html = panel.findingHtml({ ...FINDING, drift: 'untouched' });
-  assert.ok(!html.includes('Porovnat s dneškem'),
+  assert.ok(!html.includes('Compare with today'),
     'diff proti pracovní kopii by ukázal tentýž obsah dvakrát');
 });
 
@@ -175,7 +175,7 @@ check('strom nálezů rozdělí frontu, rozhodnuté a duplicity', () => {
   });
   const roots = new views.FindingsTree().roots();
   const labels = roots.map((r) => r.item.label);
-  assert.deepStrictEqual(labels, ['K rozhodnutí', 'Rozhodnuté', 'Duplicity']);
+  assert.deepStrictEqual(labels, ['To decide', 'Decided', 'Duplicates']);
   assert.strictEqual(roots[0].children.length, 1);
 });
 
@@ -197,13 +197,13 @@ check('přehled ukáže frontu i precision', () => {
     probe: { ok: true }, cwd: 'C:/projekt', loadedAt: new Date(),
     project: { slug: 'org/repo' }, doctor: [{ name: 'gh', ok: true, detail: '' }],
     packs: [{ name: 'review-graph', installed: 'review-graph@0.1.0' }],
-    runs: [{ id: 'R', target: 467, findings: 3, status: 'ok', startedAt: new Date().toISOString() }],
+    runs: [{ id: 'R', target: 467, targetLabel: 'PR #467', findings: 3, status: 'ok', startedAt: new Date().toISOString() }],
     findings: [FINDING],
     metrics: { triage: { precision: 0.8, accepted: 4, rejected: 1 } },
   });
   const labels = new views.OverviewTree().roots().map((r) => r.item.label);
-  for (const want of ['Projekt', 'Předpoklady', 'Specialisté', 'Poslední běh',
-    'Fronta k rozhodnutí', 'Precision']) {
+  for (const want of ['Project', 'Prerequisites', 'Specialists', 'Last run',
+    'Decision queue', 'Precision']) {
     assert.ok(labels.includes(want), `v přehledu chybí „${want}"`);
   }
 });
@@ -226,8 +226,140 @@ check('doctor z CLI chodí jako {checks:[…]}, strom čeká pole', () => {
     packs: [], runs: [], findings: [], metrics: null,
   });
   const rows = new views.OverviewTree().roots();
-  const req = rows.find((r) => r.item.label === 'Předpoklady');
-  assert.strictEqual(req.item.description, '1 problém');
+  const req = rows.find((r) => r.item.label === 'Prerequisites');
+  assert.strictEqual(req.item.description, '1 problem');
+});
+
+const QA_PACK = {
+  name: 'qa',
+  title: 'QA engineer',
+  version: '0.1.0',
+  description: 'Explores the running application.',
+  installed: 'qa@0.1.0',
+  run: {
+    target: 'workspace',
+    worktree: false,
+    graph: false,
+    prompt: { accepts: true, required: true, label: 'What should be tested?', placeholder: '' },
+  },
+  agent: { provider: 'claude', model: 'sonnet' },
+  brief: {
+    standing: 'Rezervační aplikace pro lekce.',
+    scenarios: [{ name: 'smoke', text: 'Přihlášení, dashboard, jedna rezervace.' }],
+  },
+  dimensions: [{ id: 'happy-path', title: 'The main flows do what they promise' }],
+};
+
+check('spouštěč pozná pack podle politiky, ne podle jména', () => {
+  // Kdyby extension větvila podle jména packu, byl by každý další specialista
+  // zásahem do klienta. Rozhoduje `run.target` z manifestu.
+  const review = require(path.join(SRC, 'review.js'));
+  Object.assign(state.snapshot, {
+    probe: { ok: true },
+    packs: [
+      QA_PACK,
+      { name: 'review-graph', installed: 'review-graph@0.1.0', run: { target: 'pull-request' } },
+      { name: 'qa-nenainstalovany', installed: null, run: { target: 'workspace' } },
+    ],
+  });
+  const found = review.workspacePacks().map((p) => p.name);
+  assert.deepStrictEqual(found, ['qa'],
+    'nabízet se má jen nainstalovaný pack, který pracuje nad projektem');
+});
+
+check('specialista nad projektem ukáže zadání i scénáře', () => {
+  Object.assign(state.snapshot, { probe: { ok: true }, packs: [QA_PACK] });
+  const pack = new views.ToolsTree().roots()[0];
+  const labels = pack.children.map((c) => c.item.label);
+  assert.ok(labels.includes('Brief'), 'chybí uzel se zadáním');
+  assert.ok(labels.includes('What it works on'), 'není vidět, nad čím pack pracuje');
+
+  const kde = pack.children.find((c) => c.item.label === 'What it works on');
+  assert.strictEqual(kde.item.description, 'the project as it is');
+  const brief = pack.children.find((c) => c.item.label === 'Brief');
+  assert.ok(String(brief.item.description).startsWith('Rezervační'), 'chybí trvalé zadání');
+  assert.strictEqual(brief.children[0].item.label, 'smoke', 'chybí uložený scénář');
+  assert.strictEqual(brief.item.command.command, 'agency.pack.brief');
+});
+
+check('recenzent bez zadání uzel Brief nemá prázdný, ale má ho', () => {
+  Object.assign(state.snapshot, {
+    probe: { ok: true },
+    packs: [{
+      name: 'review-graph', title: 'Reviewer', version: '0.1.0', installed: 'review-graph@0.1.0',
+      run: { target: 'pull-request', prompt: { accepts: true, required: false } },
+      brief: { standing: null, scenarios: [] },
+    }],
+  });
+  const pack = new views.ToolsTree().roots()[0];
+  const brief = pack.children.find((c) => c.item.label === 'Brief');
+  assert.strictEqual(brief.item.description, 'not set');
+  const kde = pack.children.find((c) => c.item.label === 'What it works on');
+  assert.strictEqual(kde.item.description, 'a pull request');
+});
+
+check('běh bez pull requestu se nejmenuje holým ULID', () => {
+  Object.assign(state.snapshot, {
+    probe: { ok: true }, findings: [],
+    runs: [{
+      id: '01M1CGN9HAMBKK63SASPP2EYWJ', pack: 'qa@0.1.0', status: 'ok',
+      target: null, targetLabel: 'main', kind: 'workspace',
+      brief: 'vyzkoušej rušení rezervace', findings: 1, undecided: 1,
+      startedAt: new Date().toISOString(),
+    }],
+  });
+  const run = new views.RunsTree().roots()[0];
+  assert.strictEqual(run.item.label, 'main');
+  assert.ok(run.item.tooltip.value.includes('over the project as it was'),
+    'v tooltipu chybí, že běh jel nad projektem');
+  assert.ok(run.item.tooltip.value.includes('rušení rezervace'),
+    'v tooltipu chybí zadání, se kterým běh vznikl');
+});
+
+check('nastavení prohlížeče je formulář, ne prosba o editaci JSONu', () => {
+  const html = panel.playwrightHtml({
+    pack: 'qa',
+    config: {
+      app: { baseUrl: 'http://localhost:3000', startPolicy: 'manual' },
+      playwright: {
+        enabled: true, configFile: 'playwright.config.ts', projectTestDir: 'e2e',
+        specTarget: 'run', scaffold: 'run-dir', browsers: ['chromium', 'webkit'],
+        artifacts: { trace: 'retain-on-failure', screenshot: 'only-on-failure', video: 'off' },
+      },
+    },
+    detected: { playwright: { present: true, configFile: 'playwright.config.ts', testDir: 'e2e', specs: 4 } },
+  });
+  assert.ok(html.includes('data-key="playwright.enabled"'), 'chybí přepínač prohlížeče');
+  assert.ok(/data-key="playwright.enabled"[^>]*checked/.test(html), 'zapnutý stav se nepropsal');
+  assert.ok(html.includes('chromium, webkit'), 'seznam prohlížečů se nevykreslil');
+  assert.ok(html.includes('http://localhost:3000'), 'chybí adresa aplikace');
+  assert.ok(html.includes('The project already has Playwright'),
+    'nalezený Playwright se má oznámit — sezení ho má použít, ne postavit vedle');
+  assert.ok(html.includes('data-key="playwright.artifacts.trace"'), 'chybí volba trace');
+});
+
+check('bez Playwrightu panel řekne, co se stane místo toho', () => {
+  const html = panel.playwrightHtml({
+    pack: 'qa', config: { playwright: { enabled: false, scaffold: 'run-dir' } },
+    detected: { playwright: { present: false } },
+  });
+  assert.ok(html.includes('The project has no Playwright'));
+  assert.ok(!/data-key="playwright.enabled"[^>]*checked/.test(html));
+});
+
+check('specialista s prohlížečem má v pohledu uzel Browser', () => {
+  Object.assign(state.snapshot, {
+    probe: { ok: true },
+    packs: [{
+      ...QA_PACK,
+      playwright: { enabled: true, configFile: 'playwright.config.ts', specTarget: 'run', scaffold: 'run-dir' },
+    }],
+  });
+  const pack = new views.ToolsTree().roots()[0];
+  const browser = pack.children.find((c) => c.item.label === 'Browser');
+  assert.ok(browser, 'chybí uzel Browser');
+  assert.strictEqual(browser.item.command.command, 'agency.qa.playwright');
+  assert.ok(String(browser.item.description).includes('Playwright'));
 });
 
 console.log(failed ? `\n${failed} selhalo\n` : '\nvšechno prošlo\n');

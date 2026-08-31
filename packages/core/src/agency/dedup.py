@@ -145,7 +145,7 @@ def is_duplicate(new: dict, old: dict) -> tuple[bool, str]:
     shared = a & b
     score = overlap(a, b)
     if score >= SIMILARITY and len(shared) >= MIN_SHARED:
-        return True, f"podobnost {score:.2f} ({len(shared)} slov)"
+        return True, f"similarity {score:.2f} ({len(shared)} words)"
     return False, ""
 
 

@@ -57,13 +57,13 @@ class CommitContentProvider {
     // v klonu chybět MŮŽE. Záchranná síť je `anchor.body` v nálezu; tenhle
     // text je poslední instance, kdy ani ta není.
     return [
-      `// Commit ${String(commit).slice(0, 8)} v tomhle klonu není.`,
+      `// Commit ${String(commit).slice(0, 8)} is not in this clone.`,
       `//`,
-      `// Zkus:  git fetch origin ${commit}`,
-      `// GitHub drží refs/pull/<n>/head, takže to obvykle projde i po smazání větve.`,
+      `// Try:  git fetch origin ${commit}`,
+      `// GitHub keeps refs/pull/<n>/head, so this usually works even after the branch is gone.`,
       `//`,
-      `// Tělo funkce v den analýzy je i tak uložené v nálezu (anchor.body) —`,
-      `// otevři detail nálezu v panelu Agency.`,
+      `// The body of the function as of the analysis is stored in the finding (anchor.body) —`,
+      `// open the finding detail in the Agency panel.`,
     ].join('\n');
   }
 }

@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import proc
-from .config import Project
+from .config import AGENCY_DIR, Project
 from .util import out, posix, read_json, ulid, write_json
 
 DECISION_STATES = ("accepted", "rejected", "deferred")
@@ -107,21 +107,21 @@ def resolve_target(project: Project, pr: int | None, latest_merged: bool) -> dic
     if latest_merged:
         merged = proc.pr_list(project.root, state="merged", limit=1)
         if not merged:
-            raise SystemExit("V tomhle repu není žádný mergnutý PR.")
+            raise SystemExit("There is no merged pull request in this repo.")
         pr = merged[0]["number"]
 
     data = proc.pr_view(project.root, pr)
     if data is None:
         raise SystemExit(
-            f"PR {pr if pr else '(aktuální větve)'} se nepodařilo načíst. "
-            "Ověř `gh auth status` a že PR existuje."
+            f"PR {pr if pr else '(of the current branch)'} could not be loaded. "
+            "Check `gh auth status` and that the PR exists."
         )
 
     merged_at = data.get("mergedAt")
     kind = "merged-pull-request" if merged_at else "pull-request"
     if not merged_at and data.get("state") != "OPEN":
         raise SystemExit(
-            f"PR #{data['number']} je ve stavu {data['state']} a není mergnutý — nemám co recenzovat."
+            f"PR #{data['number']} is in state {data['state']} and is not merged — nothing to review."
         )
     return {
         "kind": kind,
@@ -134,6 +134,108 @@ def resolve_target(project: Project, pr: int | None, latest_merged: bool) -> dic
         "_files": [f["path"] for f in (data.get("files") or [])],
         "_isDraft": data.get("isDraft", False),
         "_comments": data.get("comments") or [],
+    }
+
+
+def resolve_workspace_target(project: Project, since: str | None = None) -> dict:
+    """Cíl bez pull requestu — projekt tak, jak je právě teď.
+
+    QA nezkoumá diff, zkoumá běžící aplikaci. Cíl je proto pracovní kopie:
+    HEAD kvůli kotvám (nález musí ukázat na řádek, který na tom commitu
+    existuje) a seznam změn proti základní větvi jako vodítko, kde hledat
+    nejdřív — ne jako hranice, za kterou se nesmí. Prázdný seznam změn je
+    u QA normální stav, ne důvod běh odmítnout.
+    """
+    head = proc.head(project.root)
+    if not head:
+        raise SystemExit(
+            "This repository has no commit yet — a finding would have nothing to anchor to."
+        )
+
+    branch = proc.git("rev-parse", "--abbrev-ref", "HEAD", cwd=project.root).stdout.strip() or "HEAD"
+
+    base = None
+    candidates = [since] if since else (
+        [f"origin/{project.default_branch}", project.default_branch]
+        if project.default_branch else [])
+    for ref in [c for c in candidates if c]:
+        r = proc.git("merge-base", "HEAD", ref, cwd=project.root)
+        if r.ok and r.stdout.strip():
+            base = r.stdout.strip()
+            break
+    if since and base is None:
+        raise SystemExit(f"Ref “{since}” could not be resolved in this repository.")
+
+    def keep(path: str) -> bool:
+        # Vlastní záznamy z výčtu ven. `.agency/` se mění každým během, takže
+        # by se každý běh objevil sám v sobě jako změna projektu — a stejná
+        # chyba jako u materialize_pack: artefakt nástroje vypadá jako práce.
+        return bool(path) and not path.endswith("/") and not path.startswith(AGENCY_DIR + "/")
+
+    files: list[str] = []
+    if base and base != head:
+        r = proc.git("diff", "--name-only", base, cwd=project.root)
+        if r.ok:
+            files = [line.strip() for line in r.stdout.splitlines() if keep(line.strip())]
+
+    # Rozdělaná práce patří dovnitř: aplikace, kterou QA zkouší, běží nad
+    # pracovní kopií, ne nad posledním commitem. `-uall` kvůli tomu, aby
+    # nesledovaný adresář byl seznam souborů, ne jedna položka „foo/“.
+    dirty: list[str] = []
+    for line in proc.git("status", "--porcelain", "-uall", cwd=project.root).stdout.splitlines():
+        path = line[3:].strip()
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1]
+        path = path.strip('"')
+        if keep(path):
+            dirty.append(path)
+
+    return {
+        "kind": "workspace",
+        "ref": branch,
+        "title": f"{branch} · {head[:8]}",
+        "url": None,
+        "headRefOid": head,
+        "baseRefOid": base,
+        "dirty": bool(dirty),
+        "_files": sorted(set(files) | set(dirty)),
+        "_isDraft": False,
+        "_comments": [],
+    }
+
+
+def resolve_brief(cfg: dict, prompt: str | None = None, scenario: str | None = None) -> dict:
+    """Zadání běhu: co se má tentokrát dělat.
+
+    Dvě vrstvy, protože každá platí jinak dlouho. `standing` je to, co o
+    projektu platí pořád — kde aplikace běží, co je na ní důležité — a bydlí
+    v konfiguraci. `focus` je tenhle jeden běh; přijde z `--prompt`, nebo
+    z pojmenovaného scénáře. Slít je do jednoho pole by znamenalo, že zadání
+    jednoho běhu přepíše to, co pro projekt platí pořád.
+    """
+    b = cfg.get("brief") or {}
+    scenarios = b.get("scenarios") or {}
+    focus: str | None = None
+    source: list[str] = []
+
+    if scenario:
+        if scenario not in scenarios:
+            known = ", ".join(sorted(scenarios)) or "none defined in the configuration"
+            raise SystemExit(f"Unknown scenario “{scenario}”. Known: {known}")
+        focus = str(scenarios[scenario] or "").strip() or None
+        source.append(f"scenario:{scenario}")
+
+    if prompt and prompt.strip():
+        # Volný text scénář nepřepisuje, zpřesňuje ho: „pusť smoke, ale na mobilu“.
+        focus = f"{focus}\n\n{prompt.strip()}" if focus else prompt.strip()
+        source.append("prompt")
+
+    standing = (b.get("default") or "").strip() or None
+    return {
+        "standing": standing,
+        "focus": focus,
+        "scenario": scenario,
+        "source": "+".join(source) or ("config" if standing else None),
     }
 
 
@@ -202,7 +304,7 @@ def make_worktree(project: Project, cfg: dict, target: dict) -> Path:
     ref = "FETCH_HEAD" if r.ok else target["headRefOid"]
     r = proc.git("worktree", "add", "--detach", str(wt), ref, cwd=project.root)
     if not r.ok:
-        raise SystemExit(f"Worktree se nepodařilo vytvořit:\n{r.stderr.strip()}")
+        raise SystemExit(f"The worktree could not be created:\n{r.stderr.strip()}")
     return wt
 
 
@@ -241,7 +343,7 @@ def materialize_pack(project: Project, pack, wt: Path) -> list[str]:
             add = [c for c in copied if c not in have]
             if add:
                 with open(excl, "a", encoding="utf-8", newline="\n") as f:
-                    f.write("\n# agency: soubory packu, nejsou součástí PR\n")
+                    f.write("\n# agency: pack files, not part of the PR\n")
                     f.write("\n".join("/" + c for c in add) + "\n")
 
     return copied
@@ -315,6 +417,80 @@ def collect_evidence(wt: Path, run: Run, target: dict, files: list[str]) -> dict
     return stats
 
 
+def collect_workspace_evidence(project: Project, run: Run, target: dict,
+                               files: list[str]) -> dict:
+    """Signál pro běh bez pull requestu: co se v projektu poslední dobou dělo.
+
+    A hlavně `known-findings.json` — co už tenhle projekt ví. Dedup po ingestu
+    je pojistka, ne náhrada za to, aby pack netvrdil podruhé totéž; sezení,
+    které začne bez znalosti minulých nálezů, je odsouzené je zopakovat.
+    """
+    ev = run.dir / "evidence"
+    ev.mkdir(parents=True, exist_ok=True)
+    stats: dict = {"changedFiles": len(files)}
+
+    base = target.get("baseRefOid")
+    if base and base != target.get("headRefOid"):
+        r = proc.git("diff", "--stat", base, cwd=project.root)
+        (ev / "changes.txt").write_text(r.stdout or r.stderr, encoding="utf-8")
+        log = proc.git("log", "--oneline", "-n", "30", f"{base}..HEAD", cwd=project.root)
+        stats["commitsSinceBase"] = len([x for x in log.stdout.splitlines() if x.strip()])
+    else:
+        log = proc.git("log", "--oneline", "-n", "30", cwd=project.root)
+    (ev / "recent-commits.txt").write_text(log.stdout or log.stderr, encoding="utf-8")
+
+    known = []
+    for other in load_runs(project):
+        if other.id == run.id:
+            continue
+        dec = decisions(other)
+        for f in other.findings():
+            d = dec.get(f.get("id"))
+            a = f.get("anchor") or {}
+            known.append({
+                "id": f.get("id"), "title": f.get("title"), "dimension": f.get("dimension"),
+                "severity": f.get("severity"), "file": a.get("file"), "line": a.get("line"),
+                "decision": d["state"] if d else None,
+                "reason": d.get("reason") if d else None,
+                "runId": other.id,
+            })
+    write_json(ev / "known-findings.json", known[:300])
+    stats["knownFindings"] = len(known)
+
+    # Reprodukční testy ze starších běhů. Tohle je ta věc, kvůli které se
+    # reprodukce píše jako spustitelný soubor a ne jako odstavec: „je to už
+    # opravené?" se pak dá zodpovědět spuštěním, ne dalším sezením.
+    specs = []
+    for other in load_runs(project):
+        if other.id == run.id or not (other.dir / "specs").is_dir():
+            continue
+        for f in sorted((other.dir / "specs").rglob("*")):
+            if f.is_file():
+                specs.append({"runId": other.id, "path": posix(f.relative_to(project.root))})
+    if specs:
+        write_json(ev / "known-specs.json", specs[:200])
+        stats["knownSpecs"] = len(specs)
+    return stats
+
+
+def method_hint(pack, project: Project, carried: list[str], in_worktree: bool) -> str:
+    """Jak se agent dostane k metodě packu.
+
+    Ve worktree je metoda jen díky `materialize_pack`, v projektu je tam, kam ji
+    položila instalace. Když neplatí ani jedno, odkaž na ni cestou — jinak běh
+    skončí na „Unknown skill“ a uživatel nemá kam sáhnout.
+    """
+    installs = [str(i["to"]) for i in pack.manifest.get("installs", [])
+                if str(i.get("to", "")).endswith("SKILL.md")]
+    present = (any(str(c).endswith("SKILL.md") for c in carried) if in_worktree
+               else any((project.root / to).is_file() for to in installs))
+    if pack.skill_name and present:
+        return f"Use the {pack.skill_name} skill."
+    if installs:
+        return f"Read the method in {posix(project.root)}/{installs[0]}."
+    return "The pack installs no method into the project — work from the run context."
+
+
 def start(project: Project, pack_ref: str, cfg: dict, target: dict,
           trigger: str = "manual") -> Run:
     run_id = ulid()
@@ -336,19 +512,30 @@ def start(project: Project, pack_ref: str, cfg: dict, target: dict,
 
 
 def write_context(run: Run, cfg: dict, target: dict, wt: Path,
-                  files: list[str], skipped: int) -> None:
+                  files: list[str], skipped: int,
+                  brief: dict | None = None, worktree_owned: bool = True) -> None:
     review = dict(cfg.get("review") or {})
     review.pop("skipPatterns", None)
+    # Celá konfigurace packu, aby jádro nemuselo znát klíče jednotlivých packů.
+    # `review` a `sinks` zůstávají i nahoře — na tom stojí kontrakt, který už
+    # čte review-graph, a rozbít ho kvůli úspoře dvou klíčů se nevyplatí.
+    pack_config = {k: v for k, v in cfg.items() if k not in ("agent", "brief")}
     write_json(run.dir / "context.json", {
         "runId": run.id,
         "runDir": posix(run.dir),
         "project": {"root": posix(run.project.root), "slug": run.project.slug},
         "worktree": posix(wt),
+        # Kdo worktree vlastní. False = běh jede v pracovní kopii uživatele
+        # a nesmí do ní psát nic, co po sobě neuklidí.
+        "worktreeOwned": worktree_owned,
         "target": {k: v for k, v in target.items() if not k.startswith("_")},
         "files": files,
         "filesSkipped": skipped,
+        # Zadání běhu. `standing` platí pro projekt pořád, `focus` jen teď.
+        "brief": brief or {"standing": None, "focus": None, "scenario": None, "source": None},
         "review": review,
         "sinks": cfg.get("sinks") or {},
+        "config": pack_config,
         "schemas": {"finding": "finding.v1", "run": "run.v1"},
     })
 
@@ -364,14 +551,14 @@ def append_decision(run: Run, finding_id: str, state: str,
     kdyby to byl příkaz editoru, agent by triage neuměl.
     """
     if state not in DECISION_STATES:
-        raise SystemExit(f"Neznámý stav „{state}“. Povolené: {', '.join(DECISION_STATES)}")
+        raise SystemExit(f"Unknown state “{state}”. Allowed: {', '.join(DECISION_STATES)}")
     if state == "rejected" and not reason:
         raise SystemExit(
-            "Zamítnutí vyžaduje důvod (--reason). Povolené: " + ", ".join(REJECT_REASONS)
-            + "\nVolný text by dal stejnou práci a žádné číslo — precision se z něj nespočítá."
+            "A rejection needs a reason (--reason). Allowed: " + ", ".join(REJECT_REASONS)
+            + "\nFree text would cost the same effort and yield no number — precision cannot be computed from it."
         )
     if reason and reason not in REJECT_REASONS:
-        raise SystemExit(f"Neznámý důvod „{reason}“. Povolené: {', '.join(REJECT_REASONS)}")
+        raise SystemExit(f"Unknown reason “{reason}”. Allowed: {', '.join(REJECT_REASONS)}")
 
     ev = {"kind": "decision", "findingId": finding_id, "state": state,
           "reason": reason, "note": note, "by": by, "at": now()}
@@ -392,7 +579,7 @@ def append_note(run: Run, finding_id: str, text: str, by: str = "cli") -> dict:
     """
     text = (text or "").strip()
     if not text:
-        raise SystemExit("Prázdná poznámka. Napiš text, nebo nic nezapisuj.")
+        raise SystemExit("Empty note. Write something, or write nothing at all.")
     ev = {"kind": "note", "findingId": finding_id, "text": text, "by": by, "at": now()}
     with open(run.decisions_path, "a", encoding="utf-8", newline="\n") as f:
         f.write(json.dumps(ev, ensure_ascii=False) + "\n")

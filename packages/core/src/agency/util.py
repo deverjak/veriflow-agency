@@ -32,14 +32,20 @@ def ulid() -> str:
 
 # ---------------------------------------------------------------- JSON
 
-def read_json(path: Path, default: Any = None) -> Any:
+# Rozliší „default se nepředal" od „default je None". Bez toho se
+# `read_json(p, default=None)` chová jako bez defaultu a vyhodí výjimku —
+# a `agency init` spadne na projektu, který prostě nemá package.json.
+_NO_DEFAULT = object()
+
+
+def read_json(path: Path, default: Any = _NO_DEFAULT) -> Any:
     try:
         with open(path, encoding="utf-8") as f:
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
-        if default is not None:
-            return default
-        raise
+        if default is _NO_DEFAULT:
+            raise
+        return default
 
 
 def write_json(path: Path, data: Any) -> None:

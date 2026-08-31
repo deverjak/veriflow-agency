@@ -58,12 +58,12 @@ def resolve(repo: str | Path, anchor: dict) -> Resolution:
     rel = anchor["file"]
     abs_path = repo / rel
     if not abs_path.is_file():
-        return Resolution(None, "none", "soubor v pracovní kopii neexistuje")
+        return Resolution(None, "none", "the file does not exist in the working tree")
 
     try:
         lines = abs_path.read_text(encoding="utf-8", errors="replace").split("\n")
     except OSError as e:
-        return Resolution(None, "none", f"soubor nejde přečíst: {e}")
+        return Resolution(None, "none", f"the file cannot be read: {e}")
     count = len(lines)
     line = anchor.get("line") or 1
 
@@ -71,8 +71,8 @@ def resolve(repo: str | Path, anchor: dict) -> Resolution:
     commit = anchor.get("commit")
     if commit and proc.file_unchanged(repo, commit, rel):
         if line <= count:
-            return Resolution(line, "exact", "soubor beze změny")
-        return Resolution(None, "none", f"řádek {line} je za koncem souboru ({count} řádků)")
+            return Resolution(line, "exact", "file unchanged")
+        return Resolution(None, "none", f"line {line} is past the end of the file ({count} lines)")
 
     # 2. text bloku → najde posunutý kód
     d = distinctive_line(anchor)
@@ -82,12 +82,12 @@ def resolve(repo: str | Path, anchor: dict) -> Resolution:
         if len(hits) == 1:
             resolved = max(1, hits[0] - offset)
             if resolved == line:
-                return Resolution(resolved, "snippet (beze změny)")
-            return Resolution(resolved, "snippet", f"posun {line} → {resolved}")
+                return Resolution(resolved, "snippet (unchanged)")
+            return Resolution(resolved, "snippet", f"shifted {line} → {resolved}")
         if len(hits) > 1:
             best = min(hits, key=lambda h: abs(max(1, h - offset) - line))
-            return Resolution(max(1, best - offset), "snippet (nejednoznačné)",
-                              f"{len(hits)} shod, vybrána nejbližší")
+            return Resolution(max(1, best - offset), "snippet (ambiguous)",
+                              f"{len(hits)} matches, the closest one was picked")
 
     # 3. symbol z grafu — přežije refaktor tam, kde text řádku ne
     sym = anchor.get("symbol") or {}
@@ -96,12 +96,12 @@ def resolve(repo: str | Path, anchor: dict) -> Resolution:
         if r.ok:
             for m in re.finditer(rf"{re.escape(rel)}[:\s]+(\d+)", r.stdout):
                 return Resolution(int(m.group(1)), "symbol",
-                                  f"přes {sym['name']} z grafu")
+                                  f"via {sym['name']} from the graph")
 
     # 4. selhání — degraduj, neztrať
     if line > count:
-        return Resolution(None, "none", f"řádek {line} je za koncem souboru ({count} řádků)")
-    return Resolution(None, "none", "text bloku se v souboru nenašel ani přes symbol")
+        return Resolution(None, "none", f"line {line} is past the end of the file ({count} lines)")
+    return Resolution(None, "none", "the block text was not found in the file, nor via the symbol")
 
 
 _HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? ", re.M)

@@ -28,10 +28,10 @@ from .util import bundled, read_json, write_json
 # Důvody vyřazení. Stejně jako u zamítnutí je to enum, ne volný text — jinak
 # se nedá spočítat, čím pack nejčastěji plýtvá.
 GATE_REASONS = {
-    "schema": "neodpovídá finding.v1",
-    "phantom-file": "soubor na analyzovaném commitu neexistuje",
-    "phantom-line": "řádek je za koncem souboru v den analýzy",
-    "below-score": "score pod prahem projektu",
+    "schema": "does not match finding.v1",
+    "phantom-file": "the file does not exist at the analysed commit",
+    "phantom-line": "the line is past the end of the file as of the analysis",
+    "below-score": "score below the project threshold",
 }
 
 
@@ -45,7 +45,7 @@ def _schema_errors(findings: list[dict]) -> dict[int, list[str]]:
         for i, f in enumerate(findings):
             missing = [k for k in required if k not in f]
             if missing:
-                errs[i] = [f"chybí {k}" for k in missing]
+                errs[i] = [f"missing {k}" for k in missing]
         return errs
 
     schema = read_json(bundled("schemas", "finding.v1.json"))
@@ -93,10 +93,10 @@ def gate(project: Project, run: Run, findings: list[dict], min_score: int | None
         a = f.get("anchor") or {}
         ok, lines = _exists_at_commit(project.root, a.get("commit") or "", a["file"])
         if not ok:
-            drop("phantom-file", f"{a['file']} na {(a.get('commit') or '')[:8]} není")
+            drop("phantom-file", f"{a['file']} is not at {(a.get('commit') or '')[:8]}")
             continue
         if lines is not None and a.get("line", 1) > lines:
-            drop("phantom-line", f"řádek {a['line']} > {lines} řádků souboru")
+            drop("phantom-line", f"line {a['line']} > {lines} lines in the file")
             continue
 
         score = f.get("score")

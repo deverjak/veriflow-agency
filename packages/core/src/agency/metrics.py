@@ -96,7 +96,7 @@ def collect(project: Project, runs: list[Run] | None = None) -> dict:
         wall += ((rec.get("cost") or {}).get("wallClockSeconds") or 0)
 
         model = ((rec.get("agent") or {}).get("model")
-                 or (rec.get("cost") or {}).get("model") or "výchozí")
+                 or (rec.get("cost") or {}).get("model") or "default")
         started = _parse(rec.get("startedAt"))
         run_undecided = 0
 

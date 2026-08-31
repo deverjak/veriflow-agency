@@ -31,6 +31,7 @@ Recenze pull requestu s **doloženými** nálezy. Strukturální signál, který
 | `review.rules` / `review.docMap` | odkazy do dokumentace projektu, nebo `null` |
 | `review.verifyCommand` | co dělá CI — **k zahazování nálezů, ne ke spouštění** |
 | `review.minScore` / `review.language` | práh a jazyk výstupu |
+| `brief.standing` / `brief.focus` | volitelné zadání od člověka — na co se u téhle recenze zaměřit. `focus` platí pro tenhle běh, `standing` pro projekt pořád. |
 
 Když `context.json` chybí, běžíš mimo `agency run`. Řekni to uživateli a nabídni `agency run review-graph --pr <n>` — deterministickou přípravu ručně nesimuluj, je to zdroj tichých chyb.
 
@@ -51,6 +52,8 @@ Pusť dimenze z `review.dimensions` jako **paralelní čerstvé agenty**. Nemaj�
 | `reuse` | Duplicitní read modely napříč vrstvami, nově mrtvý kód, zbytečná abstrakce | `evidence/dead-code.txt` |
 | `errors` | Spolknuté chyby, chybějící `await`, neidempotentní handlery | diff |
 | `repo-rules` | Pravidla z `review.rules` — **obsah je projektový, ne packový** | sekce z `review.rules` |
+
+Když `brief.focus` nebo `brief.standing` není `null`, **projdi zadanou oblast první a důkladněji.** Zadání mění pořadí a hloubku, ne pravidla: nález mimo zadání se nezahazuje a nález bez evidence neprojde bránou ani tehdy, když si ho zadání výslovně přeje.
 
 `repo-rules` se pouští **jen když `review.rules` není `null`.** Bez projektových pravidel běží čtyři dimenze z pěti a je to legitimní výstup, ne selhání — neuváděj to jako chybu.
 

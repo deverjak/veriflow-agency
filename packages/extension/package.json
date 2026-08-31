@@ -1,7 +1,7 @@
 {
   "name": "veriflow-agency",
   "displayName": "Agency",
-  "description": "Specialisté, které si najmeš do repozitáře. Recenze pull requestů s doloženými nálezy, triage přímo u kódu a měřitelná precision.",
+  "description": "Specialists you hire into your repository. Pull request reviews with evidence-backed findings, triage right next to the code, and measurable precision.",
   "version": "0.1.0",
   "publisher": "veriflow",
   "license": "UNLICENSED",
@@ -40,23 +40,23 @@
       "agency": [
         {
           "id": "agency.overview",
-          "name": "Přehled",
+          "name": "Overview",
           "icon": "$(dashboard)"
         },
         {
           "id": "agency.findings",
-          "name": "Nálezy",
+          "name": "Findings",
           "icon": "$(inbox)"
         },
         {
           "id": "agency.runs",
-          "name": "Běhy",
+          "name": "Runs",
           "icon": "$(history)",
           "visibility": "collapsed"
         },
         {
           "id": "agency.tools",
-          "name": "Specialisté",
+          "name": "Specialists",
           "icon": "$(person)",
           "visibility": "collapsed"
         }
@@ -66,37 +66,37 @@
       {
         "view": "agency.overview",
         "when": "!agency.ready && agency.reason == no-folder",
-        "contents": "Agency pracuje uvnitř projektu.\n\nOtevři složku s git repozitářem a panel se naplní sám.\n\n[Otevřít složku](command:vscode.openFolder)"
+        "contents": "Agency works inside a project.\n\nOpen a folder with a git repository and this panel fills itself in.\n\n[Open folder](command:vscode.openFolder)"
       },
       {
         "view": "agency.overview",
         "when": "!agency.ready && agency.reason == no-cli",
-        "contents": "Chybí jádro.\n\nExtension je jen klient — všechnu práci dělá příkaz `agency`, ten samý, který volá agent z terminálu.\n\nNainstaluj ho:\n\n```\nuv tool install --editable <veriflow-agency>/packages/core\n```\n\n[Nastavit cestu k agency](command:agency.openSettings)\n[Zkusit znovu](command:agency.refresh)"
+        "contents": "The core is missing.\n\nThe extension is only a client — all the work is done by the `agency` command, the same one an agent calls from the terminal.\n\nInstall it:\n\n```\nuv tool install --editable <veriflow-agency>/packages/core\n```\n\n[Set the path to agency](command:agency.openSettings)\n[Try again](command:agency.refresh)"
       },
       {
         "view": "agency.overview",
         "when": "!agency.ready && agency.reason == no-repo",
-        "contents": "Tady není git repozitář.\n\nNálezy se ukládají do `.agency/` uvnitř projektu, aby přežily přeinstalaci i nové naklonování — bez repozitáře nemá kam.\n\n[Zkusit znovu](command:agency.refresh)"
+        "contents": "There is no git repository here.\n\nFindings are stored in `.agency/` inside the project so they survive a reinstall and a fresh clone — without a repository there is nowhere to put them.\n\n[Try again](command:agency.refresh)"
       },
       {
         "view": "agency.overview",
         "when": "!agency.ready && agency.reason == error",
-        "contents": "Agency se nepodařilo spustit. Detail je v Output → Agency.\n\n[Ověřit předpoklady](command:agency.doctor)\n[Zkusit znovu](command:agency.refresh)"
+        "contents": "Agency failed to start. The details are in Output → Agency.\n\n[Check prerequisites](command:agency.doctor)\n[Try again](command:agency.refresh)"
       },
       {
         "view": "agency.findings",
         "when": "agency.ready && !agency.hasRuns",
-        "contents": "Zatím žádný běh.\n\nRecenzent projde pull request, zkříží změny se skutečnou strukturou kódu a napíše nálezy — každý s evidencí a s odkazem na řádek, který přežije i pozdější změny.\n\n[Zrecenzovat pull request](command:agency.review.pick)\n\nBěh se pouští ve viditelném terminálu, ne na pozadí: attended je vlastnost systému, ne úmysl."
+        "contents": "No run yet.\n\nTwo specialists, two ways of finding a problem.\n\nThe reviewer walks a pull request and cross-checks the changes against the real structure of the code.\n\n[Review a pull request](command:agency.review.pick)\n\nThe QA engineer explores the running application following a brief you write, reproduces every problem from a clean session and anchors it to the code that causes it.\n\n[Start a QA session](command:agency.qa.run)\n\nA run starts in a visible terminal, not in the background: attended is a property of the system, not an intention."
       },
       {
         "view": "agency.findings",
         "when": "agency.ready && agency.hasRuns && !agency.hasFindings",
-        "contents": "Běh proběhl, ale nálezy tu ještě nejsou.\n\nAgent zapisuje `findings.json` na konci práce. Pak je potřeba je protáhnout bránou — ta ověří kontrakt, existenci souborů a duplicitu.\n\n[Zpracovat výsledek běhu](command:agency.ingest)\n[Zrecenzovat další PR](command:agency.review.pick)"
+        "contents": "The run finished, but the findings are not here yet.\n\nThe agent writes `findings.json` when it is done. After that they have to be pulled through the gate — it checks the contract, that the files exist, and duplicates.\n\n[Process run output](command:agency.ingest)\n[Review another PR](command:agency.review.pick)"
       },
       {
         "view": "agency.tools",
         "when": "agency.ready",
-        "contents": "Specialista (pack) je metoda práce, ne obsah. Instalací dostane projekt jeho postup a konfiguraci; pravidla a dokumentace zůstávají projektu.\n\n[Najmout specialistu](command:agency.pack.add)"
+        "contents": "A specialist (pack) is a method of work, not content. Installing one gives the project its procedure and its configuration; rules and documentation stay with the project.\n\n[Hire a specialist](command:agency.pack.add)"
       }
     ],
     "configuration": {
@@ -105,13 +105,13 @@
         "agency.cliPath": {
           "type": "string",
           "default": "agency",
-          "markdownDescription": "Cesta k příkazu `agency`. Nech `agency`, když je v PATH; `uv tool install` ho umí položit i mimo něj.",
+          "markdownDescription": "Path to the `agency` command. Leave it as `agency` when it is on PATH; `uv tool install` can also put it somewhere else.",
           "order": 1
         },
         "agency.pack": {
           "type": "string",
           "default": "review-graph",
-          "description": "Kterého specialistu spouští „Zrecenzovat pull request“.",
+          "description": "Which specialist the “Review a pull request” button starts. Packs that work over the running project are started by “Start a QA session…” instead.",
           "order": 2
         },
         "agency.model": {
@@ -120,7 +120,7 @@
             "null"
           ],
           "default": null,
-          "markdownDescription": "Model pro tenhle projekt. Prázdné = použije se `agent.model` z konfigurace packu.\n\nModel je vlastnost úkolu, ne uživatele: recenze je čtení a klasifikace, ne psaní, takže se dá pustit levněji než kódování. Volba se zapisuje do run recordu, aby šlo změřit, který model dává lepší nálezy.",
+          "markdownDescription": "Model for this project. Empty = `agent.model` from the pack configuration is used.\n\nThe model is a property of the task, not of the user: a review is reading and classification, not writing, so it can run cheaper than coding. The choice is written into the run record so you can measure which model produces better findings.",
           "order": 3
         },
         "agency.provider": {
@@ -134,19 +134,19 @@
             "codex"
           ],
           "default": null,
-          "markdownDescription": "Čím běh spustit. Prázdné = `agent.provider` z konfigurace packu.",
+          "markdownDescription": "What to run the review with. Empty = `agent.provider` from the pack configuration.",
           "order": 4
         },
         "agency.commentThreads": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "Ukazovat nálezy jako komentáře přímo u řádku kódu. Vypnutím zůstane jen panel Agency.",
+          "markdownDescription": "Show findings as comments right at the line of code. Turning this off leaves only the Agency panel.",
           "order": 5
         },
         "agency.autoRefresh": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "Přenačíst, když se `.agency/runs/` změní zvenčí — tedy když rozhodne agent nebo terminál. Vypnutím se změny projeví až po ručním obnovení.",
+          "markdownDescription": "Reload when `.agency/runs/` changes from the outside — that is, when an agent or a terminal decides. Turning this off means changes only show up after a manual refresh.",
           "order": 6
         }
       }
@@ -154,128 +154,146 @@
     "submenus": [
       {
         "id": "agency.rejectMenu",
-        "label": "Zamítnout",
+        "label": "Reject",
         "icon": "$(circle-slash)"
       }
     ],
     "commands": [
       {
         "command": "agency.review.pick",
-        "title": "Zrecenzovat pull request…",
+        "title": "Review a pull request…",
         "category": "Agency",
         "icon": "$(play)"
       },
       {
+        "command": "agency.qa.run",
+        "title": "Start a QA session…",
+        "category": "Agency",
+        "icon": "$(beaker)"
+      },
+      {
         "command": "agency.ingest",
-        "title": "Zpracovat výsledek běhu",
+        "title": "Process run output",
         "category": "Agency",
         "icon": "$(filter)"
       },
       {
         "command": "agency.refresh",
-        "title": "Přenačíst",
+        "title": "Reload",
         "category": "Agency",
         "icon": "$(refresh)"
       },
       {
         "command": "agency.doctor",
-        "title": "Ověřit předpoklady",
+        "title": "Check prerequisites",
         "category": "Agency",
         "icon": "$(pulse)"
       },
       {
         "command": "agency.metrics",
-        "title": "Metriky — precision, dedup, fronta",
+        "title": "Metrics — precision, dedup, queue",
         "category": "Agency",
         "icon": "$(graph)"
       },
       {
         "command": "agency.openSettings",
-        "title": "Nastavení",
+        "title": "Settings",
         "category": "Agency",
         "icon": "$(settings-gear)"
       },
       {
         "command": "agency.pack.add",
-        "title": "Najmout specialistu…",
+        "title": "Hire a specialist…",
         "category": "Agency",
         "icon": "$(person-add)"
       },
       {
         "command": "agency.pack.openConfig",
-        "title": "Otevřít konfiguraci packu",
+        "title": "Open pack configuration",
         "category": "Agency"
       },
       {
         "command": "agency.finding.open",
-        "title": "Otevřít detail nálezu",
+        "title": "Open finding detail",
         "category": "Agency",
         "icon": "$(book)"
       },
       {
         "command": "agency.finding.reveal",
-        "title": "Ukázat v kódu",
+        "title": "Show in code",
         "category": "Agency",
         "icon": "$(go-to-file)"
       },
       {
         "command": "agency.finding.accept",
-        "title": "Přijmout",
+        "title": "Accept",
         "icon": "$(check)"
       },
       {
         "command": "agency.finding.defer",
-        "title": "Odložit na později",
+        "title": "Defer for later",
         "icon": "$(bookmark)"
       },
       {
         "command": "agency.finding.reject.not-reproducible",
-        "title": "Nešlo zopakovat"
+        "title": "Could not reproduce"
       },
       {
         "command": "agency.finding.reject.by-design",
-        "title": "Chová se tak záměrně"
+        "title": "Behaves that way by design"
       },
       {
         "command": "agency.finding.reject.wrong-diagnosis",
-        "title": "Špatná diagnóza — problém je jinde"
+        "title": "Wrong diagnosis — the problem is elsewhere"
       },
       {
         "command": "agency.finding.reject.duplicate-missed",
-        "title": "Duplicita, kterou dedup nechytil"
+        "title": "Duplicate the dedup missed"
       },
       {
         "command": "agency.finding.reject.out-of-scope",
-        "title": "Mimo rozsah projektu"
+        "title": "Out of scope for this project"
       },
       {
         "command": "agency.finding.rejectPick",
-        "title": "Zamítnout…",
+        "title": "Reject…",
         "icon": "$(circle-slash)"
       },
       {
         "command": "agency.finding.addNote",
-        "title": "Uložit poznámku"
+        "title": "Save note"
       },
       {
         "command": "agency.finding.openAtCommit",
-        "title": "Ukázat kód v den analýzy",
+        "title": "Show the code as of the analysis",
         "icon": "$(history)"
       },
       {
         "command": "agency.finding.diffAgainstHead",
-        "title": "Porovnat s pracovní kopií",
+        "title": "Compare with the working tree",
         "icon": "$(git-compare)"
       },
       {
         "command": "agency.decision.apply",
-        "title": "Zapsat rozhodnutí (programaticky)",
+        "title": "Record a decision (programmatically)",
         "category": "Agency"
       },
       {
         "command": "agency.view.findings.focus",
-        "title": "Přejít na frontu nálezů",
+        "title": "Go to the findings queue",
         "category": "Agency"
+      },
+      {
+        "command": "agency.pack.brief",
+        "title": "Set the standing brief…",
+        "category": "Agency",
+        "icon": "$(note)"
+      },
+      {
+        "command": "agency.qa.playwright",
+        "title": "Browser testing setup…",
+        "category": "Agency",
+        "icon": "$(browser)"
       }
     ],
     "menus": {
@@ -352,6 +370,11 @@
           "when": "view == agency.overview || view == agency.runs"
         },
         {
+          "command": "agency.qa.run",
+          "group": "navigation@2",
+          "when": "view == agency.overview || view == agency.runs"
+        },
+        {
           "command": "agency.ingest",
           "group": "navigation@2",
           "when": "view == agency.runs"
@@ -380,6 +403,16 @@
           "command": "agency.openSettings",
           "group": "9_config@1",
           "when": "view == agency.overview || view == agency.tools"
+        },
+        {
+          "command": "agency.pack.brief",
+          "group": "9_config@2",
+          "when": "view == agency.tools"
+        },
+        {
+          "command": "agency.qa.playwright",
+          "group": "9_config@3",
+          "when": "view == agency.tools"
         }
       ],
       "view/item/context": [
@@ -417,6 +450,11 @@
           "command": "agency.pack.add",
           "group": "inline@1",
           "when": "viewItem == agencyPack.available"
+        },
+        {
+          "command": "agency.pack.brief",
+          "group": "inline@1",
+          "when": "viewItem == agencyPack.installed"
         }
       ],
       "comments/commentThread/title": [

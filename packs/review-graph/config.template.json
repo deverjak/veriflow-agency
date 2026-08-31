@@ -1,45 +1,51 @@
 {
-  "$comment": "Šablona konfigurace packu review-graph. `agency add review-graph` ji zkopíruje do <projekt>/.agency/review-graph.json a doplní, co pozná sám. Tenhle soubor vlastní PROJEKT — upgrade packu ho nikdy nepřepíše.",
+  "$comment": "Configuration template for the review-graph pack. `agency add review-graph` copies it to <project>/.agency/review-graph.json and fills in what it can detect. This file is owned by the PROJECT — a pack upgrade never overwrites it.",
 
   "pack": "review-graph@0.1.0",
 
   "repo": {
     "slug": null,
-    "$comment_slug": "owner/repo. Doplní `agency init` z git remote."
+    "$comment_slug": "owner/repo. `agency init` fills it in from the git remote."
+  },
+
+  "brief": {
+    "$comment": "Optional. A standing focus for every review of this project, e.g. \"pay extra attention to Supabase policies\". A one-off focus is `agency run review-graph --pr 12 --prompt \"…\"`. The brief prioritises, it never overrides the gate: a finding without evidence stays dropped no matter what the brief says.",
+    "default": null,
+    "scenarios": {}
   },
 
   "graph": {
     "db": ".code-review-graph/graph.db",
     "onStale": "update",
-    "$comment_onStale": "update = přírůstkově doindexovat (rychlé, správné pro PR) | build = přestavět od nuly (drahé, jen když graf chybí) | ignore"
+    "$comment_onStale": "update = index incrementally (fast, the right thing for a PR) | build = rebuild from scratch (expensive, only when the graph is missing) | ignore"
   },
 
   "worktree": {
     "path": "../{repo}-review-pr-{n}",
-    "$comment_path": "Jednorázový worktree. Nikdy se nečekoutuje do pracovní kopie uživatele — jeho větev i rozdělaná práce zůstanou netknuté."
+    "$comment_path": "A throwaway worktree. Nothing is ever checked out into the user's working copy — their branch and their work in progress stay untouched."
   },
 
   "agent": {
-    "$comment": "Kdo a čím recenzi odbaví. Model je vlastnost úkolu, ne uživatele — kódování si můžeš držet na tom nejsilnějším a recenzi pustit levněji. Přebít jednorázově jde přes `agency run review-graph --model <m>`.",
+    "$comment": "Who handles the review and with what. The model is a property of the task, not of the user — you can keep coding on the strongest one and run reviews cheaper. Override it for a single run with `agency run review-graph --model <m>`.",
     "provider": "claude",
     "model": "sonnet",
-    "$comment_model": "null = nech výchozí model providera. Volba se zapisuje do run recordu, aby šlo změřit, jaký model dává lepší nálezy.",
+    "$comment_model": "null = keep the provider default model. The choice is written into the run record so you can measure which model produces better findings.",
     "extraArgs": [],
-    "$comment_extraArgs": "Další přepínače pro spuštění, např. [\"--permission-mode\", \"acceptEdits\"]."
+    "$comment_extraArgs": "Extra launch flags, e.g. [\"--permission-mode\", \"acceptEdits\"]."
   },
 
   "review": {
     "dimensions": ["correctness", "tests", "reuse", "errors"],
-    "$comment_dimensions": "repo-rules se přidá, až vyplníš `rules` níže. Bez projektových pravidel běží 4 z 5 dimenzí — to je legitimní výstup, ne selhání.",
+    "$comment_dimensions": "repo-rules is added once you fill in `rules` below. Without project rules 4 of 5 dimensions run — that is a legitimate outcome, not a failure.",
 
     "rules": null,
-    "$comment_rules": "Odkaz na sekci s pravidly projektu, např. 'CLAUDE.md#rules-that-will-bite-you'. Obsah té sekce je obsah projektu, ne packu.",
+    "$comment_rules": "A pointer to the section with the project rules, e.g. 'CLAUDE.md#rules-that-will-bite-you'. The content of that section belongs to the project, not to the pack.",
 
     "docMap": null,
-    "$comment_docMap": "Sekce mapující dotčené cesty na dokumentaci, např. 'CLAUDE.md#where-the-truth-lives'. Bez ní se dokumentace nedohledává.",
+    "$comment_docMap": "A section mapping touched paths to documentation, e.g. 'CLAUDE.md#where-the-truth-lives'. Without it the documentation is not looked up.",
 
     "verifyCommand": null,
-    "$comment_verifyCommand": "Co dělá CI, např. 'npm run verify'. Slouží k zahazování nálezů, které CI stejně chytí — ne ke spouštění.",
+    "$comment_verifyCommand": "What CI does, e.g. 'npm run verify'. It is used to drop findings CI would catch anyway — not to run anything.",
 
     "minScore": 80,
     "language": "cs",
@@ -53,9 +59,9 @@
 
   "sinks": {
     "runRecord": true,
-    "$comment_runRecord": "Vždy true. Run record je pravda, zbytek jsou odvozené cíle — když sink selže, nález se neztratí.",
+    "$comment_runRecord": "Always true. The run record is the truth, everything else is a derived sink — if a sink fails, the finding is not lost.",
     "prComment": false,
     "githubProject": null,
-    "$comment_githubProject": "Číslo GitHub Projectu pro jednosměrný export, nebo null. Zpětný sync se nedělá."
+    "$comment_githubProject": "The GitHub Project number for the one-way export, or null. There is no sync back."
   }
 }

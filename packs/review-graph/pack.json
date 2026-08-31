@@ -1,12 +1,24 @@
 {
   "name": "review-graph",
   "version": "0.1.0",
-  "title": "Recenzent",
-  "description": "Projde pull request — otevřený i mergnutý — zkříží změny se skutečnou strukturou kódu z code-review-graph (blast radius, chybějící testy, mrtvý kód) a doloží nálezy.",
+  "title": "Reviewer",
+  "description": "Walks a pull request — open or merged — cross-checks the changes against the real structure of the code from code-review-graph (blast radius, missing tests, dead code) and backs every finding with evidence.",
 
   "requires": {
     "tools": ["git", "gh", "code-review-graph"],
     "provider": ["claude", "codex"]
+  },
+
+  "run": {
+    "target": "pull-request",
+    "worktree": true,
+    "graph": true,
+    "prompt": {
+      "accepts": true,
+      "required": false,
+      "label": "Anything this review should focus on?",
+      "placeholder": "e.g. only the changes in the payment module"
+    }
   },
 
   "installs": [
@@ -25,10 +37,10 @@
   },
 
   "dimensions": [
-    { "id": "correctness", "title": "Korektnost a blast radius", "projectSpecific": false },
-    { "id": "tests", "title": "Pokrytí testy", "projectSpecific": false },
-    { "id": "reuse", "title": "Znovupoužitelnost a mrtvý kód", "projectSpecific": false },
-    { "id": "errors", "title": "Ošetření chyb", "projectSpecific": false },
-    { "id": "repo-rules", "title": "Dodržení pravidel projektu", "projectSpecific": true }
+    { "id": "correctness", "title": "Correctness and blast radius", "projectSpecific": false },
+    { "id": "tests", "title": "Test coverage", "projectSpecific": false },
+    { "id": "reuse", "title": "Reuse and dead code", "projectSpecific": false },
+    { "id": "errors", "title": "Error handling", "projectSpecific": false },
+    { "id": "repo-rules", "title": "Adherence to project rules", "projectSpecific": true }
   ]
 }

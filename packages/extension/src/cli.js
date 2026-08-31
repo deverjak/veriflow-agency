@@ -34,13 +34,13 @@ function call(cwd, args, { timeout = 60000 } = {}) {
         const msg = (stderr || err.message || '').trim();
         return resolve({
           ok: false, data: null,
-          error: /ENOENT/.test(msg) ? `\`${bin()}\` není v PATH` : msg,
+          error: /ENOENT/.test(msg) ? `\`${bin()}\` is not on PATH` : msg,
         });
       }
       try {
         resolve({ ok: true, error: null, data: JSON.parse(stdout) });
       } catch (e) {
-        resolve({ ok: false, data: null, error: `nečitelný JSON z agency: ${e.message}` });
+        resolve({ ok: false, data: null, error: `unreadable JSON from agency: ${e.message}` });
       }
     });
   });
@@ -58,10 +58,10 @@ async function read(cwd, args, fallback) {
 async function probe(cwd) {
   const r = await call(cwd, ['status', '--limit', '1'], { timeout: 15000 });
   if (r.ok) return { ok: true, reason: null, error: null };
-  const noCli = /není v PATH|ENOENT/.test(r.error || '');
+  const noCli = /is not on PATH|ENOENT/.test(r.error || '');
   return {
     ok: false,
-    reason: noCli ? 'no-cli' : /git repozitář/.test(r.error || '') ? 'no-repo' : 'error',
+    reason: noCli ? 'no-cli' : /no git repository/.test(r.error || '') ? 'no-repo' : 'error',
     error: r.error,
   };
 }
@@ -116,13 +116,20 @@ const ingest = (cwd, runId) =>
  * skládala i extension, vznikne druhé místo, kde se dá nastavit model, a
  * run record by lhal.
  */
-async function run(cwd, pack, { pr, latestMerged, force, model, provider } = {}) {
+async function run(cwd, pack, { pr, latestMerged, force, model, provider,
+  prompt, scenario, since } = {}) {
   const args = ['run', pack];
   if (pr) args.push('--pr', String(pr));
   if (latestMerged) args.push('--latest-merged');
   if (force) args.push('--force');
   if (model) args.push('--model', model);
   if (provider) args.push('--provider', provider);
+  // Zadání jde do CLI jako argument, ne do promptu poskládaného tady. Kdyby si
+  // ho skládala extension, vzniklo by druhé místo, kde běh vzniká, a run record
+  // by o tom, s čím agent běžel, lhal.
+  if (prompt) args.push('--prompt', prompt);
+  if (scenario) args.push('--scenario', scenario);
+  if (since) args.push('--since', since);
   const r = await call(cwd, args, { timeout: 15 * 60 * 1000 });
   if (r.ok && r.data && r.data.ok === false) {
     return { ok: false, error: r.data.message, reason: r.data.reason, data: null };
@@ -132,8 +139,34 @@ async function run(cwd, pack, { pr, latestMerged, force, model, provider } = {})
 
 const addPack = (cwd, pack) => call(cwd, ['add', pack]);
 
+/**
+ * Konfigurace packu i s tím, co si nástroj o projektu domyslel.
+ *
+ * Zápis jde touž cestou jako `agency config` z terminálu — nastavení bydlí
+ * v projektu, ne v editoru, takže co nastavíš klikem, platí i pro běh
+ * z terminálu a pro agenta.
+ */
+const packConfig = (cwd, pack) => call(cwd, ['config', pack]);
+
+const setConfig = (cwd, pack, values) => {
+  const args = ['config', pack];
+  for (const [key, value] of Object.entries(values || {})) {
+    args.push('--set', `${key}=${JSON.stringify(value)}`);
+  }
+  return call(cwd, args);
+};
+
+/** Trvalé zadání packu a jeho pojmenované scénáře — čtení i zápis. */
+const brief = (cwd, pack, { set, scenario, remove } = {}) => {
+  const args = ['brief', pack];
+  if (scenario) args.push('--scenario', scenario);
+  if (remove) args.push('--remove');
+  else if (set !== undefined && set !== null) args.push('--set', set);
+  return call(cwd, args);
+};
+
 module.exports = {
   bin, call, probe,
   init, doctor, packs, status, metrics, projects, findings, prs,
-  triage, note, ingest, run, addPack,
+  triage, note, ingest, run, addPack, brief, packConfig, setConfig,
 };

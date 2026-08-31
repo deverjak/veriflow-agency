@@ -20,32 +20,32 @@ const path = require('path');
 const state = require('./state.js');
 
 const SEVERITY = {
-  blocker: { icon: 'error', color: 'charts.red', label: 'blokující' },
-  high: { icon: 'error', color: 'charts.red', label: 'vysoká' },
-  medium: { icon: 'warning', color: 'charts.orange', label: 'střední' },
-  low: { icon: 'info', color: 'charts.blue', label: 'nízká' },
+  blocker: { icon: 'error', color: 'charts.red', label: 'blocker' },
+  high: { icon: 'error', color: 'charts.red', label: 'high' },
+  medium: { icon: 'warning', color: 'charts.orange', label: 'medium' },
+  low: { icon: 'info', color: 'charts.blue', label: 'low' },
 };
 
 const DECISION = {
-  accepted: { icon: 'pass-filled', color: 'charts.green', label: 'přijato' },
-  rejected: { icon: 'error-small', color: 'charts.red', label: 'zamítnuto' },
-  deferred: { icon: 'clock', color: 'charts.yellow', label: 'odloženo' },
+  accepted: { icon: 'pass-filled', color: 'charts.green', label: 'accepted' },
+  rejected: { icon: 'error-small', color: 'charts.red', label: 'rejected' },
+  deferred: { icon: 'clock', color: 'charts.yellow', label: 'deferred' },
 };
 
 const DRIFT = {
-  untouched: 'kód je od analýzy nezměněný — nález platí doslova',
-  touched: 'na tenhle kód se od analýzy sáhlo — možná už opravené',
-  deleted: 'soubor byl od analýzy smazaný',
-  unknown: 'commit není v klonu, drift se nedá vyhodnotit',
+  untouched: 'the code has not changed since the analysis — the finding holds literally',
+  touched: 'this code was touched since the analysis — it may already be fixed',
+  deleted: 'the file was deleted after the analysis',
+  unknown: 'the commit is not in this clone, drift cannot be evaluated',
 };
 
 function ago(iso) {
   if (!iso) return '';
   const s = (Date.now() - new Date(iso).getTime()) / 1000;
-  if (s < 90) return 'právě teď';
-  if (s < 5400) return `před ${Math.round(s / 60)} min`;
-  if (s < 172800) return `před ${Math.round(s / 3600)} h`;
-  return `před ${Math.round(s / 86400)} dny`;
+  if (s < 90) return 'just now';
+  if (s < 5400) return `${Math.round(s / 60)} min ago`;
+  if (s < 172800) return `${Math.round(s / 3600)} h ago`;
+  return `${Math.round(s / 86400)} d ago`;
 }
 
 function icon(name, color) {
@@ -87,83 +87,85 @@ function node(label, { description, tooltip, iconId, color, command, args, child
 class OverviewTree extends Tree {
   roots() {
     const s = state.snapshot;
-    if (s.loading && !s.loadedAt) return [node('načítám…', { iconId: 'loading~spin' })];
+    if (s.loading && !s.loadedAt) return [node('loading…', { iconId: 'loading~spin' })];
     if (!s.probe.ok) return [];   // uvítací obrazovka z package.json
 
     const rows = [];
     const p = s.project || {};
 
-    rows.push(node('Projekt', {
+    rows.push(node('Project', {
       description: p.slug || (s.cwd ? path.basename(s.cwd) : '—'),
       iconId: 'repo',
-      tooltip: `**${p.slug || ''}**\n\n${s.cwd || ''}\n\nVšechno, co Agency zapíše, `
-        + 'leží v `.agency/` tohohle projektu — ne v nástroji. Proto to přežije '
-        + 'přeinstalaci i nové naklonování repozitáře.',
+      tooltip: `**${p.slug || ''}**\n\n${s.cwd || ''}\n\nEverything Agency writes `
+        + 'lives in `.agency/` of this project — not in the tool. That is why it survives '
+        + 'a reinstall and a fresh clone of the repository.',
     }));
 
     const problems = (s.doctor || []).filter((c) => !c.ok);
     const fatal = problems.filter((c) => c.fatal);
-    rows.push(node('Předpoklady', {
+    rows.push(node('Prerequisites', {
       description: problems.length
-        ? `${problems.length} ${problems.length === 1 ? 'problém' : 'problémy'}`
-        : 'v pořádku',
+        ? `${problems.length} ${problems.length === 1 ? 'problem' : 'problems'}`
+        : 'all good',
       iconId: fatal.length ? 'error' : problems.length ? 'warning' : 'pass',
       color: fatal.length ? 'charts.red' : problems.length ? 'charts.orange' : 'charts.green',
       command: 'agency.doctor',
       tooltip: problems.length
         ? problems.map((c) => `- **${c.name}** — ${c.detail}`).join('\n')
-        : 'Nástroje, přihlášení a stav grafu se ověřují **před** během, ne až '
-        + 'v jeho půlce. Klikni pro celý výpis.',
+        : 'Tools, logins and the state of the graph are checked **before** a run, not '
+        + 'halfway through it. Click for the full list.',
     }));
 
     const packs = (s.packs || []).filter((x) => x.installed);
-    rows.push(node('Specialisté', {
-      description: packs.length ? packs.map((x) => x.name).join(', ') : 'žádný nainstalovaný',
+    rows.push(node('Specialists', {
+      description: packs.length ? packs.map((x) => x.name).join(', ') : 'none installed',
       iconId: packs.length ? 'person' : 'person-add',
       command: packs.length ? undefined : 'agency.pack.add',
       tooltip: packs.length
-        ? 'Pack je metoda práce, ne obsah. Nainstalovaný pack přinesl do projektu '
-        + 'svůj skill a konfiguraci — obsah (pravidla, dokumentace) zůstává projektu.'
-        : 'Zatím žádný. Klikni a nainstaluj prvního.',
+        ? 'A pack is a method of work, not content. An installed pack brought its skill '
+        + 'and its configuration into the project — the content (rules, documentation) '
+        + 'stays with the project.'
+        : 'None yet. Click to install the first one.',
     }));
 
     const last = (s.runs || [])[0];
-    rows.push(node('Poslední běh', {
+    rows.push(node('Last run', {
       description: last
-        ? `${last.target ? '#' + last.target : '—'} · ${last.findings} nálezů · ${ago(last.startedAt)}`
-        : 'zatím žádný',
+        ? `${last.targetLabel || '—'} · ${last.findings} findings · ${ago(last.startedAt)}`
+        : 'none yet',
       iconId: last ? (last.status === 'ok' ? 'history' : 'circle-slash') : 'circle-outline',
       command: last ? undefined : 'agency.review.pick',
       tooltip: last
-        ? `Běh \`${last.id}\`, stav \`${last.status}\`.\n\nBěh je záznam v repu, ne `
-        + 'událost v nástroji — dá se přečíst i za rok a v PR se dá reviewovat.'
-        : 'Klikni a vyber pull request k recenzi.',
+        ? `Run \`${last.id}\`, status \`${last.status}\`.\n\nA run is a record in the repo, `
+        + 'not an event in the tool — it can still be read a year from now and reviewed in a PR.'
+        : 'Click and pick a pull request to review.',
     }));
 
     const q = state.queue();
-    rows.push(node('Fronta k rozhodnutí', {
-      description: q.length ? `${q.length}` : 'prázdná',
+    rows.push(node('Decision queue', {
+      description: q.length ? `${q.length}` : 'empty',
       iconId: q.length ? 'inbox' : 'check-all',
       color: q.length ? 'charts.orange' : 'charts.green',
       command: 'agency.view.findings.focus',
-      tooltip: 'Nález bez rozhodnutí není ani pravda, ani lež. Dokud ho nerozhodneš, '
-        + 'nezapočítá se do precision — proto fronta, která roste, je ta nejdražší '
-        + 'věc v celém systému.',
+      tooltip: 'An undecided finding is neither true nor false. Until you decide it, '
+        + 'it does not count towards precision — which is why a growing queue is the '
+        + 'most expensive thing in the whole system.',
     }));
 
     const m = s.metrics;
     const t = m && m.triage;
     rows.push(node('Precision', {
       description: t && t.precision !== null && t.precision !== undefined
-        ? `${Math.round(t.precision * 100)} % (${t.accepted} z ${t.accepted + t.rejected})`
-        : 'zatím není z čeho počítat',
+        ? `${Math.round(t.precision * 100)} % (${t.accepted} of ${t.accepted + t.rejected})`
+        : 'nothing to compute from yet',
       iconId: 'graph',
       color: t && t.precision >= 0.7 ? 'charts.green'
         : t && t.precision !== null && t.precision !== undefined ? 'charts.orange' : undefined,
       command: 'agency.metrics',
-      tooltip: 'Kolik z toho, co pack našel, je pravda. Počítá se **jen z rozhodnutých** '
-        + 'nálezů — nerozhodnuté by číslo ředily a měřily by pak rychlost triage, '
-        + 'ne kvalitu nálezů.\n\nKlikni pro celý rozpad podle dimenzí, severity a modelů.',
+      tooltip: 'How much of what the pack found is true. It is computed **only from decided** '
+        + 'findings — undecided ones would dilute the number and it would then measure the '
+        + 'speed of triage, not the quality of the findings.\n\nClick for the full breakdown '
+        + 'by dimension, severity and model.',
     }));
 
     return rows;
@@ -179,44 +181,101 @@ class ToolsTree extends Tree {
     return (s.packs || []).map((p) => {
       const children = [];
 
-      children.push(node('Co dělá', {
+      children.push(node('What it does', {
         description: '', tooltip: p.description, iconId: 'info',
       }));
       const dims = (p.dimensions || []).length ? p.dimensions : null;
       if (dims) {
-        children.push(node('Na co se dívá', {
-          description: `${dims.length} dimenzí`,
+        children.push(node('What it looks at', {
+          description: `${dims.length} dimensions`,
           iconId: 'checklist',
           collapsed: true,
           children: dims.map((d) => node(d.title || d.id, {
-            description: d.projectSpecific ? 'podle pravidel projektu' : '',
+            description: d.projectSpecific ? 'follows project rules' : '',
             iconId: 'circle-small-filled',
             tooltip: d.projectSpecific
-              ? 'Tahle dimenze potřebuje pravidla projektu (`review.rules` '
-              + 'v konfiguraci). Bez nich pack běží o jednu dimenzi méně — což je '
-              + 'legitimní výstup, ne selhání.'
+              ? 'This dimension needs the project rules (`review.rules` in the '
+              + 'configuration). Without them the pack runs one dimension short — which is '
+              + 'a legitimate outcome, not a failure.'
               : undefined,
           })),
         }));
       }
+      const takesBrief = p.run && p.run.prompt && p.run.prompt.accepts;
+      children.push(node('What it works on', {
+        description: p.run && p.run.target === 'workspace'
+          ? 'the project as it is' : 'a pull request',
+        iconId: p.run && p.run.target === 'workspace' ? 'browser' : 'git-pull-request',
+        tooltip: p.run && p.run.target === 'workspace'
+          ? 'It runs over the working copy, including uncommitted work — that is where the '
+          + 'application under test actually runs. No throwaway worktree, so the source is '
+          + '**read only**: everything the run produces goes into the run directory.'
+          : 'It runs over a pull request in a throwaway worktree on its head commit. Your '
+          + 'branch and your work in progress stay untouched.',
+      }));
+      if (p.installed && takesBrief) {
+        const standing = (p.brief && p.brief.standing) || null;
+        const scenarios = (p.brief && p.brief.scenarios) || [];
+        children.push(node('Brief', {
+          description: standing ? String(standing).slice(0, 40) : 'not set',
+          iconId: 'note',
+          color: standing ? 'charts.green' : undefined,
+          command: 'agency.pack.brief',
+          args: [p.name],
+          collapsed: true,
+          children: scenarios.length
+            ? scenarios.map((sc) => node(sc.name, {
+              description: String(sc.text || '').slice(0, 60),
+              iconId: 'bookmark',
+              tooltip: `\`agency run ${p.name} --scenario ${sc.name}\`\n\n${sc.text || ''}`,
+            }))
+            : undefined,
+          tooltip: 'What this specialist should work on. The **standing** brief applies to '
+            + 'every run and lives in the project configuration; a one-off assignment is '
+            + 'given when the run starts. The choice is written into the run record — '
+            + '“which brief produces better findings” is a question worth answering with '
+            + 'numbers.\n\nClick to change it.',
+        }));
+      }
+      if (p.installed && p.playwright) {
+        const pw = p.playwright;
+        children.push(node('Browser', {
+          description: pw.enabled
+            ? `Playwright · specs ${pw.specTarget === 'suite' ? 'in the suite' : 'with the run'}`
+            : 'off — HTTP only',
+          iconId: pw.enabled ? 'browser' : 'circle-slash',
+          color: pw.enabled ? 'charts.green' : undefined,
+          command: 'agency.qa.playwright',
+          args: [p.name],
+          tooltip: pw.enabled
+            ? 'The session drives a real browser and writes a **failing spec** for every finding. '
+            + 'The spec travels with the run record, so “is it fixed?” is answered by running it, '
+            + 'not by another session.'
+            + (pw.configFile ? `\n\nUses the project config \`${pw.configFile}\`.`
+              : `\n\nThe project has no Playwright; scaffolding is \`${pw.scaffold}\`.`)
+            : 'Off. The session only reaches what it can over HTTP — enough for API-level checks, '
+            + 'not for anything a user actually clicks.\n\nClick to set it up.',
+        }));
+      }
       if (p.installed && p.agent) {
-        children.push(node('Kdo to odbaví', {
+        children.push(node('Who handles it', {
           description: [p.agent.provider, p.agent.model].filter(Boolean).join(' · ')
-            || 'výchozí model providera',
+            || 'provider default model',
           iconId: 'rocket',
-          tooltip: 'Model je vlastnost úkolu, ne uživatele. Recenze je čtení '
-            + 'a klasifikace, ne psaní — dá se pustit levněji než kódování. Volba se '
-            + 'zapisuje do run recordu, aby šlo změřit, který model dává lepší nálezy.',
+          tooltip: 'The model is a property of the task, not of the user. A review is '
+            + 'reading and classification, not writing — it can run cheaper than coding. '
+            + 'The choice is written into the run record so you can measure which model '
+            + 'produces better findings.',
         }));
       }
       if (p.installed) {
-        children.push(node('Konfigurace', {
+        children.push(node('Configuration', {
           description: `.agency/${p.name}.json`,
           iconId: 'settings-gear',
           command: 'agency.pack.openConfig',
           args: [p.name],
-          tooltip: 'Konfiguraci vlastní **projekt** — upgrade packu ji nikdy nepřepíše. '
-            + 'Model, práh score, přeskakované soubory, cíl exportu.',
+          tooltip: 'The configuration is owned by the **project** — a pack upgrade never '
+            + 'overwrites it. Model, score threshold, skipped files, export target.',
         }));
       }
 
@@ -225,7 +284,7 @@ class ToolsTree extends Tree {
         description: p.installed
           ? [p.installed.split('@')[1] || p.version, p.agent && p.agent.model]
             .filter(Boolean).join(' · ')
-          : 'neinstalován',
+          : 'not installed',
         iconId: p.installed ? 'person' : 'person-add',
         color: p.installed ? 'charts.green' : undefined,
         contextValue: p.installed ? 'agencyPack.installed' : 'agencyPack.available',
@@ -253,18 +312,20 @@ class RunsTree extends Tree {
         failed: ['error', 'charts.red'],
       }[r.status] || ['circle-outline', undefined];
 
-      return node(r.target ? `PR #${r.target}` : r.id.slice(0, 10), {
+      return node(r.targetLabel || r.id.slice(0, 10), {
         id: `run:${r.id}`,
-        description: `${r.findings} nálezů · ${ago(r.startedAt)}`,
+        description: `${r.findings} findings · ${ago(r.startedAt)}`,
         iconId: st[0], color: st[1],
         collapsed: true,
         contextValue: 'agencyRun',
         children: mine.length
           ? mine.map((f) => findingNode(f, { showFile: true }))
-          : [node('žádné nálezy', { iconId: 'circle-outline' })],
-        tooltip: `Běh \`${r.id}\`\n\n- stav: \`${r.status}\`\n- pack: \`${r.pack}\`\n`
-          + `- ${r.kind === 'merged-pull-request' ? 'retrospektivní audit' : 'otevřený PR'}\n`
-          + `- ${r.undecided} bez rozhodnutí`,
+          : [node('no findings', { iconId: 'circle-outline' })],
+        tooltip: `Run \`${r.id}\`\n\n- status: \`${r.status}\`\n- pack: \`${r.pack}\`\n`
+          + `- ${{ 'merged-pull-request': 'retrospective audit', workspace: 'over the project as it was' }[r.kind]
+            || 'open PR'}\n`
+          + (r.brief ? `- brief: _${String(r.brief).slice(0, 120)}_\n` : '')
+          + `- ${r.undecided} undecided`,
       });
     });
   }
@@ -282,16 +343,16 @@ function findingNode(f, { showFile = true } = {}) {
   tip.appendMarkdown(`**${f.title}**\n\n`);
   if (f.body) tip.appendMarkdown(`${String(f.body).slice(0, 400)}\n\n`);
   tip.appendMarkdown(`---\n\n`);
-  tip.appendMarkdown(`- závažnost: **${sev.label}**${f.dimension ? ` · dimenze \`${f.dimension}\`` : ''}\n`);
+  tip.appendMarkdown(`- severity: **${sev.label}**${f.dimension ? ` · dimension \`${f.dimension}\`` : ''}\n`);
   if (f.file) tip.appendMarkdown(`- \`${f.file}:${f.line}\`\n`);
-  tip.appendMarkdown(`- ${DRIFT[f.drift] || 'drift neznámý'}\n`);
-  if (f.resolved && f.resolved.note) tip.appendMarkdown(`- kotva: ${f.resolved.note}\n`);
+  tip.appendMarkdown(`- ${DRIFT[f.drift] || 'drift unknown'}\n`);
+  if (f.resolved && f.resolved.note) tip.appendMarkdown(`- anchor: ${f.resolved.note}\n`);
   tip.appendMarkdown(`- evidence: ${(f.evidence || []).length}×\n`);
-  if (dec) tip.appendMarkdown(`- rozhodnutí: **${dec.label}**${f.reason ? ` — \`${f.reason}\`` : ''}\n`);
+  if (dec) tip.appendMarkdown(`- decision: **${dec.label}**${f.reason ? ` — \`${f.reason}\`` : ''}\n`);
 
-  return node(f.title || '(bez titulku)', {
+  return node(f.title || '(untitled)', {
     id: `finding:${f.id}`,
-    description: [showFile ? loc : '', drifted ? '· dotčeno' : ''].filter(Boolean).join(' '),
+    description: [showFile ? loc : '', drifted ? '· touched' : ''].filter(Boolean).join(' '),
     iconId: dec ? dec.icon : sev.icon,
     color: dec ? dec.color : sev.color,
     tooltip: tip,
@@ -320,16 +381,16 @@ class FindingsTree extends Tree {
 
     const groups = [];
     if (open.length) {
-      groups.push(node(`K rozhodnutí`, {
+      groups.push(node(`To decide`, {
         description: String(open.length),
         iconId: 'inbox',
         children: open.map((f) => findingNode(f)),
-        tooltip: 'Seřazeno tak, aby nahoře byly nálezy na kódu, na který od analýzy '
-          + 'nikdo nesáhl — ty platí doslova a rozhodnou se nejrychleji.',
+        tooltip: 'Sorted so that findings on code nobody has touched since the analysis '
+          + 'come first — those hold literally and are the fastest to decide.',
       }));
     }
     if (decided.length) {
-      groups.push(node('Rozhodnuté', {
+      groups.push(node('Decided', {
         description: String(decided.length),
         iconId: 'check-all',
         collapsed: true,
@@ -337,13 +398,14 @@ class FindingsTree extends Tree {
       }));
     }
     if (dupes.length) {
-      groups.push(node('Duplicity', {
+      groups.push(node('Duplicates', {
         description: String(dupes.length),
         iconId: 'copy',
         collapsed: true,
         children: dupes.map((f) => findingNode(f)),
-        tooltip: 'Nález, který pack našel podruhé. Nezahazuje se — dedup ratio je '
-          + 'metrika, kvůli které se to počítá —, ale do fronty nepatří.',
+        tooltip: 'A finding the pack found a second time. It is not thrown away — the '
+          + 'dedup ratio is the metric this is counted for — but it does not belong in '
+          + 'the queue.',
       }));
     }
     return groups;

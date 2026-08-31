@@ -18,6 +18,32 @@ from .config import Project
 from .util import bundled, posix, read_json, strip_comments, write_json
 
 
+# Výchozí běhová politika packu.
+#
+# Existuje proto, aby CLI nemuselo znát jména packů. Recenzent potřebuje pull
+# request, worktree a graf; QA potřebuje běžící aplikaci a zadání, co zkoušet.
+# Kdyby o tom rozhodovalo větvení v cli.py, byl by každý další specialista
+# zásahem do jádra — takhle je to políčko v manifestu.
+RUN_DEFAULTS: dict = {
+    # pull-request = běh se váže na PR (otevřený nebo mergnutý)
+    # workspace    = běh se váže na projekt tak, jak je právě teď
+    "target": "pull-request",
+    # Jednorázový worktree na hlavičce PR. QA ho mít nesmí: zkouší běžící
+    # aplikaci, a ta běží nad pracovní kopií s nainstalovanými závislostmi.
+    "worktree": True,
+    # Kroky code-review-graph (kopie indexu do worktree, update, detect-changes).
+    "graph": True,
+    "prompt": {
+        # Bere pack zadání textem? Když ne, `--prompt` se u něj odmítne.
+        "accepts": False,
+        # Bez zadání nemá běh smysl — odmítni dřív, než vznikne prázdný běh.
+        "required": False,
+        "label": "What should this run focus on?",
+        "placeholder": "",
+    },
+}
+
+
 @dataclass
 class Pack:
     name: str
@@ -28,6 +54,25 @@ class Pack:
     @property
     def ref(self) -> str:
         return f"{self.name}@{self.version}"
+
+    @property
+    def run_policy(self) -> dict:
+        """Co pack potřebuje k běhu. Chybějící pole = výchozí, ne chyba."""
+        policy = dict(RUN_DEFAULTS)
+        policy.update(self.manifest.get("run") or {})
+        prompt = dict(RUN_DEFAULTS["prompt"])
+        prompt.update(policy.get("prompt") or {})
+        policy["prompt"] = prompt
+        return policy
+
+    @property
+    def skill_name(self) -> str | None:
+        """Jméno skillu, který pack instaluje — pod ním si ho agent vyvolá."""
+        for item in self.manifest.get("installs", []):
+            to = str(item.get("to") or "")
+            if to.endswith("SKILL.md"):
+                return Path(to).parent.name
+        return None
 
 
 def packs_dir() -> Path:
@@ -55,8 +100,8 @@ def load(name: str, from_path: str | Path | None = None) -> Pack:
     for p in available():
         if p.name == name:
             return p
-    known = ", ".join(p.name for p in available()) or "(žádné)"
-    raise SystemExit(f"Pack „{name}“ neznám. Dostupné: {known}")
+    known = ", ".join(p.name for p in available()) or "(none)"
+    raise SystemExit(f"Unknown pack “{name}”. Available: {known}")
 
 
 def _sha(data: bytes) -> str:
@@ -77,15 +122,15 @@ def plan(pack: Pack, project: Project) -> list[dict]:
         new_hash = _sha(new)
 
         if not dst.exists():
-            action, why = "create", "soubor v projektu není"
+            action, why = "create", "the file is not in the project"
         else:
             cur_hash = _sha(dst.read_bytes())
             if cur_hash == new_hash:
-                action, why = "keep", "shodný obsah"
+                action, why = "keep", "identical content"
             elif prev_files.get(item["to"]) and prev_files[item["to"]] != cur_hash:
-                action, why = "blocked", "soubor byl ručně změněn od instalace"
+                action, why = "blocked", "the file was modified by hand since the installation"
             else:
-                action, why = "update", f"nová verze packu ({prev.get('version', '?')} → {pack.version})"
+                action, why = "update", f"new pack version ({prev.get('version', '?')} → {pack.version})"
 
         steps.append({"kind": "file", "to": item["to"], "src": src,
                       "action": action, "why": why, "hash": new_hash})
@@ -97,8 +142,8 @@ def plan(pack: Pack, project: Project) -> list[dict]:
             "kind": "config", "to": cfg_rel, "src": pack.root / pack.manifest["config"]["template"],
             # Konfiguraci vlastní projekt. Po prvním zápisu se nikdy nepřepisuje.
             "action": "keep" if dst.exists() else "create",
-            "why": "konfiguraci vlastní projekt, upgrade ji nepřepisuje" if dst.exists()
-                   else "šablona konfigurace",
+            "why": "the configuration is owned by the project, an upgrade leaves it alone"
+                   if dst.exists() else "configuration template",
             "hash": None,
         })
     return steps
@@ -124,8 +169,24 @@ def apply(pack: Pack, project: Project, steps: list[dict], detected: dict | None
                 for key in ("rules", "docMap", "verifyCommand"):
                     if detected.get(key) is not None:
                         r[key] = detected[key]
-                if r.get("rules") and "repo-rules" not in r.get("dimensions", []):
+                # Dimenzi přidávej jen packu, který ji má. Druhý pack tuhle
+                # větev odhalil: QA žádné `repo-rules` nezná a dostávalo by
+                # do konfigurace dimenzi, kterou by nikdy nepustilo.
+                known = {d.get("id") for d in (pack.manifest.get("dimensions") or [])}
+                if (r.get("rules") and "repo-rules" in known
+                        and "repo-rules" not in r.get("dimensions", [])):
                     r.setdefault("dimensions", []).append("repo-rules")
+
+                # Playwright, který v projektu už je, se má POUŽÍT, ne postavit
+                # vedle. Proto se cesty k němu vyplní hned při instalaci —
+                # jinak by je uživatel dopisoval ručně do konfigurace, kterou
+                # ještě neviděl.
+                pw = cfg.get("playwright")
+                found = detected.get("playwright") or {}
+                if isinstance(pw, dict) and found.get("present"):
+                    pw["enabled"] = True
+                    pw["configFile"] = found.get("configFile")
+                    pw["projectTestDir"] = found.get("testDir")
             write_json(dst, cfg)
         else:
             dst.write_bytes(s["src"].read_bytes())

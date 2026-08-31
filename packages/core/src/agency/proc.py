@@ -47,9 +47,9 @@ def run(
             timeout=timeout,
         )
     except FileNotFoundError:
-        return Result(False, 127, "", f"{args[0]}: příkaz nenalezen")
+        return Result(False, 127, "", f"{args[0]}: command not found")
     except subprocess.TimeoutExpired:
-        return Result(False, 124, "", f"{args[0]}: vypršel časový limit {timeout}s")
+        return Result(False, 124, "", f"{args[0]}: timed out after {timeout}s")
     return Result(p.returncode == 0, p.returncode, p.stdout or "", p.stderr or "")
 
 
@@ -114,6 +114,53 @@ def show_file(cwd: str | Path, commit: str, path: str) -> str | None:
 
 def commit_exists(cwd: str | Path, commit: str) -> bool:
     return git("cat-file", "-e", f"{commit}^{{commit}}", cwd=cwd).ok
+
+
+def browser_cache() -> str | None:
+    """Kam Playwright stahuje prohlížeče, pokud tam už něco je.
+
+    Prohlížeče nejsou v projektu, ale v uživatelském cache — proto se na ně
+    `agency doctor` ptá zvlášť. Chybí typicky na čerstvém stroji a chyba, kterou
+    to vyrobí, přijde až uprostřed sezení.
+    """
+    from pathlib import Path as _P
+
+    override = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
+    candidates = [override] if override and override != "0" else []
+    home = _P.home()
+    candidates += [
+        os.environ.get("LOCALAPPDATA", "") and str(_P(os.environ["LOCALAPPDATA"]) / "ms-playwright"),
+        str(home / "AppData" / "Local" / "ms-playwright"),
+        str(home / "Library" / "Caches" / "ms-playwright"),
+        str(home / ".cache" / "ms-playwright"),
+    ]
+    for c in candidates:
+        if not c:
+            continue
+        d = _P(c)
+        if d.is_dir() and any(d.iterdir()):
+            return str(d)
+    return None
+
+
+def reachable(url: str, timeout: float = 2.0) -> tuple[bool, str]:
+    """Odpovídá ta adresa?
+
+    QA sezení proti nedostupné aplikaci je vyhozený běh — a pozná se to
+    dopředu, jedním dotazem. 401 a 403 jsou v pořádku: aplikace běží a jen
+    chce přihlášení, což je přesně to, co se v sezení řeší.
+    """
+    import urllib.error
+    import urllib.request
+
+    req = urllib.request.Request(url, headers={"User-Agent": "agency-doctor"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return 200 <= r.status < 400, f"{url} → HTTP {r.status}"
+    except urllib.error.HTTPError as e:
+        return e.code < 500, f"{url} → HTTP {e.code}"
+    except Exception as e:  # síť, DNS, TLS, timeout — pro doktora jeden případ
+        return False, f"{url} unreachable — {type(e).__name__}"
 
 
 # ---------------------------------------------------------------- gh

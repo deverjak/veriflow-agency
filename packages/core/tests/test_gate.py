@@ -144,7 +144,7 @@ def test_preformulovany_nalez_je_taky_duplicita(project, make_run):
     vysledek = ingest.ingest(project, novy)
 
     assert len(vysledek["duplicates"]) == 1, "přeformulovaná duplicita neprošla"
-    assert "podobnost" in vysledek["duplicates"][0]["how"]
+    assert "similarity" in vysledek["duplicates"][0]["how"]
 
 
 def test_nalez_v_jine_funkci_neni_duplicita(project, make_run):

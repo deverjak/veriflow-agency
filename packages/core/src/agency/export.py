@@ -51,7 +51,7 @@ def _gh_json(*args: str):
     try:
         return json.loads(r.stdout)
     except json.JSONDecodeError as e:
-        raise ExportError(f"gh vrátil nečitelný JSON: {e}") from e
+        raise ExportError(f"gh returned unreadable JSON: {e}") from e
 
 
 def project_meta(number: int, owner: str) -> dict:
@@ -102,14 +102,14 @@ def item_body(finding: dict, decision: dict | None, run: Run) -> str:
         "",
         "---",
         "",
-        f"**Kde:** `{a.get('file')}:{a.get('line')}` na `{(a.get('commit') or '')[:8]}`",
+        f"**Where:** `{a.get('file')}:{a.get('line')}` at `{(a.get('commit') or '')[:8]}`",
     ]
     if t.get("url"):
-        lines.append(f"**Zdroj:** {t['url']}"
-                     + (" · retrospektivní audit" if t.get("mergedAt") else ""))
+        lines.append(f"**Source:** {t['url']}"
+                     + (" · retrospective audit" if t.get("mergedAt") else ""))
     lines.append(f"**Pack:** `{finding.get('pack')}`"
-                 + (f" · dimenze `{finding['dimension']}`" if finding.get("dimension") else "")
-                 + f" · běh `{run.id}`")
+                 + (f" · dimension `{finding['dimension']}`" if finding.get("dimension") else "")
+                 + f" · run `{run.id}`")
 
     ev = finding.get("evidence") or []
     if ev:
@@ -118,7 +118,7 @@ def item_body(finding: dict, decision: dict | None, run: Run) -> str:
             lines.append(f"- `{e.get('kind')}` — {e.get('detail')}"
                          + (f"  \n  _{e['source']}_" if e.get("source") else ""))
     if decision:
-        mark = {"accepted": "přijato", "rejected": "zamítnuto", "deferred": "odloženo"}
+        mark = {"accepted": "accepted", "rejected": "rejected", "deferred": "deferred"}
         lines += ["", f"**Triage:** {mark.get(decision['state'], decision['state'])}"
                   + (f" — `{decision['reason']}`" if decision.get("reason") else "")
                   + (f" ({decision.get('by')})" if decision.get("by") else "")]
@@ -194,7 +194,7 @@ def push(rows: list[dict], number: int, owner: str, dry_run: bool = False) -> di
                 opt = _option(field, value)
                 if not opt:
                     skipped.append({"id": fid, "field": field["name"],
-                                    "why": f"volba {value} v poli není"})
+                                    "why": f"the field has no option {value}"})
                     continue
                 r = proc.gh("project", "item-edit", "--id", item_id,
                             "--project-id", meta["id"], "--field-id", field["id"],

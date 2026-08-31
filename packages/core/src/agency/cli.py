@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 from . import anchor, config, dedup, export, ingest, metrics, packs, proc, registry, runs
-from .util import bundled, out, posix, read_json, ulid, write_json
+from .util import bundled, out, posix, read_json, strip_comments, ulid, write_json
 
 # ---------------------------------------------------------------- pomůcky
 
@@ -43,7 +43,7 @@ def _pack_cfg(project: config.Project, pack_name: str) -> dict:
     cfg = project.pack_config(pack_name)
     if cfg is None:
         raise SystemExit(
-            f"Pack „{pack_name}“ tady není nainstalovaný. Spusť `agency add {pack_name}`."
+            f"Pack “{pack_name}” is not installed here. Run `agency add {pack_name}`."
         )
     return cfg
 
@@ -58,18 +58,22 @@ def cmd_init(args) -> int:
     def human():
         print(f"\n{out.bold(project.name)}  {out.dim(posix(project.root))}\n")
         rows = [
-            ("git remote", facts["slug"] or out.warn("chybí — pack bude potřebovat repo.slug ručně")),
-            ("výchozí větev", facts["defaultBranch"] or out.warn("nezjištěna")),
-            ("graf kódu", out.ok("postavený") if facts["hasGraph"]
-             else out.warn("chybí — první běh ho postaví (`code-review-graph build`)")),
-            ("CI příkaz", facts["verifyCommand"] or out.dim("žádný — nálezy, které chytá CI, se nebudou zahazovat")),
-            ("pravidla projektu", facts["rules"] or out.dim("nenalezena — poběží 4 z 5 dimenzí")),
-            ("mapa dokumentace", facts["docMap"] or out.dim("nenalezena")),
-            ("existující skills", ", ".join(facts["existingSkills"]) or out.dim("žádné")),
+            ("git remote", facts["slug"] or out.warn("missing — the pack will need repo.slug set by hand")),
+            ("default branch", facts["defaultBranch"] or out.warn("not detected")),
+            ("code graph", out.ok("built") if facts["hasGraph"]
+             else out.warn("missing — the first run builds it (`code-review-graph build`)")),
+            ("CI command", facts["verifyCommand"] or out.dim("none — findings that CI catches will not be dropped")),
+            ("project rules", facts["rules"] or out.dim("not found — 4 of 5 dimensions will run")),
+            ("doc map", facts["docMap"] or out.dim("not found")),
+            ("existing skills", ", ".join(facts["existingSkills"]) or out.dim("none")),
+            ("playwright", f"{pw['configFile'] or 'no config'} · {pw['specs']} "
+                           f"spec{'' if pw['specs'] == 1 else 's'} in {pw['testDir'] or '?'}"
+             if (pw := facts["playwright"])["present"]
+             else out.dim("none — QA can set one up inside the run directory")),
         ]
         for k, v in rows:
             print(f"  {k:20} {v}")
-        print(f"\n  Dál: {out.bold('agency add review-graph')}\n")
+        print(f"\n  Next: {out.bold('agency add review-graph')}\n")
 
     return _emit(args, facts, human)
 
@@ -87,18 +91,36 @@ def cmd_packs(args) -> int:
                  # cist pack.json sam, cimz by obesel hranici.
                  "dimensions": p.manifest.get("dimensions") or [],
                  "requires": p.manifest.get("requires") or {},
+                 # Behova politika patri do odpovedi „co ten specialista umi":
+                 # bez ni by klient nevedel, jestli se ma ptat na pull request,
+                 # nebo na zadani — a musel by jmena packu znat napevno.
+                 "run": p.run_policy,
                  "installed": packs.installed_ref(project, p.name) if project else None}
         cfg = project.pack_config(p.name) if project else None
         if cfg:
             a = cfg.get("agent") or {}
             entry["agent"] = {"provider": a.get("provider"), "model": a.get("model")}
             entry["configPath"] = posix(project.pack_config_path(p.name))
+            pw = cfg.get("playwright")
+            if isinstance(pw, dict):
+                entry["playwright"] = {
+                    "enabled": bool(pw.get("enabled")),
+                    "configFile": pw.get("configFile"),
+                    "specTarget": pw.get("specTarget"),
+                    "scaffold": pw.get("scaffold"),
+                }
+            b = cfg.get("brief") or {}
+            entry["brief"] = {
+                "standing": b.get("default"),
+                "scenarios": [{"name": k, "text": v} for k, v in
+                              sorted((b.get("scenarios") or {}).items())],
+            }
         data.append(entry)
 
     def human():
         print()
         for e in data:
-            mark = out.ok("nainstalován " + e["installed"]) if e["installed"] else out.dim("neinstalován")
+            mark = out.ok("installed " + e["installed"]) if e["installed"] else out.dim("not installed")
             print(f"  {out.bold(e['name']):28} {e['version']:8} {mark}")
             print(f"  {'':28} {out.dim(e['description'] or '')}")
         print()
@@ -126,13 +148,13 @@ def cmd_add(args) -> int:
         for s in steps:
             print(f"  {icon[s['action']]} {s['to']:52} {out.dim(s['why'])}")
         if blocked:
-            print(f"\n  {out.err('Instalace zastavena.')} Soubory výše byly ručně změněny.")
-            print(out.dim("  Ruční úprava packu obvykle znamená, že v konfiguraci chybí pole —"))
-            print(out.dim("  doplň ho do .agency/, ne do metody. Přepsat i tak: --force."))
+            print(f"\n  {out.err('Installation stopped.')} The files above were modified by hand.")
+            print(out.dim("  Editing a pack by hand usually means a field is missing from the"))
+            print(out.dim("  configuration — add it to .agency/, not to the method. Overwrite anyway: --force."))
         elif args.dry_run:
-            print(f"\n  {out.dim('Zkušební běh, nic se nezapsalo.')}")
+            print(f"\n  {out.dim('Dry run, nothing was written.')}")
         else:
-            print(f"\n  Dál: {out.bold('agency doctor')}")
+            print(f"\n  Next: {out.bold('agency doctor')}")
         print()
 
     _emit(args, data, human)
@@ -148,17 +170,44 @@ def cmd_doctor(args) -> int:
     def check(name, ok, detail, fatal=True):
         checks.append({"name": name, "ok": bool(ok), "detail": detail, "fatal": fatal})
 
-    check("git", proc.which("git"), proc.which("git") or "není v PATH")
-    v = proc.crg_version()
-    check("code-review-graph", v, v or "není v PATH — `uv tool install code-review-graph`")
-    login = proc.gh_login()
-    check("gh auth", login, f"přihlášen jako {login}" if login else "nepřihlášen — `gh auth login`")
-    check("repo slug", project.slug, project.slug or "origin remote chybí")
+    # Nástroj je předpoklad jen tehdy, když ho někdo najatý opravdu chce.
+    # Projekt, který si najal jen QA, nemá svítit červeně kvůli grafu, který
+    # nepoužije — a naopak: dokud není najatý nikdo, platí přísnější výchozí stav.
+    hired = [p for p in packs.available() if packs.installed_ref(project, p.name)]
+    wanted: set[str] = set()
+    required_config: set[str] = set()
+    for p in hired:
+        wanted |= set((p.manifest.get("requires") or {}).get("tools") or [])
+        required_config |= set((p.manifest.get("config") or {}).get("required") or [])
 
-    graph = proc.crg_status(project.root)
-    check("graf kódu", graph["exists"],
-          f"{graph.get('sizeBytes', 0) // 1_000_000} MB" if graph["exists"]
-          else "chybí — postav `code-review-graph build`", fatal=False)
+    def needed(tool: str) -> bool:
+        return not hired or tool in wanted
+
+    def tool_check(name: str, tool: str, value, missing: str) -> None:
+        if value:
+            check(name, True, value, fatal=needed(tool))
+        elif needed(tool):
+            check(name, False, missing)
+        else:
+            check(name, True, "not needed by the specialists hired here", fatal=False)
+
+    check("git", proc.which("git"), proc.which("git") or "not on PATH")
+    tool_check("code-review-graph", "code-review-graph", proc.crg_version(),
+               "not on PATH — `uv tool install code-review-graph`")
+    login = proc.gh_login()
+    tool_check("gh auth", "gh", f"signed in as {login}" if login else None,
+               "not signed in — `gh auth login`")
+    slug_needed = not hired or "repo.slug" in required_config
+    check("repo slug", project.slug or not slug_needed,
+          project.slug or ("origin remote missing" if slug_needed
+                           else "no remote — the hired specialists do not need one"),
+          fatal=slug_needed)
+
+    if needed("code-review-graph"):
+        graph = proc.crg_status(project.root)
+        check("code graph", graph["exists"],
+              f"{graph.get('sizeBytes', 0) // 1_000_000} MB" if graph["exists"]
+              else "missing — build it with `code-review-graph build`", fatal=False)
 
     for p in packs.available():
         ref = packs.installed_ref(project, p.name)
@@ -168,11 +217,31 @@ def cmd_doctor(args) -> int:
         missing = [k for k in (p.manifest.get("config", {}).get("required") or [])
                    if not _dig(cfg, k)]
         check(f"pack {p.name}", not missing,
-              f"{ref}, konfigurace úplná" if not missing
-              else f"chybí povinné: {', '.join(missing)}")
+              f"{ref}, configuration complete" if not missing
+              else f"missing required: {', '.join(missing)}")
         if ref != p.ref:
-            check(f"pack {p.name} verze", False,
-                  f"nainstalováno {ref}, dostupné {p.ref} — `agency add {p.name}`", fatal=False)
+            check(f"pack {p.name} version", False,
+                  f"installed {ref}, available {p.ref} — `agency add {p.name}`", fatal=False)
+
+        # Pack, který zkouší běžící aplikaci, se má ptát dřív, než začne běh.
+        # Nedostupná aplikace je nejlevnější způsob, jak přijít o celé sezení.
+        base = (cfg.get("app") or {}).get("baseUrl")
+        if base:
+            ready = (cfg.get("app") or {}).get("readyCheck") or ""
+            ok, detail = proc.reachable(base.rstrip("/") + (ready if ready.startswith("/") else ""))
+            check(f"pack {p.name} app", ok, detail, fatal=False)
+
+        if (cfg.get("playwright") or {}).get("enabled"):
+            for name, ok, detail, is_fatal in _playwright_checks(project, cfg["playwright"]):
+                check(f"pack {p.name} {name}", ok, detail, fatal=is_fatal)
+
+        # Zadání je u packu, který ho vyžaduje, taky předpoklad — jen se nedá
+        # nainstalovat, musí ho napsat člověk.
+        if p.run_policy["prompt"]["required"]:
+            standing = ((cfg.get("brief") or {}).get("default") or "").strip()
+            check(f"pack {p.name} brief", True,
+                  standing[:60] if standing
+                  else "no standing brief — every run will need --prompt", fatal=False)
 
     fatal = [c for c in checks if not c["ok"] and c["fatal"]]
 
@@ -183,12 +252,54 @@ def cmd_doctor(args) -> int:
             print(f"  {icon} {c['name']:24} {out.dim(c['detail'])}")
         print()
         if fatal:
-            print(f"  {out.err('Běh by selhal.')} Oprav položky s ✗.\n")
+            print(f"  {out.err('A run would fail.')} Fix the items marked ✗.\n")
         else:
-            print(f"  {out.ok('Připraveno.')}  {out.dim('agency run review-graph --pr <n>')}\n")
+            print(f"  {out.ok('Ready.')}  {out.dim('agency run review-graph --pr <n>')}"
+                  f"  {out.dim('·')}  {out.dim('agency run qa --prompt \"…\"')}\n")
 
     _emit(args, {"checks": checks, "ok": not fatal}, human)
     return 1 if fatal else 0
+
+
+def _playwright_checks(project: config.Project, pw: dict) -> list[tuple]:
+    """Co musí platit, aby sezení dojelo prohlížečem.
+
+    Selhání Playwrightu přijde uprostřed sezení, po přihlášení a po deseti
+    krocích průchodu — a celé sezení tím padá. Zeptat se dopředu stojí
+    milisekundy.
+    """
+    rows: list[tuple] = []
+
+    npx = proc.which("npx") or proc.which("npx.cmd")
+    rows.append(("node", bool(npx),
+                 npx or "npx is not on PATH — Playwright is started through it", True))
+
+    local = (project.root / "node_modules" / "@playwright" / "test").is_dir()
+    scaffold = pw.get("scaffold") or "run-dir"
+    if local:
+        ok, detail, fatal = True, "@playwright/test is installed in the project", False
+    elif pw.get("configFile"):
+        # Konfigurace projektu se opírá o jeho fixtures, a ty bez node_modules
+        # nejsou. Náhradní konfigurace v běhovém adresáři to nezachrání —
+        # zachrání to `npm install`, tak to řekni rovnou.
+        ok, detail, fatal = (False,
+                             f"{pw['configFile']} is here, but @playwright/test is not "
+                             f"installed — `npm install`", False)
+    elif scaffold == "run-dir":
+        ok, detail, fatal = (True,
+                             "the project has no Playwright; the session sets one up inside "
+                             "the run directory", False)
+    else:
+        ok, detail, fatal = (False,
+                             "the project has no Playwright and scaffolding is off — turn it "
+                             "on or install Playwright", True)
+    rows.append(("playwright", ok, detail, fatal))
+
+    cache = proc.browser_cache()
+    rows.append(("browsers", bool(cache),
+                 cache or "not downloaded — `npx playwright install "
+                          + " ".join(pw.get("browsers") or ["chromium"]) + "`", False))
+    return rows
 
 
 def _dig(d: dict, dotted: str):
@@ -233,12 +344,12 @@ def cmd_prs(args) -> int:
 
     def human():
         if not rows:
-            print("\n  " + out.dim("Žádné PR.") + "\n")
+            print("\n  " + out.dim("No pull requests.") + "\n")
             return
         print()
         for r in rows:
-            tag = out.dim("mergnutý") if r["state"] == "merged" else out.ok("otevřený")
-            mark = out.dim(" · už recenzovaný") if r["reviewed"] else ""
+            tag = out.dim("merged") if r["state"] == "merged" else out.ok("open")
+            mark = out.dim(" · already reviewed") if r["reviewed"] else ""
             print(f"  #{r['number']:<5} {tag:20} {(r['title'] or '')[:58]:60}{mark}")
         print()
 
@@ -257,21 +368,21 @@ def _reviewed(project: config.Project, head: str | None) -> bool:
 
 # ---------------------------------------------------------------- run
 
+def _one_line(text: str, limit: int = 400) -> str:
+    """Zadání do spouštěcího příkazu. Víceřádkový text by terminál rozsekal."""
+    flat = " ".join((text or "").split())
+    return flat if len(flat) <= limit else flat[:limit].rstrip() + "…"
+
+
 def cmd_run(args) -> int:
     project = _project(args)
     cfg = _pack_cfg(project, args.pack)
     pack = packs.load(args.pack)
+    policy = pack.run_policy
 
     # V --json režimu se průběh potlačí, jinak by se mísil s výstupem
     # a extension by ho neuparsovala.
     out.quiet = bool(getattr(args, "json", False))
-
-    out.say(f"\n  {out.bold(pack.ref)} → {project.name}\n")
-
-    out.step("hledám PR")
-    target = runs.resolve_target(project, args.pr, args.latest_merged)
-    kind = "mergnutý (retrospektivní audit)" if target["kind"] == "merged-pull-request" else "otevřený"
-    out.done(f"PR #{target['pr']} — {target['title'][:58]}  {out.dim(kind)}")
 
     def refuse(reason: str, code: str) -> int:
         out.note(reason)
@@ -280,69 +391,125 @@ def cmd_run(args) -> int:
                              ensure_ascii=False, indent=2))
         return 1
 
-    if target["_isDraft"] and not args.force:
-        return refuse("PR je draft. Pokračuj s --force, jestli to je záměr.", "draft")
-    if runs.already_reviewed(target, proc.gh_login()) and not args.force:
+    out.say(f"\n  {out.bold(pack.ref)} → {project.name}\n")
+
+    # Zadání se řeší první. U packu, který ho vyžaduje, by běh bez něj jen
+    # spálil přípravu a skončil na agentovi, který neví, co má dělat.
+    asked = getattr(args, "prompt", None) or getattr(args, "scenario", None)
+    if asked and not policy["prompt"]["accepts"]:
+        raise SystemExit(
+            f"Pack “{pack.name}” does not take a brief — --prompt and --scenario have "
+            f"nothing to do here."
+        )
+    brief = runs.resolve_brief(cfg, getattr(args, "prompt", None), getattr(args, "scenario", None))
+    if policy["prompt"]["required"] and not (brief["focus"] or brief["standing"]):
         return refuse(
-            f"Commit {target['headRefOid'][:8]} už recenzovaný — marker je na PR. Znovu: --force.",
-            "already-reviewed")
+            f"{pack.manifest.get('title') or pack.name} needs to know what to work on. "
+            f"Pass --prompt \"…\", pick a --scenario, or write a standing brief into "
+            f"brief.default in {posix(project.pack_config_path(pack.name))}.",
+            "no-brief")
+
+    if policy["target"] == "workspace":
+        out.step("resolving the workspace")
+        target = runs.resolve_workspace_target(project, getattr(args, "since", None))
+        out.done(f"{target['ref']} @ {target['headRefOid'][:8]}"
+                 + (f"  {out.dim('uncommitted changes included')}" if target["dirty"] else ""))
+    else:
+        out.step("looking up the pull request")
+        target = runs.resolve_target(project, args.pr, args.latest_merged)
+        kind = "merged (retrospective audit)" if target["kind"] == "merged-pull-request" else "open"
+        out.done(f"PR #{target['pr']} — {target['title'][:58]}  {out.dim(kind)}")
+
+        if target["_isDraft"] and not args.force:
+            return refuse("The pull request is a draft. Continue with --force if that is intended.", "draft")
+        if runs.already_reviewed(target, proc.gh_login()) and not args.force:
+            return refuse(
+                f"Commit {target['headRefOid'][:8]} has already been reviewed — the marker is on the PR. Again: --force.",
+                "already-reviewed")
 
     skip = (cfg.get("review") or {}).get("skipPatterns") or []
     all_files = target.pop("_files", [])
     files = [f for f in all_files if not runs._skip(f, skip)]
     skipped = len(all_files) - len(files)
-    out.done(f"{len(files)} souborů k recenzi  {out.dim(f'({skipped} odfiltrováno)')}")
-    if not files:
-        return refuse("Po odfiltrování nezbyl žádný soubor — není co recenzovat.", "no-files")
+
+    if policy["target"] == "workspace":
+        # Prázdný seznam změn běh nezastaví: QA zkouší aplikaci, ne diff.
+        # Změny jsou vodítko, kde hledat nejdřív, ne hranice běhu.
+        out.done(f"{len(files)} changed files  {out.dim('— where to look first, not a boundary')}")
+    else:
+        out.done(f"{len(files)} files to review  {out.dim(f'({skipped} filtered out)')}")
+        if not files:
+            return refuse("No file left after filtering — there is nothing to review.", "no-files")
 
     run = runs.start(project, pack.ref, cfg, target)
-    out.step(f"běh {run.id}")
+    out.step(f"run {run.id}")
 
-    wt = None
+    wt = project.root
+    wt_owned = bool(policy["worktree"])
+    carried: list[str] = []
+    ginfo: dict = {}
     try:
-        out.step("stavím jednorázový worktree")
-        wt = runs.make_worktree(project, cfg, target)
-        out.done(posix(wt))
+        if wt_owned:
+            out.step("building a throwaway worktree")
+            wt = runs.make_worktree(project, cfg, target)
+            out.done(posix(wt))
 
-        out.step("kopíruji metodu packu do worktree")
-        carried = runs.materialize_pack(project, pack, wt)
-        out.done(f"{len(carried)} souborů" if carried
-                 else "pack v projektu nic neinstaluje")
+            out.step("copying the pack method into the worktree")
+            carried = runs.materialize_pack(project, pack, wt)
+            out.done(f"{len(carried)} files" if carried
+                     else "the pack installs nothing into the project")
+        else:
+            # Bez worktree, vědomě: aplikace, kterou pack zkouší, běží nad
+            # pracovní kopií — s nainstalovanými závislostmi a s .env.
+            # Zdrojový kód je pro takový běh ke ČTENÍ, zapisuje se do RUN_DIR.
+            out.done(f"working in the project itself  {out.dim(posix(wt))}")
 
-        out.step("aktualizuji graf")
-        ginfo = runs.prepare_graph(project, wt, cfg)
-        out.done(f"graf: {ginfo['action']}" + (f"  {out.dim(ginfo['tool'] or '')}" if ginfo.get("tool") else ""))
+        if policy["graph"]:
+            out.step("updating the graph")
+            ginfo = runs.prepare_graph(project, wt, cfg)
+            out.done(f"graph: {ginfo['action']}"
+                     + (f"  {out.dim(ginfo['tool'] or '')}" if ginfo.get("tool") else ""))
 
-        out.step("sbírám grafový signál")
-        stats = runs.collect_evidence(wt, run, target, files)
-        out.done("evidence/ naplněno" + (f"  {out.dim(str(stats))}" if stats else ""))
+            out.step("collecting graph signal")
+            stats = runs.collect_evidence(wt, run, target, files)
+            out.done("evidence/ filled" + (f"  {out.dim(str(stats))}" if stats else ""))
+        else:
+            out.step("collecting signal from the project")
+            stats = runs.collect_workspace_evidence(project, run, target, files)
+            out.done(f"evidence/ filled  {out.dim(str(stats))}")
 
-        runs.write_context(run, cfg, target, wt, files, skipped)
+        runs.write_context(run, cfg, target, wt, files, skipped,
+                           brief=brief, worktree_owned=wt_owned)
 
         rec = run.record()
-        rec["graph"] = {**ginfo, **stats}
+        if ginfo:
+            rec["graph"] = {**ginfo, **stats}
+        else:
+            rec["evidence"] = stats
+        rec["brief"] = brief
         rec["target"]["filesReviewed"] = len(files)
         rec["target"]["filesSkipped"] = skipped
         run.save_record(rec)
 
     except Exception:
-        if wt:
+        if wt_owned and wt != project.root:
             runs.remove_worktree(project, wt)
         rec = run.record()
         rec.update(status="failed", finishedAt=runs.now())
         run.save_record(rec)
         raise
 
-    # Skill se ve worktree najde jen díky materialize_pack výše. Kdyby pack
-    # do projektu nic neinstaloval, odkaž na metodu cestou — jinak by běh
-    # skončil na Unknown skill a uživatel by neměl kam sáhnout.
-    how = ("Použij skill agency-review-graph."
-           if any(str(c).endswith("SKILL.md") for c in carried)
-           else f"Přečti si metodu v {posix(project.root)}/.claude/skills/agency-review-graph/SKILL.md.")
+    # Kde se metoda packu vezme, ví `runs.method_hint` — ve worktree je jen
+    # díky materialize_pack, v projektu tam, kam ji položila instalace.
     prompt = (
-        f"{how} RUN_DIR={posix(run.dir)} — začni jeho context.json. "
-        f"Povinný výstup je RUN_DIR/findings.json podle finding.v1."
+        f"{runs.method_hint(pack, project, carried, in_worktree=wt_owned)} "
+        f"RUN_DIR={posix(run.dir)} — start from its context.json. "
+        f"The required output is RUN_DIR/findings.json following finding.v1."
     )
+    if brief["focus"]:
+        # Zadání jde i do spouštěcího příkazu, ne jen do context.json: uživatel
+        # má na obrazovce vidět, s čím agenta pouští.
+        prompt += " Brief for this run: " + _one_line(brief["focus"])
     launch, agent_info = runs.launch_argv(
         cfg, posix(run.dir), prompt,
         provider=getattr(args, "provider", None), model=getattr(args, "model", None))
@@ -358,6 +525,8 @@ def cmd_run(args) -> int:
             "runId": run.id,
             "runDir": posix(run.dir),
             "worktree": posix(wt),
+            "worktreeOwned": wt_owned,
+            "brief": brief,
             "prompt": prompt,
             # Hotový příkaz — tvar spuštění vlastní CLI, ne klient.
             "launch": launch,
@@ -370,24 +539,31 @@ def cmd_run(args) -> int:
         return 0
 
     out.say()
-    out.done("příprava hotová — deterministická část skončila")
+    out.done("preparation done — the deterministic part is finished")
     out.say()
-    out.say(f"  {out.dim('Worktree zůstává, dokud běh nedokončíš:')}")
-    out.say(f"  {out.dim(posix(wt))}")
+    if wt_owned:
+        out.say(f"  {out.dim('The worktree stays until you finish the run:')}")
+        out.say(f"  {out.dim(posix(wt))}")
+    else:
+        out.say(f"  {out.dim('The run works in the project itself — nothing to clean up afterwards.')}")
+    if brief["focus"] or brief["standing"]:
+        out.say()
+        out.say(f"  {out.dim('Brief:')} {_one_line(brief['focus'] or brief['standing'], 120)}")
     out.say()
 
     if args.launch:
         os.chdir(wt)
-        out.say(f"  {out.bold('spouštím claude…')}\n")
+        out.say(f"  {out.bold('launching claude…')}\n")
         os.execvp(launch[0], launch)
 
-    print(f"  {out.bold('Spusť recenzi:')}")
+    print(f"  {out.bold('Start it:')}")
     print(f"    cd {posix(wt)}")
     print("    " + " ".join(
         json.dumps(a, ensure_ascii=False) if " " in a else a for a in launch))
     print()
-    print(f"  {out.dim('Až doběhne:')}  agency ingest --run {run.id[:8]}")
-    print(f"  {out.dim('Úklid:')}        agency cleanup --run {run.id[:8]}")
+    print(f"  {out.dim('When it finishes:')}  agency ingest --run {run.id[:8]}")
+    if wt_owned:
+        print(f"  {out.dim('Cleanup:')}           agency cleanup --run {run.id[:8]}")
     print()
     return 0
 
@@ -396,15 +572,20 @@ def cmd_cleanup(args) -> int:
     project = _project(args)
     run = runs.find_run(project, args.run)
     if not run:
-        raise SystemExit("Žádný běh nenalezen.")
-    cfg = _pack_cfg(project, run.record().get("pack", "review-graph").split("@")[0])
+        raise SystemExit("No run found.")
     ctx = read_json(run.dir / "context.json", default={})
     wt = ctx.get("worktree")
+    # Běh bez vlastního worktree jel v pracovní kopii uživatele. Smazat ji by
+    # bylo to nejhorší, co tenhle nástroj může udělat — proto se to hlídá
+    # záznamem v kontextu, ne porovnáním cest.
+    if ctx.get("worktreeOwned") is False:
+        out.note("the run worked in the project itself — there is nothing to clean up")
+        return 0
     if wt and Path(wt).exists():
         runs.remove_worktree(project, Path(wt))
-        out.done(f"worktree odstraněn: {wt}")
+        out.done(f"worktree removed: {wt}")
     else:
-        out.note("worktree už neexistuje")
+        out.note("the worktree no longer exists")
     return 0
 
 
@@ -414,7 +595,7 @@ def cmd_validate(args) -> int:
     project = _project(args)
     run = runs.find_run(project, args.run)
     if not run:
-        raise SystemExit("Žádný běh nenalezen.")
+        raise SystemExit("No run found.")
 
     findings = run.findings()
     errors: list[dict] = []
@@ -427,11 +608,11 @@ def cmd_validate(args) -> int:
                 errors.append({"index": i, "id": f.get("id"),
                                "path": "/".join(str(p) for p in e.path), "message": e.message})
     except ImportError:
-        out.note("jsonschema není nainstalované, kontroluji jen povinná pole")
+        out.note("jsonschema is not installed, checking required fields only")
         for i, f in enumerate(findings):
             for key in ("id", "runId", "pack", "severity", "title", "body", "anchor", "evidence"):
                 if key not in f:
-                    errors.append({"index": i, "id": f.get("id"), "path": key, "message": "chybí"})
+                    errors.append({"index": i, "id": f.get("id"), "path": key, "message": "missing"})
 
     # Kotva se ověřuje proti pracovní kopii — nález, který nejde umístit, je
     # nález, který za měsíc nikdo nedohledá.
@@ -451,9 +632,9 @@ def cmd_validate(args) -> int:
     data = {"run": run.id, "findings": len(findings), "errors": errors, "anchors": resolved}
 
     def human():
-        print(f"\n  běh {out.bold(run.id)}  ·  {len(findings)} nálezů\n")
+        print(f"\n  run {out.bold(run.id)}  ·  {len(findings)} findings\n")
         if errors:
-            print(f"  {out.err('Kontrakt nesedí:')}")
+            print(f"  {out.err('The contract does not match:')}")
             for e in errors[:20]:
                 print(f"    #{e['index']} {e['path']}: {e['message'][:90]}")
             print()
@@ -463,7 +644,7 @@ def cmd_validate(args) -> int:
             print(f"  {icon} {loc:56} {out.dim(r['via'])} {out.dim(r['note'])}")
         print()
         if not errors:
-            print(f"  {out.ok('Nálezy odpovídají finding.v1.')}\n")
+            print(f"  {out.ok('The findings match finding.v1.')}\n")
 
     _emit(args, data, human)
     return 1 if errors else 0
@@ -476,29 +657,29 @@ def cmd_ingest(args) -> int:
     project = _project(args)
     run = runs.find_run(project, args.run)
     if not run:
-        raise SystemExit("Žádný běh nenalezen.")
+        raise SystemExit("No run found.")
 
     data = ingest.ingest(project, run, min_score=args.min_score)
 
     def human():
         c = data["counts"]
-        print(f"\n  běh {out.bold(run.id)}\n")
-        print(f"  {c['raw']:3} nálezů zapsal pack")
+        print(f"\n  run {out.bold(run.id)}\n")
+        print(f"  {c['raw']:3} findings written by the pack")
         if data["dropped"]:
-            print(f"  {out.err(str(c['gated']).rjust(3))} vyřazeno bránou")
+            print(f"  {out.err(str(c['gated']).rjust(3))} dropped by the gate")
             for d in data["dropped"]:
                 label = (d["title"] or d["id"] or "")[:52]
                 print(f"      {out.dim('·')} {label:54} {out.err(d['reason'])} "
                       f"{out.dim(d['detail'][:60])}")
         if data["duplicates"]:
-            print(f"  {out.warn(str(len(data['duplicates'])).rjust(3))} duplicit starších nálezů")
+            print(f"  {out.warn(str(len(data['duplicates'])).rjust(3))} duplicates of older findings")
             for d in data["duplicates"]:
                 label = (d["title"] or "")[:52]
                 ref = "= " + (d["duplicateOf"] or "")[:10]
                 print(f"      {out.dim('·')} {label:54} {out.dim(ref)} {out.dim(d['how'])}")
-        print(f"  {out.ok(str(c['kept']).rjust(3))} kandidátů k rozhodnutí\n")
+        print(f"  {out.ok(str(c['kept']).rjust(3))} candidates to decide\n")
         if c["kept"]:
-            print(f"  Dál: {out.bold('agency findings')}  nebo panel Agency ve VS Code\n")
+            print(f"  Next: {out.bold('agency findings')}  or the Agency panel in VS Code\n")
 
     _emit(args, data, human)
     return 0
@@ -520,7 +701,7 @@ def _bar(t: dict) -> str:
 def cmd_metrics(args) -> int:
     projects = registry.resolve() if args.all_projects else [_project(args)]
     if not projects:
-        raise SystemExit("Registr je prázdný — spusť `agency metrics` uvnitř projektu.")
+        raise SystemExit("The registry is empty — run `agency metrics` inside a project.")
     reports = [metrics.collect(p) for p in projects]
     data = reports if args.all_projects else reports[0]
 
@@ -530,37 +711,37 @@ def cmd_metrics(args) -> int:
             return
         print(f"  {out.dim(title)}")
         for k, v in rows.items():
-            tally = f"{v['accepted']} ok / {v['rejected']} ne"
+            tally = f"{v['accepted']} yes / {v['rejected']} no"
             print(f"    {k[:22]:24} {_bar(v)}  {out.dim(tally)}")
         print()
 
     def one(r: dict) -> None:
         f, t, q = r["findings"], r["triage"], r["queue"]
-        print(f"\n  {out.bold(r['project']['name'])}  {out.dim(str(r['runs']) + ' běhů')}\n")
-        undec = out.dim(f"  ({t['undecided']} nerozhodnuto)") if t["undecided"] else ""
+        print(f"\n  {out.bold(r['project']['name'])}  {out.dim(str(r['runs']) + ' runs')}\n")
+        undec = out.dim(f"  ({t['undecided']} undecided)") if t["undecided"] else ""
         print(f"  {out.bold('Precision')}   {_bar(t)}   "
-              f"{t['accepted']} přijato / {t['rejected']} zamítnuto{undec}")
+              f"{t['accepted']} accepted / {t['rejected']} rejected{undec}")
         if not (t["accepted"] + t["rejected"]):
-            print(f"  {out.dim('Zatím není z čeho počítat — precision vzniká až triage.')}")
+            print(f"  {out.dim('Nothing to compute from yet — precision comes out of triage.')}")
         print()
-        dedup_note = out.dim(f"({f['dedupRatio']:.0%} duplicit)") if f["dedupRatio"] else ""
-        print(f"  {out.dim('Průchod bránou')}  {f['raw']} zapsáno → {f['kept']} kandidátů  {dedup_note}")
+        dedup_note = out.dim(f"({f['dedupRatio']:.0%} duplicates)") if f["dedupRatio"] else ""
+        print(f"  {out.dim('Gate')}            {f['raw']} written → {f['kept']} candidates  {dedup_note}")
         if f["gatedBy"]:
-            print(f"  {out.dim('Vyřazeno')}        "
+            print(f"  {out.dim('Dropped')}         "
                   + ", ".join(f"{v}x {k}" for k, v in f["gatedBy"].items()))
         if q["undecided"]:
-            age = f", medián {q['medianAgeDays']} dní" if q["medianAgeDays"] else ""
-            old = f", nejstarší {q['oldestDays']} dní" if q["oldestDays"] else ""
-            print(f"  {out.dim('Fronta')}          {q['undecided']} čeká{age}{old}")
+            age = f", median {q['medianAgeDays']} days" if q["medianAgeDays"] else ""
+            old = f", oldest {q['oldestDays']} days" if q["oldestDays"] else ""
+            print(f"  {out.dim('Queue')}           {q['undecided']} waiting{age}{old}")
         if r["cost"]["secondsPerKeptFinding"]:
-            print(f"  {out.dim('Cena')}            "
-                  f"{r['cost']['secondsPerKeptFinding']} s na kandidáta")
+            print(f"  {out.dim('Cost')}            "
+                  f"{r['cost']['secondsPerKeptFinding']} s per candidate")
         print()
-        table("po dimenzích", r["byDimension"])
-        table("po severitě", r["bySeverity"])
-        table("po modelech", r["byModel"])
+        table("by dimension", r["byDimension"])
+        table("by severity", r["bySeverity"])
+        table("by model", r["byModel"])
         if r["rejectReasons"]:
-            print(f"  {out.dim('důvody zamítnutí')}")
+            print(f"  {out.dim('reasons for rejection')}")
             for k, v in r["rejectReasons"].items():
                 print(f"    {k[:22]:24} {v}")
             print()
@@ -580,11 +761,11 @@ def cmd_export(args) -> int:
     number = args.project_number or (cfg.get("sinks") or {}).get("githubProject")
     if not number:
         raise SystemExit(
-            "Není kam exportovat. Doplň `sinks.githubProject` do "
-            f"{posix(project.pack_config_path(args.pack))}, nebo použij --project <číslo>.")
+            "Nowhere to export to. Add `sinks.githubProject` to "
+            f"{posix(project.pack_config_path(args.pack))}, or use --project <number>.")
     owner = args.owner or (project.slug or "/").split("/")[0]
     if not owner:
-        raise SystemExit("Nepoznám ownera Projectu. Použij --owner.")
+        raise SystemExit("Cannot tell who owns the Project. Use --owner.")
 
     if args.run:
         r = runs.find_run(project, args.run)
@@ -594,14 +775,14 @@ def cmd_export(args) -> int:
     rows = export.plan(selected, only_decided=not args.include_undecided)
     if not rows:
         raise SystemExit(
-            "Není co exportovat. Exportují se rozhodnuté nálezy — "
-            "zatriaguj je, nebo pusť s --include-undecided.")
+            "Nothing to export. Only decided findings are exported — "
+            "triage them, or run with --include-undecided.")
 
     data = export.push(rows, int(number), owner, dry_run=args.dry_run)
 
     def human():
         if data["dryRun"]:
-            head = "Zkušební běh — nic se neodeslalo"
+            head = "Dry run — nothing was sent"
         else:
             title = data["project"].get("title")
             head = f"Project #{number} ({owner})" + (f" — {title}" if title else "")
@@ -611,12 +792,12 @@ def cmd_export(args) -> int:
         for r in data["updated"]:
             print(f"  {out.dim('~')} {(r['title'] or '')[:70]}")
         for r in data["fieldSkips"]:
-            print(f"  {out.warn('!')} pole {r['field']}: {r['why']}")
+            print(f"  {out.warn('!')} field {r['field']}: {r['why']}")
         for r in data["failed"]:
             print(f"  {out.err('x')} {(r['title'] or '')[:50]} — {r['error']}")
-        fail = out.err(f", {len(data['failed'])} selhalo") if data["failed"] else ""
-        print(f"\n  {len(data['created'])} nových, "
-              f"{len(data['updated'])} aktualizovaných{fail}\n")
+        fail = out.err(f", {len(data['failed'])} failed") if data["failed"] else ""
+        print(f"\n  {len(data['created'])} new, "
+              f"{len(data['updated'])} updated{fail}\n")
 
     _emit(args, data, human)
     return 1 if data["failed"] else 0
@@ -642,13 +823,13 @@ def cmd_projects(args) -> int:
 
     def human():
         if not rows:
-            print(f"\n  {out.dim('Registr je prázdný. Naplní se prvním `agency add` v projektu.')}\n")
+            print(f"\n  {out.dim('The registry is empty. It fills up with the first `agency add` in a project.')}\n")
             return
         print()
         for r in rows:
-            badge = out.warn(f"{r['undecided']} k rozhodnutí") if r["undecided"] else out.dim("čisto")
-            packs_ = ", ".join(r["packs"]) or "bez packu"
-            print(f"  {out.bold(r['name']):28} {r['runs']:3} běhů  {badge:24} {out.dim(packs_)}")
+            badge = out.warn(f"{r['undecided']} to decide") if r["undecided"] else out.dim("clear")
+            packs_ = ", ".join(r["packs"]) or "no pack"
+            print(f"  {out.bold(r['name']):28} {r['runs']:3} runs  {badge:24} {out.dim(packs_)}")
             print(f"  {'':28} {out.dim(r['root'])}")
         print()
 
@@ -699,10 +880,10 @@ def cmd_findings(args) -> int:
 
     def human():
         if not rows:
-            print(f"\n  {out.dim('Žádné nálezy. Spusť `agency run review-graph --pr <n>`.')}\n")
+            print(f"\n  {out.dim('No findings. Run `agency run review-graph --pr <n>`.')}\n")
             return
         undecided = sum(1 for r in rows if not r["decision"])
-        print(f"\n  {len(rows)} nálezů, {undecided} bez rozhodnutí\n")
+        print(f"\n  {len(rows)} findings, {undecided} undecided\n")
         mark = {"accepted": out.ok("✔"), "rejected": out.err("✘"), "deferred": out.warn("⏱")}
         sev = {"blocker": out.err("●"), "high": out.err("●"), "medium": out.warn("●"), "low": out.dim("●")}
         for r in rows:
@@ -721,7 +902,7 @@ def _run_with_finding(project: config.Project, finding_id: str) -> runs.Run:
     for r in runs.load_runs(project):
         if any(f.get("id") == finding_id for f in r.findings()):
             return r
-    raise SystemExit(f"Nález „{finding_id}“ jsem v žádném běhu nenašel.")
+    raise SystemExit(f"Finding “{finding_id}” was not found in any run.")
 
 
 def cmd_triage(args) -> int:
@@ -739,6 +920,157 @@ def cmd_triage(args) -> int:
     return _emit(args, ev, human)
 
 
+def _set_path(data: dict, dotted: str, value) -> None:
+    cur = data
+    parts = dotted.split(".")
+    for part in parts[:-1]:
+        nxt = cur.get(part)
+        if not isinstance(nxt, dict):
+            nxt = {}
+            cur[part] = nxt
+        cur = nxt
+    cur[parts[-1]] = value
+
+
+def _unset_path(data: dict, dotted: str) -> bool:
+    cur = data
+    parts = dotted.split(".")
+    for part in parts[:-1]:
+        cur = cur.get(part)
+        if not isinstance(cur, dict):
+            return False
+    return cur.pop(parts[-1], _MISSING) is not _MISSING
+
+
+_MISSING = object()
+
+
+def cmd_config(args) -> int:
+    """Konfigurace packu — čtení i zápis jednou cestou.
+
+    Zapisovat sem smí i klient: nastavení bydlí v projektu, ne v editoru, takže
+    co nastavíš klikem, platí i pro běh z terminálu a pro agenta. Kdyby si
+    extension držela vlastní kopii nastavení, byly by dvě pravdy o jedné věci.
+    """
+    project = _project(args)
+    pack = packs.load(args.pack)
+    path = project.pack_config_path(pack.name)
+    if not path.is_file():
+        raise SystemExit(f"Pack “{pack.name}” is not installed here. Run `agency add {pack.name}`.")
+
+    raw = read_json(path, default={})
+    changed: list[str] = []
+
+    for pair in (args.set_pairs or []):
+        key, sep, value = pair.partition("=")
+        if not sep:
+            raise SystemExit(f"Expected key=value, got “{pair}”.")
+        key = key.strip()
+        if key.split(".")[0] == "pack":
+            raise SystemExit("`pack` is stamped by the installation — change it with `agency add`.")
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            parsed = value  # holý text je platná hodnota, ne chyba
+        _set_path(raw, key, parsed)
+        changed.append(key)
+
+    for key in (args.unset or []):
+        if _unset_path(raw, key):
+            changed.append(f"-{key}")
+
+    if changed:
+        write_json(path, raw)
+
+    data = {
+        "pack": pack.name,
+        "path": posix(path),
+        "config": strip_comments(raw),
+        # Co si nástroj o projektu domyslí sám. Klient tím umí ukázat „tenhle
+        # projekt už Playwright má" místo prázdného pole k vyplnění.
+        "detected": config.detect(project),
+        "run": pack.run_policy,
+        "changed": changed,
+    }
+
+    def human():
+        print(f"\n  {out.bold(pack.name)}  {out.dim(posix(path))}\n")
+        if changed:
+            print(f"  {out.ok('updated')} {', '.join(changed)}\n")
+        print(json.dumps(data["config"], ensure_ascii=False, indent=2))
+        print()
+
+    return _emit(args, data, human)
+
+
+def cmd_brief(args) -> int:
+    """Co má pack dělat — trvale, nebo pod jménem.
+
+    Zadání je konfigurace projektu, ne argument jednoho spuštění: „na tomhle
+    projektu vždycky zkoušej rezervace a platby“ nemá cenu psát pokaždé znovu.
+    Zapisuje se do `.agency/<pack>.json` k ostatní konfiguraci a čte ho stejně
+    CLI, extension i agent.
+    """
+    project = _project(args)
+    pack = packs.load(args.pack)
+    path = project.pack_config_path(pack.name)
+    if not path.is_file():
+        raise SystemExit(f"Pack “{pack.name}” is not installed here. Run `agency add {pack.name}`.")
+
+    # Čte se surový soubor včetně komentářů — konfiguraci vlastní projekt
+    # a zápis z CLI mu nesmí vymazat dokumentaci šablony.
+    raw = read_json(path, default={})
+    brief = raw.setdefault("brief", {})
+    scenarios = brief.setdefault("scenarios", {})
+    changed = False
+
+    if args.remove:
+        if not args.scenario:
+            raise SystemExit("--remove needs --scenario <name>.")
+        if args.scenario not in scenarios:
+            raise SystemExit(f"There is no scenario “{args.scenario}”.")
+        scenarios.pop(args.scenario)
+        changed = True
+    elif args.set_text is not None:
+        text = args.set_text.strip()
+        if args.scenario:
+            if not text:
+                raise SystemExit("An empty scenario makes no sense — use --remove.")
+            scenarios[args.scenario] = text
+        else:
+            brief["default"] = text or None
+        changed = True
+
+    if changed:
+        write_json(path, raw)
+
+    data = {
+        "pack": pack.name,
+        "configPath": posix(path),
+        "accepts": pack.run_policy["prompt"]["accepts"],
+        "standing": brief.get("default"),
+        "scenarios": [{"name": k, "text": v} for k, v in sorted(scenarios.items())],
+        "changed": changed,
+    }
+
+    def human():
+        print(f"\n  {out.bold(pack.name)}  {out.dim(posix(path))}\n")
+        if not data["accepts"]:
+            print(f"  {out.warn('This pack does not take a brief.')} "
+                  f"{out.dim('The text would be written but never read.')}\n")
+        print(f"  {out.bold('standing')}  {out.dim('— applies to every run of this pack')}")
+        print(f"    {data['standing'] or out.dim('not set')}")
+        print()
+        print(f"  {out.bold('scenarios')} {out.dim('— agency run ' + pack.name + ' --scenario <name>')}")
+        if not data["scenarios"]:
+            print(f"    {out.dim('none')}")
+        for sc in data["scenarios"]:
+            print(f"    {out.ok(sc['name']):20} {out.dim(_one_line(sc['text'], 70))}")
+        print()
+
+    return _emit(args, data, human)
+
+
 def cmd_note(args) -> int:
     """Poznámka k nálezu. Vlastní příkaz, protože poznámka není rozhodnutí."""
     project = _project(args)
@@ -749,6 +1081,15 @@ def cmd_note(args) -> int:
         print(f"  {args.finding}: {ev['text']}")
 
     return _emit(args, ev, human)
+
+
+def _target_label(target: dict) -> str:
+    """Jak se cíl běhu jmenuje na jeden řádek."""
+    if target.get("pr"):
+        return f"PR #{target['pr']}"
+    if target.get("kind") == "workspace":
+        return target.get("ref") or "workspace"
+    return target.get("title") or "—"
 
 
 def cmd_status(args) -> int:
@@ -764,22 +1105,27 @@ def cmd_status(args) -> int:
             "startedAt": rec.get("startedAt"),
             "target": (rec.get("target") or {}).get("pr"),
             "kind": (rec.get("target") or {}).get("kind"),
+            # Popisek cíle skládá jádro, ne klient — běh bez PR by se v UI
+            # jinak ukazoval jako holé ULID.
+            "targetLabel": _target_label(rec.get("target") or {}),
+            "brief": (rec.get("brief") or {}).get("focus")
+                     or (rec.get("brief") or {}).get("standing"),
             "findings": len(fs), "undecided": sum(1 for f in fs if f.get("id") not in dec),
         })
 
     def human():
         print(f"\n  {out.bold(project.name)}  {out.dim(posix(project.root))}")
         installed = [f"{n} {v.get('ref')}" for n, v in (project.installed().get("packs") or {}).items()]
-        print(f"  {out.dim('packy:')} {', '.join(installed) or out.dim('žádné')}\n")
+        print(f"  {out.dim('packs:')} {', '.join(installed) or out.dim('none')}\n")
         if not data:
-            print(f"  {out.dim('Zatím žádné běhy.')}\n")
+            print(f"  {out.dim('No runs yet.')}\n")
             return
         for d in data:
             icon = {"ok": out.ok("✓"), "no-findings": out.ok("○"), "running": out.warn("…"),
                     "failed": out.err("✗")}.get(d["status"], out.dim("·"))
-            pr = f"PR #{d['target']}" if d["target"] else "—"
-            print(f"  {icon} {d['id'][:10]} {pr:9} {d['findings']:3} nálezů "
-                  f"{out.dim(f'{d['undecided']} nerozhodnuto'):24} {out.dim(d['startedAt'] or '')}")
+            pr = d["targetLabel"] or "—"
+            print(f"  {icon} {d['id'][:10]} {pr[:18]:18} {d['findings']:3} findings "
+                  f"{out.dim(f'{d['undecided']} undecided'):24} {out.dim(d['startedAt'] or '')}")
         print()
 
     return _emit(args, data, human)
@@ -792,89 +1138,94 @@ def build_parser() -> argparse.ArgumentParser:
     # psát výhradně PŘED subpříkazem a `agency findings --json` by spadlo.
     # Konzumentem toho výstupu je extension a agent, takže na tom UX záleží.
     common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("--repo", help="kořen projektu (výchozí: aktuální git repo)")
-    common.add_argument("--json", action="store_true", help="strojově čitelný výstup")
+    common.add_argument("--repo", help="project root (default: the current git repo)")
+    common.add_argument("--json", action="store_true", help="machine-readable output")
 
     p = argparse.ArgumentParser(
         prog="agency",
         parents=[common],
-        description="Specialisté, které si najmeš do repozitáře. Attended, na tvém "
-                    "přihlášení, s doloženými nálezy, které zůstanou.",
+        description="Specialists you hire into your repository. Attended, on your own "
+                    "login, with evidence-backed findings that stay.",
     )
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    s = sub.add_parser("init", parents=[common], help="rozpozná projekt a řekne, co o něm ví")
+    s = sub.add_parser("init", parents=[common], help="detect the project and report what is known about it")
     s.set_defaults(fn=cmd_init)
 
-    s = sub.add_parser("packs", parents=[common], help="dostupní specialisté")
+    s = sub.add_parser("packs", parents=[common], help="available specialists")
     s.set_defaults(fn=cmd_packs)
 
-    s = sub.add_parser("add", parents=[common], help="nainstaluje packa do projektu")
+    s = sub.add_parser("add", parents=[common], help="install a pack into the project")
     s.add_argument("pack")
-    s.add_argument("--from", dest="from_path", help="cesta k packu (pro vývoj)")
+    s.add_argument("--from", dest="from_path", help="path to the pack (for development)")
     s.add_argument("--dry-run", action="store_true")
-    s.add_argument("--force", action="store_true", help="přepsat i ručně změněné soubory")
+    s.add_argument("--force", action="store_true", help="overwrite hand-modified files too")
     s.set_defaults(fn=cmd_add)
 
-    s = sub.add_parser("doctor", parents=[common], help="ověří předpoklady DŘÍV, než začne běh")
+    s = sub.add_parser("doctor", parents=[common], help="check the prerequisites BEFORE a run starts")
     s.set_defaults(fn=cmd_doctor)
 
-    s = sub.add_parser("prs", parents=[common], help="PR k recenzi — otevřené i prošlé")
+    s = sub.add_parser("prs", parents=[common], help="pull requests to review — open and merged")
     s.add_argument("--state", choices=["open", "merged", "all"], default="all")
     s.add_argument("--limit", type=int, default=20)
     s.set_defaults(fn=cmd_prs)
 
-    s = sub.add_parser("run", parents=[common], help="připraví běh packu nad PR")
+    s = sub.add_parser("run", parents=[common],
+                       help="prepare a pack run — over a pull request, or over the project as it is")
     s.add_argument("pack")
-    s.add_argument("--pr", type=int, help="číslo PR (výchozí: PR aktuální větve)")
+    s.add_argument("--pr", type=int, help="PR number (default: the PR of the current branch)")
     s.add_argument("--latest-merged", action="store_true",
-                   help="poslední mergnutý PR — retrospektivní audit")
-    s.add_argument("--launch", action="store_true", help="rovnou spustit agenta")
-    s.add_argument("--model", help="model pro tenhle běh (přebije agent.model z konfigurace)")
-    s.add_argument("--provider", help="claude | codex (přebije agent.provider)")
-    s.add_argument("--force", action="store_true", help="i draft nebo už recenzovaný commit")
+                   help="the last merged PR — retrospective audit")
+    s.add_argument("--prompt", "-p",
+                   help="what this run should focus on — free text, for packs that take a brief")
+    s.add_argument("--scenario", help="a named brief from the pack configuration (brief.scenarios)")
+    s.add_argument("--since", help="base ref for a run over the project (default: the default branch)")
+    s.add_argument("--launch", action="store_true", help="start the agent right away")
+    s.add_argument("--model", help="model for this run (overrides agent.model from the configuration)")
+    s.add_argument("--provider", help="claude | codex (overrides agent.provider)")
+    s.add_argument("--force", action="store_true", help="a draft or an already reviewed commit too")
     s.set_defaults(fn=cmd_run)
 
-    s = sub.add_parser("validate", parents=[common], help="ověří findings.json proti kontraktu a kotvy proti kódu")
-    s.add_argument("--run", help="id běhu (výchozí: poslední)")
+    s = sub.add_parser("validate", parents=[common], help="check findings.json against the contract and the anchors against the code")
+    s.add_argument("--run", help="run id (default: the latest)")
     s.set_defaults(fn=cmd_validate)
 
     s = sub.add_parser("ingest", parents=[common],
-                       help="brána: kontrakt, existence, práh, dedup — DŘÍV než se nález stane nálezem")
-    s.add_argument("--run", help="id běhu (výchozí: poslední)")
-    s.add_argument("--min-score", type=int, help="přebije review.minScore z konfigurace")
+                       help="the gate: contract, existence, threshold, dedup — BEFORE a finding becomes a finding")
+    s.add_argument("--run", help="run id (default: the latest)")
+    s.add_argument("--min-score", type=int, help="overrides review.minScore from the configuration")
     s.set_defaults(fn=cmd_ingest)
 
     s = sub.add_parser("metrics", parents=[common],
-                       help="precision, dedup, stáří fronty — po dimenzích, severitě a modelech")
-    s.add_argument("--all-projects", action="store_true", help="napříč registrem projektů")
+                       help="precision, dedup, queue age — by dimension, severity and model")
+    s.add_argument("--all-projects", action="store_true", help="across the project registry")
     s.set_defaults(fn=cmd_metrics)
 
-    s = sub.add_parser("export", parents=[common], help="jednosměrný push do GitHub Projectu")
+    s = sub.add_parser("export", parents=[common], help="one-way push into a GitHub Project")
     s.add_argument("target", choices=["github"])
     s.add_argument("--pack", default="review-graph")
-    s.add_argument("--run", help="jen jeden běh (výchozí: všechny)")
+    s.add_argument("--run", help="a single run only (default: all)")
     s.add_argument("--project", dest="project_number", type=int,
-                   help="číslo Projectu (výchozí: sinks.githubProject)")
-    s.add_argument("--owner", help="owner Projectu (výchozí: z git remote)")
+                   help="Project number (default: sinks.githubProject)")
+    s.add_argument("--owner", help="Project owner (default: from the git remote)")
     s.add_argument("--include-undecided", action="store_true",
-                   help="i nálezy bez rozhodnutí")
-    s.add_argument("--dry-run", action="store_true", help="jen ukázat, co by odešlo")
+                   help="undecided findings too")
+    s.add_argument("--dry-run", action="store_true", help="only show what would be sent")
     s.set_defaults(fn=cmd_export)
 
-    s = sub.add_parser("projects", parents=[common], help="projekty, ve kterých Agency něco dělá")
+    s = sub.add_parser("projects", parents=[common], help="projects where Agency is doing something")
     s.set_defaults(fn=cmd_projects)
 
-    s = sub.add_parser("cleanup", parents=[common], help="odstraní worktree běhu")
+    s = sub.add_parser("cleanup", parents=[common], help="remove the worktree of a run")
     s.add_argument("--run")
     s.set_defaults(fn=cmd_cleanup)
 
-    s = sub.add_parser("findings", parents=[common], help="nálezy a jejich rozhodnutí")
+    s = sub.add_parser("findings", parents=[common], help="findings and their decisions")
     s.add_argument("--run")
-    s.add_argument("--all", action="store_true", help="napříč všemi běhy")
+    s.add_argument("--all", action="store_true", help="across all runs")
     s.set_defaults(fn=cmd_findings)
 
-    s = sub.add_parser("triage", parents=[common], help="rozhodnutí o nálezu — volá i agent")
+    s = sub.add_parser("triage", parents=[common], help="decide on a finding — an agent calls this too")
     s.add_argument("action", choices=["accept", "reject", "defer"])
     s.add_argument("finding")
     s.add_argument("--reason", choices=list(runs.REJECT_REASONS))
@@ -882,13 +1233,30 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--by", default="cli")
     s.set_defaults(fn=cmd_triage)
 
-    s = sub.add_parser("note", parents=[common], help="poznámka k nálezu — volný text, ne rozhodnutí")
+    s = sub.add_parser("config", parents=[common],
+                       help="pack configuration — show it, or change it with --set")
+    s.add_argument("pack")
+    s.add_argument("--set", dest="set_pairs", action="append", metavar="KEY=VALUE",
+                   help="dotted path, JSON value (repeatable): --set playwright.enabled=true")
+    s.add_argument("--unset", action="append", metavar="KEY", help="remove a key")
+    s.set_defaults(fn=cmd_config)
+
+    s = sub.add_parser("brief", parents=[common],
+                       help="the standing brief of a pack and its named scenarios — show or set")
+    s.add_argument("pack")
+    s.add_argument("--set", dest="set_text",
+                   help="new text; without --scenario it becomes the standing brief")
+    s.add_argument("--scenario", help="name of the scenario the text belongs to")
+    s.add_argument("--remove", action="store_true", help="remove the scenario given by --scenario")
+    s.set_defaults(fn=cmd_brief)
+
+    s = sub.add_parser("note", parents=[common], help="a note on a finding — free text, not a decision")
     s.add_argument("finding")
     s.add_argument("text")
     s.add_argument("--by", default="cli")
     s.set_defaults(fn=cmd_note)
 
-    s = sub.add_parser("status", parents=[common], help="přehled běhů projektu")
+    s = sub.add_parser("status", parents=[common], help="overview of the project runs")
     s.add_argument("--limit", type=int, default=10)
     s.set_defaults(fn=cmd_status)
 
@@ -925,7 +1293,7 @@ def main(argv: list[str] | None = None) -> int:
     except SystemExit:
         raise
     except KeyboardInterrupt:
-        print("\n  přerušeno")
+        print("\n  interrupted")
         return 130
 
 

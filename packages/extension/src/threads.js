@@ -21,16 +21,16 @@ const CONTROLLER_ID = 'agency.findings';
 const SEV_ICON = { blocker: '🔴', high: '🔴', medium: '🟠', low: '🟡' };
 
 const DRIFT_LABEL = {
-  untouched: '✅ **Kód je od analýzy nezměněný** — nález platí doslova.',
-  touched: '⚠️ **Na tenhle kód se od analýzy sáhlo** — může být opravené, podívej se na diff.',
-  deleted: '🗑️ **Soubor byl od analýzy smazán.**',
-  unknown: '❔ Commit není v klonu, drift se nedá vyhodnotit.',
+  untouched: '✅ **The code has not changed since the analysis** — the finding holds literally.',
+  touched: '⚠️ **This code was touched since the analysis** — it may be fixed, look at the diff.',
+  deleted: '🗑️ **The file was deleted after the analysis.**',
+  unknown: '❔ The commit is not in this clone, drift cannot be evaluated.',
 };
 
 class Threads {
   constructor(log) {
     this.log = log;
-    this.controller = vscode.comments.createCommentController(CONTROLLER_ID, 'Agency — nálezy');
+    this.controller = vscode.comments.createCommentController(CONTROLLER_ID, 'Agency — findings');
     // Uživatel nezakládá vlastní vlákna — komentář bez nálezu by neměl kam patřit.
     this.controller.commentingRangeProvider = { provideCommentingRanges: () => [] };
     this.threads = [];
@@ -84,11 +84,11 @@ class Threads {
     if (f.body) md.appendMarkdown(`${f.body}\n\n`);
     md.appendMarkdown('---\n\n');
     md.appendMarkdown(`${DRIFT_LABEL[f.drift] || DRIFT_LABEL.unknown}\n\n`);
-    md.appendMarkdown(`Nalezeno na \`${String(a.commit || '').slice(0, 8)}\` · `
+    md.appendMarkdown(`Found at \`${String(a.commit || '').slice(0, 8)}\` · `
       + `\`${a.file}:${a.line}\``);
     if (f.resolved && f.resolved.note) md.appendMarkdown(` · ${f.resolved.note}`);
     const ev = (f.evidence || []).length;
-    if (ev) md.appendMarkdown(`\n\nEvidence: ${ev}× — [celý detail](command:agency.finding.open?${
+    if (ev) md.appendMarkdown(`\n\nEvidence: ${ev}× — [full detail](command:agency.finding.open?${
       encodeURIComponent(JSON.stringify([f.id]))})`);
     return {
       body: md,
@@ -105,7 +105,7 @@ class Threads {
         md.appendMarkdown(e.text || '');
         return { body: md, mode: vscode.CommentMode.Preview, author: { name: `📝 ${e.by}` } };
       }
-      const mark = { accepted: '✔ Přijato', rejected: '✘ Zamítnuto', deferred: '⏱ Odloženo' }[e.state]
+      const mark = { accepted: '✔ Accepted', rejected: '✘ Rejected', deferred: '⏱ Deferred' }[e.state]
         || e.state;
       md.appendMarkdown(`**${mark}**${e.reason ? ` — \`${e.reason}\`` : ''}`);
       if (e.note) md.appendMarkdown(`\n\n${e.note}`);
@@ -149,9 +149,9 @@ class Threads {
     }
 
     if (this.log) {
-      this.log.appendLine(`[vlákna] ${this.threads.length} z ${findings.length} nálezů `
-        + `(pracovní kopie ${stats['working-tree']}, z commitu ${stats['at-commit']}, `
-        + `neumístěno ${stats.none})`);
+      this.log.appendLine(`[threads] ${this.threads.length} of ${findings.length} findings `
+        + `(working tree ${stats['working-tree']}, from commit ${stats['at-commit']}, `
+        + `unplaced ${stats.none})`);
     }
     return { stats, cancelled: false };
   }
