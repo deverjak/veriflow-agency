@@ -16,20 +16,44 @@
     "onStartupFinished"
   ],
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "agency",
+          "title": "Agency",
+          "icon": "resources/agency.svg"
+        }
+      ]
+    },
+    "views": {
+      "agency": [
+        {
+          "id": "agency.findings.view",
+          "name": "Nálezy"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "agency.spike.run",
-        "title": "Agency Spike: Spustit všechny kontroly",
-        "category": "Agency"
+        "title": "Spustit všechny kontroly",
+        "category": "Agency",
+        "icon": "$(play)"
       },
       {
         "command": "agency.spike.showThreads",
-        "title": "Agency Spike: Vytvořit vlákna nálezů",
+        "title": "Vytvořit vlákna nálezů",
+        "category": "Agency",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "agency.spike.reveal",
+        "title": "Otevřít nález",
         "category": "Agency"
       },
       {
         "command": "agency.spike.clear",
-        "title": "Agency Spike: Zahodit vlákna",
+        "title": "Zahodit vlákna",
         "category": "Agency"
       },
       {
@@ -78,6 +102,10 @@
         {
           "command": "agency.finding.diffAgainstHead",
           "when": "false"
+        },
+        {
+          "command": "agency.spike.reveal",
+          "when": "false"
         }
       ],
       "comments/commentThread/title": [
@@ -107,6 +135,18 @@
           "command": "agency.finding.reject",
           "group": "inline@1",
           "when": "commentController == agency.findings"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "agency.spike.run",
+          "group": "navigation@1",
+          "when": "view == agency.findings.view"
+        },
+        {
+          "command": "agency.spike.showThreads",
+          "group": "navigation@2",
+          "when": "view == agency.findings.view"
         }
       ]
     }

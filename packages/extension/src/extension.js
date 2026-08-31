@@ -25,6 +25,10 @@ let controller;
 let threads = [];
 /** @type {vscode.OutputChannel} */
 let log;
+/** @type {vscode.StatusBarItem} */
+let status;
+/** poslední výsledek buildThreads(), krmí strom v sidebaru */
+let lastResults = [];
 /** rozhodnutí drží spike v paměti; v ostrém nástroji jde do .agency/runs/ */
 const decisions = new Map();
 
@@ -266,14 +270,67 @@ async function buildThreads() {
       threads.push(thread);
     }
 
-    results.push({ f, drift, resolution, placed });
+    results.push({ f, drift, resolution, placed, uri, line });
   }
+  lastResults = results;
+  if (tree) tree.refresh();
+  updateStatus();
   return { fx, results };
 }
 
 function clearThreads() {
   for (const t of threads) { try { t.dispose(); } catch (_) { /* už zaniklo */ } }
   threads = [];
+}
+
+// ------------------------------------------------- sidebar (předtest §3 UI)
+
+class FindingsTree {
+  constructor() {
+    this._emitter = new vscode.EventEmitter();
+    this.onDidChangeTreeData = this._emitter.event;
+  }
+  refresh() { this._emitter.fire(); }
+  getChildren() {
+    return lastResults.map((r, i) => ({ r, i }));
+  }
+  /** @returns {vscode.TreeItem} */
+  getTreeItem(node) {
+    const { r } = node;
+    const d = decisions.get(r.f.id);
+    const item = new vscode.TreeItem(
+      `${severityIcon(r.f.severity)} ${r.f.title}`,
+      vscode.TreeItemCollapsibleState.None);
+    const loc = r.resolution.line !== null
+      ? `${path.basename(r.f.anchor.file)}:${r.resolution.line}`
+      : `${path.basename(r.f.anchor.file)} — neumístěno`;
+    item.description = `${loc} · ${r.placed}`;
+    const md = new vscode.MarkdownString();
+    md.appendMarkdown(`**${r.f.title}**\n\n`);
+    md.appendMarkdown(`- soubor: \`${r.f.anchor.file}\`\n`);
+    md.appendMarkdown(`- commit: \`${r.f.anchor.commit.slice(0, 8)}\`, řádek ${r.f.anchor.line}\n`);
+    md.appendMarkdown(`- drift: \`${r.drift}\`\n`);
+    md.appendMarkdown(`- kotva: \`${r.resolution.via}\`${r.resolution.note ? ' — ' + r.resolution.note : ''}\n`);
+    if (d) md.appendMarkdown(`- rozhodnutí: **${d.state}**${d.reason ? ' — ' + d.reason : ''}\n`);
+    item.tooltip = md;
+    item.iconPath = new vscode.ThemeIcon(
+      d ? (d.state === 'accepted' ? 'check' : d.state === 'rejected' ? 'x' : 'clock')
+        : r.placed === 'none' ? 'warning' : r.drift === 'touched' ? 'git-compare' : 'circle-outline');
+    item.command = { command: 'agency.spike.reveal', title: 'Otevřít', arguments: [node.i] };
+    return item;
+  }
+}
+
+/** @type {FindingsTree} */
+let tree;
+
+function updateStatus() {
+  if (!status) return;
+  const placed = lastResults.filter(r => r.placed !== 'none').length;
+  status.text = `$(search) Agency: ${placed}/${lastResults.length} nálezů`;
+  status.tooltip = 'Agency spike — klikni pro report';
+  status.command = 'agency.spike.run';
+  status.show();
 }
 
 // -------------------------------------------------------------------- report
@@ -372,6 +429,7 @@ function record(thread, state, reason) {
 function activate(context) {
   log = vscode.window.createOutputChannel('Agency Spike');
   context.subscriptions.push(log);
+  log.appendLine(`[aktivace] ${new Date().toISOString()}`);
 
   controller = vscode.comments.createCommentController(CONTROLLER_ID, 'Agency — nálezy');
   controller.commentingRangeProvider = { provideCommentingRanges: () => [] }; // uživatel nezakládá vlastní
@@ -379,6 +437,14 @@ function activate(context) {
 
   context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider(
     SCHEME, new CommitContentProvider()));
+
+  tree = new FindingsTree();
+  context.subscriptions.push(vscode.window.registerTreeDataProvider('agency.findings.view', tree));
+
+  status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+  status.text = '$(search) Agency: načítám…';
+  status.show();
+  context.subscriptions.push(status);
 
   const reg = (id, fn) => context.subscriptions.push(vscode.commands.registerCommand(id, fn));
 
@@ -428,7 +494,31 @@ function activate(context) {
       `${path.basename(a.file)} — ${a.commit.slice(0, 8)} ↔ pracovní kopie`);
   });
 
-  log.appendLine('Agency spike aktivní. Spusť „Agency Spike: Spustit všechny kontroly".');
+  reg('agency.spike.reveal', async (idx) => {
+    const r = lastResults[idx];
+    if (!r) return;
+    if (!r.uri || r.line === null) {
+      vscode.window.showWarningMessage(
+        `„${r.f.title}" se nepodařilo umístit — ${r.resolution.note}`);
+      return;
+    }
+    const doc = await vscode.workspace.openTextDocument(r.uri);
+    const ed = await vscode.window.showTextDocument(doc, { preview: false });
+    const l = Math.min(Math.max(r.line, 1), doc.lineCount) - 1;
+    ed.revealRange(new vscode.Range(l, 0, l, 0), vscode.TextEditorRevealType.InCenter);
+    ed.selection = new vscode.Selection(l, 0, l, 0);
+  });
+
+  // Vlákna se staví hned po aktivaci — jinak vypadá spike jako by se nenačetl.
+  buildThreads().then(({ results }) => {
+    log.appendLine(`[aktivace] ${threads.length} vláken z ${results.length} nálezů`);
+  }).catch(e => {
+    log.appendLine(`[aktivace] selhalo: ${e && e.stack}`);
+    if (status) { status.text = '$(error) Agency: chyba'; status.tooltip = String(e && e.message); }
+    vscode.window.showErrorMessage(`Agency spike: ${e && e.message} — detail v Output → Agency Spike.`);
+  });
+
+  log.appendLine('Agency spike aktivní. Ikona v activity baru vlevo, nebo paleta → „Agency".');
 }
 
 function deactivate() { clearThreads(); }
