@@ -1,0 +1,139 @@
+{
+  "repo": "C:\\Users\\kubad\\Documents\\coding\\chytre-digital\\main-panel",
+  "head": "2a4cce003d91cabc7b37b10c615bdf474e24f24f",
+  "generated": "spike",
+  "findings": [
+    {
+      "id": "f1",
+      "severity": "high",
+      "title": "Predfiltr posila kontraktu cenikovou cenu, zatimco odpoved pocita se snapshotem",
+      "case": "no-drift",
+      "anchor": {
+        "file": "src/application/marketplace/getMyBookings.ts",
+        "line": 517,
+        "endLine": 522,
+        "commit": "93dc76a73721d9164707cf1248999baa7590357b",
+        "snippet": "      priceCents: row.eventOccurrence?.event?.priceCents ?? row.payment?.priceCents,",
+        "body": "      priceCents: row.eventOccurrence?.event?.priceCents ?? row.payment?.priceCents,\n      onlineCheckoutAvailable: true,\n      paymentRequired: row.eventOccurrence?.event?.paymentRequired ?? null,\n      occurrenceStatus: row.eventOccurrence?.status ?? null,\n      paymentHoldExpiresAt: row.payment?.paymentHoldExpiresAt,\n    }).payable;",
+        "symbol": null
+      }
+    },
+    {
+      "id": "f2",
+      "severity": "high",
+      "title": "Poradi kontrol radi zaplatit lektorovi u zrusene rezervace",
+      "case": "no-drift",
+      "anchor": {
+        "file": "src/domain/booking/onlinePaymentEligibility.ts",
+        "line": 132,
+        "endLine": 146,
+        "commit": "93dc76a73721d9164707cf1248999baa7590357b",
+        "snippet": "  if (input.paymentStatus === \"not_required\" || input.paymentRequired === false) {",
+        "body": "  if (input.paymentStatus === \"not_required\" || input.paymentRequired === false) {\n    return blocked(\"manual_settlement\");\n  }\n\n  if (input.bookingStatus !== \"confirmed\") {\n    return blocked(\"booking_not_confirmed\");\n  }\n\n  if (input.occurrenceStatus != null && input.occurrenceStatus !== \"scheduled\") {\n    return blocked(\"occurrence_not_available\");\n  }\n\n  if (input.paymentHoldExpiresAt != null) {\n    return blocked(\"checkout_in_flight\");\n  }",
+        "symbol": null
+      }
+    },
+    {
+      "id": "f3",
+      "severity": "medium",
+      "title": "PayOutstandingButton vypisuje zakaznikovi syrovy text ze serveru",
+      "case": "no-drift",
+      "anchor": {
+        "file": "src/presentation/components/user/PayOutstandingButton.tsx",
+        "line": 36,
+        "endLine": 56,
+        "commit": "93dc76a73721d9164707cf1248999baa7590357b",
+        "snippet": "      // `jsonError` shape: { error: <message>, code, details } — see respond.ts.",
+        "body": "      // `jsonError` shape: { error: <message>, code, details } — see respond.ts.\n      const payload = (await response.json().catch(() => ({}))) as {\n        checkoutUrl?: string;\n        error?: string;\n        code?: string;\n      };\n      if (!response.ok || !payload.checkoutUrl) {\n        // #452: the server now says WHY. The button is only rendered on rows the\n        // shared eligibility contract cleared, so reaching this at all means the\n        // page is stale (the instructor marked it paid, cancelled the term,\n        // switched Connect off) — name the state instead of the old blanket\n        // \"online payment is not available right now\", which left a customer\n        // with a debt and no next step.\n        notifications.show({\n          title: t('finances.payOnlineUnavailable'),\n          message: mapBookingErrorCode(payload.code, locale, '', payload.error),\n          color: 'orange',\n        });\n        setLoading(false);\n        return;\n      }",
+        "symbol": null
+      }
+    },
+    {
+      "id": "f4",
+      "severity": "medium",
+      "title": "Parity test zahazuje outstanding radek prave v pokrytem pripade",
+      "case": "no-drift",
+      "anchor": {
+        "file": "tests/integration/marketplace/historicalBookingCheckoutParity.test.ts",
+        "line": 460,
+        "endLine": 463,
+        "commit": "93dc76a73721d9164707cf1248999baa7590357b",
+        "snippet": "      const { booking } = await readConsole(customer.userId, customer.email, bookingId);",
+        "body": "      const { booking } = await readConsole(customer.userId, customer.email, bookingId);\n      expect(booking?.payment?.payable).toBe(false);\n      expect(booking?.payment?.payableBlocker).toBe(\"occurrence_not_available\");\n    });",
+        "symbol": null
+      }
+    },
+    {
+      "id": "f5",
+      "severity": "low",
+      "title": "Docblock slibuje zaruku, kterou kod prestal davat",
+      "case": "no-drift",
+      "anchor": {
+        "file": "src/application/marketplace/resolveLessonPayment.ts",
+        "line": 151,
+        "endLine": 160,
+        "commit": "93dc76a73721d9164707cf1248999baa7590357b",
+        "snippet": "/**",
+        "body": "/**\n * Booking statuses on which an unpaid booking counts as outstanding/payable.\n * Shared by the Finances tab overview and the Bookings tab pay button so the\n * two surfaces can never drift apart.\n */\nexport const PAYABLE_BOOKING_STATUSES: ReadonlySet<string> = new Set([\n  \"confirmed\",\n  \"attended\",\n  \"no_show\",\n]);",
+        "symbol": null
+      }
+    },
+    {
+      "id": "f6",
+      "severity": "high",
+      "title": "DRIFT TEST: radek se posunul 62 -> 47 (soubor +1012/-865)",
+      "case": "drifted",
+      "expect": {
+        "resolvedLine": 47,
+        "via": "snippet"
+      },
+      "anchor": {
+        "file": "src/presentation/components/admin/BookingsTabPanel.tsx",
+        "line": 62,
+        "endLine": 62,
+        "commit": "10818e09014287e0c71b2718300bbc6f2ed70a2c",
+        "snippet": "  bookingParticipantDisplayName,",
+        "body": "  bookingParticipantDisplayName,",
+        "symbol": null
+      }
+    },
+    {
+      "id": "f7",
+      "severity": "medium",
+      "title": "DRIFT TEST: soubor byl od te doby smazan",
+      "case": "deleted",
+      "expect": {
+        "resolvedLine": null,
+        "via": "none"
+      },
+      "anchor": {
+        "file": "src/app/[locale]/account/page.tsx",
+        "line": 10,
+        "endLine": 14,
+        "commit": "10818e09014287e0c71b2718300bbc6f2ed70a2c",
+        "snippet": "  const { locale } = await params;",
+        "body": "import { redirect } from 'next/navigation';\nimport { loadAccountSettingsContext } from '@/application/account/loadAccountSettingsContext';\nimport { AccountSettingsView } from '@/presentation/components/account/AccountSettingsView';\n\nexport default async function AccountPage({\n  params,\n}: {\n  params: Promise<{ locale: string }>;\n}) {\n  const { locale } = await params;\n\n  let context;\n  try {\n    context = await loadAccountSettingsContext(locale);\n  } catch {\n    redirect(`/${locale}/login`);\n  }\n\n  return <AccountSettingsView context={context} />;\n}",
+        "symbol": null
+      }
+    },
+    {
+      "id": "f8",
+      "severity": "low",
+      "title": "DRIFT TEST: cislo radku je za koncem souboru",
+      "case": "out-of-bounds",
+      "expect": {
+        "resolvedLine": null,
+        "via": "none"
+      },
+      "anchor": {
+        "file": "src/application/marketplace/resolveLessonPayment.ts",
+        "line": 99999,
+        "endLine": 99999,
+        "commit": "93dc76a73721d9164707cf1248999baa7590357b",
+        "snippet": "tenhle radek nikdy neexistoval",
+        "body": "",
+        "symbol": null
+      }
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Spike: CommentController nad main-panelem",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/packages/extension",
+        "--disable-extensions",
+        "C:\\Users\\kubad\\Documents\\coding\\chytre-digital\\main-panel"
+      ],
+      "outFiles": []
+    }
+  ]
+}

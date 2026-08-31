@@ -1,0 +1,114 @@
+{
+  "name": "agency-spike",
+  "displayName": "Agency — CommentController spike",
+  "description": "Zjišťovací spike: unese VS Code Comments API nálezy zakotvené na jiný commit než working tree?",
+  "version": "0.0.1",
+  "publisher": "veriflow",
+  "private": true,
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./src/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "agency.spike.run",
+        "title": "Agency Spike: Spustit všechny kontroly",
+        "category": "Agency"
+      },
+      {
+        "command": "agency.spike.showThreads",
+        "title": "Agency Spike: Vytvořit vlákna nálezů",
+        "category": "Agency"
+      },
+      {
+        "command": "agency.spike.clear",
+        "title": "Agency Spike: Zahodit vlákna",
+        "category": "Agency"
+      },
+      {
+        "command": "agency.finding.accept",
+        "title": "Přijmout",
+        "icon": "$(check)"
+      },
+      {
+        "command": "agency.finding.defer",
+        "title": "Odložit",
+        "icon": "$(clock)"
+      },
+      {
+        "command": "agency.finding.reject",
+        "title": "Zamítnout s důvodem"
+      },
+      {
+        "command": "agency.finding.openAtCommit",
+        "title": "Ukázat kód v den analýzy",
+        "icon": "$(history)"
+      },
+      {
+        "command": "agency.finding.diffAgainstHead",
+        "title": "Porovnat s pracovní kopií",
+        "icon": "$(git-compare)"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "agency.finding.accept",
+          "when": "false"
+        },
+        {
+          "command": "agency.finding.defer",
+          "when": "false"
+        },
+        {
+          "command": "agency.finding.reject",
+          "when": "false"
+        },
+        {
+          "command": "agency.finding.openAtCommit",
+          "when": "false"
+        },
+        {
+          "command": "agency.finding.diffAgainstHead",
+          "when": "false"
+        }
+      ],
+      "comments/commentThread/title": [
+        {
+          "command": "agency.finding.accept",
+          "group": "inline@1",
+          "when": "commentController == agency.findings"
+        },
+        {
+          "command": "agency.finding.defer",
+          "group": "inline@2",
+          "when": "commentController == agency.findings"
+        },
+        {
+          "command": "agency.finding.openAtCommit",
+          "group": "inline@3",
+          "when": "commentController == agency.findings"
+        },
+        {
+          "command": "agency.finding.diffAgainstHead",
+          "group": "inline@4",
+          "when": "commentController == agency.findings"
+        }
+      ],
+      "comments/commentThread/context": [
+        {
+          "command": "agency.finding.reject",
+          "group": "inline@1",
+          "when": "commentController == agency.findings"
+        }
+      ]
+    }
+  }
+}
