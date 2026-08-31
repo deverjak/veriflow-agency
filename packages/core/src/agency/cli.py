@@ -12,7 +12,7 @@ import os
 import sys
 from pathlib import Path
 
-from . import anchor, config, packs, proc, runs
+from . import anchor, config, dedup, export, ingest, metrics, packs, proc, registry, runs
 from .util import bundled, out, posix, read_json, ulid, write_json
 
 # ---------------------------------------------------------------- pomůcky
@@ -27,7 +27,16 @@ def _emit(args, data, human) -> int:
 
 
 def _project(args) -> config.Project:
-    return config.require(getattr(args, "repo", None))
+    project = config.require(getattr(args, "repo", None))
+    # Registr je ukazatel, ne uloziste — plni se tim, ze v projektu neco delas.
+    # Podminka na .agency drzi z registru projekty, kde jsi jen omylem spustil
+    # `agency status`; ukazatel na nic je horsi nez chybejici ukazatel.
+    if project.agency_dir.is_dir():
+        try:
+            registry.remember(project)
+        except OSError:
+            pass  # registr je postradatelny, prace kvuli nemu nespadne
+    return project
 
 
 def _pack_cfg(project: config.Project, pack_name: str) -> dict:
@@ -95,6 +104,7 @@ def cmd_add(args) -> int:
 
     if not args.dry_run and not blocked:
         packs.apply(pack, project, steps, detected=config.detect(project))
+        registry.remember(project)  # .agency vzniklo az ted
 
     data = {"pack": pack.ref, "dryRun": args.dry_run,
             "steps": [{k: v for k, v in s.items() if k != "src"} for s in steps]}
@@ -366,7 +376,7 @@ def cmd_run(args) -> int:
     print("    " + " ".join(
         json.dumps(a, ensure_ascii=False) if " " in a else a for a in launch))
     print()
-    print(f"  {out.dim('Až doběhne:')}  agency validate --run {run.id[:8]}")
+    print(f"  {out.dim('Až doběhne:')}  agency ingest --run {run.id[:8]}")
     print(f"  {out.dim('Úklid:')}        agency cleanup --run {run.id[:8]}")
     print()
     return 0
@@ -425,12 +435,9 @@ def cmd_validate(args) -> int:
                          "resolvedLine": r.line, "via": r.via, "note": r.note,
                          "drift": anchor.drift(project.root, a)})
 
-    rec = run.record()
-    rec["counts"] = {**(rec.get("counts") or {}), "kept": len(findings)}
-    rec["status"] = "ok" if findings and not errors else ("no-findings" if not findings else "failed")
-    rec.setdefault("finishedAt", runs.now())
-    run.save_record(rec)
-
+    # `validate` je ČTENÍ. Stav běhu mění `ingest` — kdyby ho psaly obě cesty,
+    # nešlo by z run recordu poznat, jestli nálezy prošly bránou, nebo jestli
+    # je někdo jen zkontroloval.
     data = {"run": run.id, "findings": len(findings), "errors": errors, "anchors": resolved}
 
     def human():
@@ -450,6 +457,192 @@ def cmd_validate(args) -> int:
 
     _emit(args, data, human)
     return 1 if errors else 0
+
+
+# ---------------------------------------------------------------- ingest
+
+def cmd_ingest(args) -> int:
+    """Brána mezi tím, co napsal agent, a tím, co se stane nálezem."""
+    project = _project(args)
+    run = runs.find_run(project, args.run)
+    if not run:
+        raise SystemExit("Žádný běh nenalezen.")
+
+    data = ingest.ingest(project, run, min_score=args.min_score)
+
+    def human():
+        c = data["counts"]
+        print(f"\n  běh {out.bold(run.id)}\n")
+        print(f"  {c['raw']:3} nálezů zapsal pack")
+        if data["dropped"]:
+            print(f"  {out.err(str(c['gated']).rjust(3))} vyřazeno bránou")
+            for d in data["dropped"]:
+                label = (d["title"] or d["id"] or "")[:52]
+                print(f"      {out.dim('·')} {label:54} {out.err(d['reason'])} "
+                      f"{out.dim(d['detail'][:60])}")
+        if data["duplicates"]:
+            print(f"  {out.warn(str(len(data['duplicates'])).rjust(3))} duplicit starších nálezů")
+            for d in data["duplicates"]:
+                label = (d["title"] or "")[:52]
+                ref = "= " + (d["duplicateOf"] or "")[:10]
+                print(f"      {out.dim('·')} {label:54} {out.dim(ref)} {out.dim(d['how'])}")
+        print(f"  {out.ok(str(c['kept']).rjust(3))} kandidátů k rozhodnutí\n")
+        if c["kept"]:
+            print(f"  Dál: {out.bold('agency findings')}  nebo panel Agency ve VS Code\n")
+
+    _emit(args, data, human)
+    return 0
+
+
+# ---------------------------------------------------------------- metrics
+
+def _bar(t: dict) -> str:
+    """Precision jako proužek. None není nula — prázdno se kreslí jako pomlčka,
+    protože „nevím" a „nic z toho neplatí" jsou dvě různé zprávy."""
+    p = t.get("precision")
+    if p is None:
+        return out.dim("—".ljust(10)) + "     "
+    filled = round(p * 10)
+    color = out.ok if p >= 0.7 else out.warn if p >= 0.4 else out.err
+    return color("#" * filled + "." * (10 - filled)) + f" {p:.0%}".rjust(5)
+
+
+def cmd_metrics(args) -> int:
+    projects = registry.resolve() if args.all_projects else [_project(args)]
+    if not projects:
+        raise SystemExit("Registr je prázdný — spusť `agency metrics` uvnitř projektu.")
+    reports = [metrics.collect(p) for p in projects]
+    data = reports if args.all_projects else reports[0]
+
+    def table(title: str, rows: dict) -> None:
+        rows = {k: v for k, v in (rows or {}).items() if v["accepted"] + v["rejected"]}
+        if not rows:
+            return
+        print(f"  {out.dim(title)}")
+        for k, v in rows.items():
+            tally = f"{v['accepted']} ok / {v['rejected']} ne"
+            print(f"    {k[:22]:24} {_bar(v)}  {out.dim(tally)}")
+        print()
+
+    def one(r: dict) -> None:
+        f, t, q = r["findings"], r["triage"], r["queue"]
+        print(f"\n  {out.bold(r['project']['name'])}  {out.dim(str(r['runs']) + ' běhů')}\n")
+        undec = out.dim(f"  ({t['undecided']} nerozhodnuto)") if t["undecided"] else ""
+        print(f"  {out.bold('Precision')}   {_bar(t)}   "
+              f"{t['accepted']} přijato / {t['rejected']} zamítnuto{undec}")
+        if not (t["accepted"] + t["rejected"]):
+            print(f"  {out.dim('Zatím není z čeho počítat — precision vzniká až triage.')}")
+        print()
+        dedup_note = out.dim(f"({f['dedupRatio']:.0%} duplicit)") if f["dedupRatio"] else ""
+        print(f"  {out.dim('Průchod bránou')}  {f['raw']} zapsáno → {f['kept']} kandidátů  {dedup_note}")
+        if f["gatedBy"]:
+            print(f"  {out.dim('Vyřazeno')}        "
+                  + ", ".join(f"{v}x {k}" for k, v in f["gatedBy"].items()))
+        if q["undecided"]:
+            age = f", medián {q['medianAgeDays']} dní" if q["medianAgeDays"] else ""
+            old = f", nejstarší {q['oldestDays']} dní" if q["oldestDays"] else ""
+            print(f"  {out.dim('Fronta')}          {q['undecided']} čeká{age}{old}")
+        if r["cost"]["secondsPerKeptFinding"]:
+            print(f"  {out.dim('Cena')}            "
+                  f"{r['cost']['secondsPerKeptFinding']} s na kandidáta")
+        print()
+        table("po dimenzích", r["byDimension"])
+        table("po severitě", r["bySeverity"])
+        table("po modelech", r["byModel"])
+        if r["rejectReasons"]:
+            print(f"  {out.dim('důvody zamítnutí')}")
+            for k, v in r["rejectReasons"].items():
+                print(f"    {k[:22]:24} {v}")
+            print()
+
+    def human():
+        for r in reports:
+            one(r)
+
+    return _emit(args, data, human)
+
+
+# ---------------------------------------------------------------- export
+
+def cmd_export(args) -> int:
+    project = _project(args)
+    cfg = _pack_cfg(project, args.pack)
+    number = args.project_number or (cfg.get("sinks") or {}).get("githubProject")
+    if not number:
+        raise SystemExit(
+            "Není kam exportovat. Doplň `sinks.githubProject` do "
+            f"{posix(project.pack_config_path(args.pack))}, nebo použij --project <číslo>.")
+    owner = args.owner or (project.slug or "/").split("/")[0]
+    if not owner:
+        raise SystemExit("Nepoznám ownera Projectu. Použij --owner.")
+
+    if args.run:
+        r = runs.find_run(project, args.run)
+        selected = [r] if r else []
+    else:
+        selected = runs.load_runs(project)
+    rows = export.plan(selected, only_decided=not args.include_undecided)
+    if not rows:
+        raise SystemExit(
+            "Není co exportovat. Exportují se rozhodnuté nálezy — "
+            "zatriaguj je, nebo pusť s --include-undecided.")
+
+    data = export.push(rows, int(number), owner, dry_run=args.dry_run)
+
+    def human():
+        if data["dryRun"]:
+            head = "Zkušební běh — nic se neodeslalo"
+        else:
+            title = data["project"].get("title")
+            head = f"Project #{number} ({owner})" + (f" — {title}" if title else "")
+        print(f"\n  {out.bold(head)}\n")
+        for r in data["created"]:
+            print(f"  {out.ok('+')} {(r['title'] or '')[:70]}")
+        for r in data["updated"]:
+            print(f"  {out.dim('~')} {(r['title'] or '')[:70]}")
+        for r in data["fieldSkips"]:
+            print(f"  {out.warn('!')} pole {r['field']}: {r['why']}")
+        for r in data["failed"]:
+            print(f"  {out.err('x')} {(r['title'] or '')[:50]} — {r['error']}")
+        fail = out.err(f", {len(data['failed'])} selhalo") if data["failed"] else ""
+        print(f"\n  {len(data['created'])} nových, "
+              f"{len(data['updated'])} aktualizovaných{fail}\n")
+
+    _emit(args, data, human)
+    return 1 if data["failed"] else 0
+
+
+# ---------------------------------------------------------------- projects
+
+def cmd_projects(args) -> int:
+    rows = []
+    for p in registry.resolve():
+        all_runs = runs.load_runs(p)
+        undecided = 0
+        for r in all_runs:
+            dec = runs.decisions(r)
+            undecided += sum(1 for f in r.findings()
+                             if f.get("state") != "duplicate" and f.get("id") not in dec)
+        rows.append({
+            "name": p.name, "slug": p.slug, "root": posix(p.root),
+            "packs": sorted((p.installed().get("packs") or {}).keys()),
+            "runs": len(all_runs), "undecided": undecided,
+            "lastRun": all_runs[0].record().get("startedAt") if all_runs else None,
+        })
+
+    def human():
+        if not rows:
+            print(f"\n  {out.dim('Registr je prázdný. Naplní se prvním `agency add` v projektu.')}\n")
+            return
+        print()
+        for r in rows:
+            badge = out.warn(f"{r['undecided']} k rozhodnutí") if r["undecided"] else out.dim("čisto")
+            packs_ = ", ".join(r["packs"]) or "bez packu"
+            print(f"  {out.bold(r['name']):28} {r['runs']:3} běhů  {badge:24} {out.dim(packs_)}")
+            print(f"  {'':28} {out.dim(r['root'])}")
+        print()
+
+    return _emit(args, rows, human)
 
 
 # ---------------------------------------------------------------- findings
@@ -616,6 +809,32 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("validate", parents=[common], help="ověří findings.json proti kontraktu a kotvy proti kódu")
     s.add_argument("--run", help="id běhu (výchozí: poslední)")
     s.set_defaults(fn=cmd_validate)
+
+    s = sub.add_parser("ingest", parents=[common],
+                       help="brána: kontrakt, existence, práh, dedup — DŘÍV než se nález stane nálezem")
+    s.add_argument("--run", help="id běhu (výchozí: poslední)")
+    s.add_argument("--min-score", type=int, help="přebije review.minScore z konfigurace")
+    s.set_defaults(fn=cmd_ingest)
+
+    s = sub.add_parser("metrics", parents=[common],
+                       help="precision, dedup, stáří fronty — po dimenzích, severitě a modelech")
+    s.add_argument("--all-projects", action="store_true", help="napříč registrem projektů")
+    s.set_defaults(fn=cmd_metrics)
+
+    s = sub.add_parser("export", parents=[common], help="jednosměrný push do GitHub Projectu")
+    s.add_argument("target", choices=["github"])
+    s.add_argument("--pack", default="review-graph")
+    s.add_argument("--run", help="jen jeden běh (výchozí: všechny)")
+    s.add_argument("--project", dest="project_number", type=int,
+                   help="číslo Projectu (výchozí: sinks.githubProject)")
+    s.add_argument("--owner", help="owner Projectu (výchozí: z git remote)")
+    s.add_argument("--include-undecided", action="store_true",
+                   help="i nálezy bez rozhodnutí")
+    s.add_argument("--dry-run", action="store_true", help="jen ukázat, co by odešlo")
+    s.set_defaults(fn=cmd_export)
+
+    s = sub.add_parser("projects", parents=[common], help="projekty, ve kterých Agency něco dělá")
+    s.set_defaults(fn=cmd_projects)
 
     s = sub.add_parser("cleanup", parents=[common], help="odstraní worktree běhu")
     s.add_argument("--run")

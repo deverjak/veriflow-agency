@@ -22,3 +22,13 @@ packages = ["src/agency"]
 [tool.hatch.build.targets.wheel.force-include]
 "../../packs" = "agency/_bundled/packs"
 "../../schemas" = "agency/_bundled/schemas"
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+# Testy jádra běží mimo VS Code i mimo skutečné repozitáře uživatele — celý
+# řetěz se staví nad dočasným git repem, takže jdou pustit stokrát za sebou.
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "tests"]
+addopts = "-q"
