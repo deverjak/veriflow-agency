@@ -214,5 +214,21 @@ check('bez CLI se stromy nevykreslí prázdné položky', () => {
   assert.deepStrictEqual(new views.OverviewTree().roots(), []);
 });
 
+check('doctor z CLI chodí jako {checks:[…]}, strom čeká pole', () => {
+  // Nesoulad, který by shodil celý Přehled na `.filter is not a function`.
+  // Rozbaluje se v cli.js, na jednom místě — proto na to stačí jeden test.
+  const cli = require(path.join(SRC, 'cli.js'));
+  assert.strictEqual(typeof cli.doctor, 'function');
+  Object.assign(state.snapshot, {
+    probe: { ok: true }, cwd: 'C:/projekt', loadedAt: new Date(),
+    project: { slug: 'org/repo' },
+    doctor: [{ name: 'gh auth', ok: false, detail: 'nepřihlášen', fatal: true }],
+    packs: [], runs: [], findings: [], metrics: null,
+  });
+  const rows = new views.OverviewTree().roots();
+  const req = rows.find((r) => r.item.label === 'Předpoklady');
+  assert.strictEqual(req.item.description, '1 problém');
+});
+
 console.log(failed ? `\n${failed} selhalo\n` : '\nvšechno prošlo\n');
 process.exit(failed ? 1 : 0);

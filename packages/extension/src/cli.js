@@ -67,7 +67,16 @@ async function probe(cwd) {
 }
 
 const init = (cwd) => read(cwd, ['init'], null);
-const doctor = (cwd) => read(cwd, ['doctor'], []);
+
+/**
+ * Kontroly předpokladů. `agency doctor --json` je balí do `{checks: […]}`,
+ * protože k nim časem přibude souhrn; klient to rozbalí tady, na jednom místě,
+ * a zbytek extension vidí prosté pole.
+ */
+async function doctor(cwd) {
+  const d = await read(cwd, ['doctor'], []);
+  return Array.isArray(d) ? d : (d && d.checks) || [];
+}
 const packs = (cwd) => read(cwd, ['packs'], []);
 const status = (cwd) => read(cwd, ['status', '--limit', '25'], []);
 const metrics = (cwd) => read(cwd, ['metrics'], null);
