@@ -75,8 +75,8 @@
       },
       {
         "command": "agency.finding.defer",
-        "title": "Odložit",
-        "icon": "$(clock)"
+        "title": "Odložit na později",
+        "icon": "$(bookmark)"
       },
       {
         "command": "agency.finding.reject.not-reproducible",
@@ -108,7 +108,7 @@
       },
       {
         "command": "agency.finding.openAtCommit",
-        "title": "Ukázat kód v den analýzy",
+        "title": "Ukázat kód v den analýzy (read-only z commitu)",
         "icon": "$(history)"
       },
       {
