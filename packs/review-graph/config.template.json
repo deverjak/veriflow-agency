@@ -1,0 +1,52 @@
+{
+  "$comment": "Šablona konfigurace packu review-graph. `agency add review-graph` ji zkopíruje do <projekt>/.agency/review-graph.json a doplní, co pozná sám. Tenhle soubor vlastní PROJEKT — upgrade packu ho nikdy nepřepíše.",
+
+  "pack": "review-graph@0.1.0",
+
+  "repo": {
+    "slug": null,
+    "$comment_slug": "owner/repo. Doplní `agency init` z git remote."
+  },
+
+  "graph": {
+    "db": ".code-review-graph/graph.db",
+    "onStale": "update",
+    "$comment_onStale": "update = přírůstkově doindexovat (rychlé, správné pro PR) | build = přestavět od nuly (drahé, jen když graf chybí) | ignore"
+  },
+
+  "worktree": {
+    "path": "../{repo}-review-pr-{n}",
+    "$comment_path": "Jednorázový worktree. Nikdy se nečekoutuje do pracovní kopie uživatele — jeho větev i rozdělaná práce zůstanou netknuté."
+  },
+
+  "review": {
+    "dimensions": ["correctness", "tests", "reuse", "errors"],
+    "$comment_dimensions": "repo-rules se přidá, až vyplníš `rules` níže. Bez projektových pravidel běží 4 z 5 dimenzí — to je legitimní výstup, ne selhání.",
+
+    "rules": null,
+    "$comment_rules": "Odkaz na sekci s pravidly projektu, např. 'CLAUDE.md#rules-that-will-bite-you'. Obsah té sekce je obsah projektu, ne packu.",
+
+    "docMap": null,
+    "$comment_docMap": "Sekce mapující dotčené cesty na dokumentaci, např. 'CLAUDE.md#where-the-truth-lives'. Bez ní se dokumentace nedohledává.",
+
+    "verifyCommand": null,
+    "$comment_verifyCommand": "Co dělá CI, např. 'npm run verify'. Slouží k zahazování nálezů, které CI stejně chytí — ne ke spouštění.",
+
+    "minScore": 80,
+    "language": "cs",
+
+    "skipPatterns": [
+      "**/package-lock.json", "**/pnpm-lock.yaml", "**/yarn.lock", "**/*.lock",
+      "**/__snapshots__/**", "**/*.snap", "**/dist/**", "**/build/**",
+      "**/*.generated.*", "**/*.d.json.ts"
+    ]
+  },
+
+  "sinks": {
+    "runRecord": true,
+    "$comment_runRecord": "Vždy true. Run record je pravda, zbytek jsou odvozené cíle — když sink selže, nález se neztratí.",
+    "prComment": false,
+    "githubProject": null,
+    "$comment_githubProject": "Číslo GitHub Projectu pro jednosměrný export, nebo null. Zpětný sync se nedělá."
+  }
+}

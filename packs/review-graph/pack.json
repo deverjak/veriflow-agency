@@ -1,0 +1,34 @@
+{
+  "name": "review-graph",
+  "version": "0.1.0",
+  "title": "Recenzent",
+  "description": "Projde pull request — otevřený i mergnutý — zkříží změny se skutečnou strukturou kódu z code-review-graph (blast radius, chybějící testy, mrtvý kód) a doloží nálezy.",
+
+  "requires": {
+    "tools": ["git", "gh", "code-review-graph"],
+    "provider": ["claude", "codex"]
+  },
+
+  "installs": [
+    { "from": "skill/SKILL.md", "to": ".claude/skills/agency-review-graph/SKILL.md" }
+  ],
+
+  "config": {
+    "file": ".agency/review-graph.json",
+    "template": "config.template.json",
+    "required": ["repo.slug"]
+  },
+
+  "outputs": {
+    "findings": "finding.v1",
+    "run": "run.v1"
+  },
+
+  "dimensions": [
+    { "id": "correctness", "title": "Korektnost a blast radius", "projectSpecific": false },
+    { "id": "tests", "title": "Pokrytí testy", "projectSpecific": false },
+    { "id": "reuse", "title": "Znovupoužitelnost a mrtvý kód", "projectSpecific": false },
+    { "id": "errors", "title": "Ošetření chyb", "projectSpecific": false },
+    { "id": "repo-rules", "title": "Dodržení pravidel projektu", "projectSpecific": true }
+  ]
+}

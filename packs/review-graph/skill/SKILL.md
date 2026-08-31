@@ -1,0 +1,148 @@
+---
+name: agency-review-graph
+description: "Use when asked to review a GitHub pull request — open or already merged — with graph-backed evidence and record the result durably. Triggered by `agency run review-graph`, which prepares a disposable worktree, refreshes the code-review-graph index against the PR's head commit and writes a context bundle; this skill then reviews across dimensions, filters false positives, and writes findings.json. Also usable directly: 'review PR #12 with agency', 'retrospective audit of the last merged PR'. Not for an uncommitted local diff with no PR — use the built-in `code-review` skill for that."
+---
+
+# Graph-augmented PR review
+
+Recenze pull requestu s **doloženými** nálezy. Strukturální signál, který samotný diff nedá — blast radius, dotčené uložené flows, chybějící testy na úrovni funkcí — pochází z `code-review-graph`.
+
+**Výstupem není komentář. Výstupem je `findings.json`.** Komentář na PR i položka v GitHub Projectu jsou z něj odvozené a volitelné. Když sink selže nebo je vypnutý, nález se neztratí — to je celý důvod, proč tenhle pack existuje.
+
+## Co dostáváš hotové
+
+`agency run review-graph` už udělalo deterministickou část a vyrobilo běhový adresář. **Nedělej ji znovu.** Přečti si:
+
+```
+<RUN_DIR>/context.json     konfigurace projektu, metadata PR, seznam souborů k recenzi
+<RUN_DIR>/evidence/        výstupy code-review-graph — detect-changes, impact, dead-code
+<RUN_DIR>/run.json         záznam běhu, který na konci doplníš
+```
+
+`context.json` nese mimo jiné:
+
+| Klíč | Význam |
+|---|---|
+| `worktree` | absolutní cesta k jednorázovému worktree na hlavičce PR — **čti soubory odtud**, ne z pracovní kopie uživatele |
+| `target.kind` | `pull-request` (otevřený) nebo `merged-pull-request` (retrospektivní audit) |
+| `target.headRefOid` / `baseRefOid` | přesné commity, proti kterým se recenzuje |
+| `files[]` | soubory po odfiltrování lockfilů, generovaných a snapshotů |
+| `review.dimensions` | které dimenze pustit |
+| `review.rules` / `review.docMap` | odkazy do dokumentace projektu, nebo `null` |
+| `review.verifyCommand` | co dělá CI — **k zahazování nálezů, ne ke spouštění** |
+| `review.minScore` / `review.language` | práh a jazyk výstupu |
+
+Když `context.json` chybí, běžíš mimo `agency run`. Řekni to uživateli a nabídni `agency run review-graph --pr <n>` — deterministickou přípravu ručně nesimuluj, je to zdroj tichých chyb.
+
+## 1. Načti kontext projektu
+
+- Pokud `review.docMap` není `null`, otevři tu sekci a podle ní přečti **jen** dokumentaci odpovídající dotčeným cestám. Nečti dokumentaci, která se změn netýká.
+- Pokud `review.rules` není `null`, přečti tu sekci celou — je to vstup dimenze `repo-rules`.
+- Pro každý soubor z `files[]` čti **celý obsah z worktree**, ne jen hunky z `gh pr diff`. Worktree má úplný soubor po změně, takže není důvod uvažovat z osekaného kontextu.
+
+## 2. Recenze po dimenzích, paralelně
+
+Pusť dimenze z `review.dimensions` jako **paralelní čerstvé agenty**. Nemají kontext téhle konverzace, takže každému předej: diff, seznam souborů s cestami do worktree, odpovídající výřez grafového signálu z `evidence/` a výňatky dokumentace z kroku 1.
+
+| Dimenze | Na co se dívá | Čím ji nakrmit |
+|---|---|---|
+| `correctness` | Logické chyby, rozbitá volající místa, změny kontraktu | `evidence/impact.json`, `evidence/detect-changes.txt` |
+| `tests` | Jestli testy v PR skutečně pokrývají změněné chování | seznam „Untested:", `code-review-graph query tests_for <symbol> --repo <worktree>` |
+| `reuse` | Duplicitní read modely napříč vrstvami, nově mrtvý kód, zbytečná abstrakce | `evidence/dead-code.txt` |
+| `errors` | Spolknuté chyby, chybějící `await`, neidempotentní handlery | diff |
+| `repo-rules` | Pravidla z `review.rules` — **obsah je projektový, ne packový** | sekce z `review.rules` |
+
+`repo-rules` se pouští **jen když `review.rules` není `null`.** Bez projektových pravidel běží čtyři dimenze z pěti a je to legitimní výstup, ne selhání — neuváděj to jako chybu.
+
+Než dimenze cokoli označí za podezřelé, **ověř to dotazem do grafu**:
+
+```bash
+code-review-graph search "<name>" --repo <worktree>
+code-review-graph query callers_of <name> --repo <worktree>
+```
+
+To je přesně ta věc, která z dohadu dělá doložitelný nález.
+
+> **Windows:** každé volání `code-review-graph`, jehož výstup čteš, prefixuj `PYTHONIOENCODING=utf-8`. Jeho Rich panely používají rámečkové znaky, které v `cp1250` konzoli spadnou na `UnicodeEncodeError`.
+>
+> **Cesty v JSON výstupu jsou na Windows absolutní a OS-native**, ne relativní k repu. Normalizuj je dřív, než je páruješ proti POSIX cestám z `gh`.
+
+## 3. Deterministická brána — dřív než filtr kvality
+
+Zahoď každý nález, který nemá **obojí**:
+
+1. `file` + `line` uvnitř souboru z `files[]`
+2. aspoň jednu položku `evidence` — grafový fakt, pravidlo z dokumentace, chybějící test, nebo obsah diffu
+
+Není to úsudek, je to schéma: `finding.v1` takový nález nezvaliduje. Počet zahozených zapiš do `run.json` → `counts.gated`. Nález bez evidence není přísnější nález, je to nález, který nejde ověřit ani zpětně dohledat.
+
+## 4. Filtr falešných pozitivů
+
+Ze zbylých zahoď to, co je:
+
+- **předchozí stav**, ne zavedený tímhle diffem — ověř hranicemi hunků nebo `git blame` ve worktree
+- **chytá to CI** — `review.verifyCommand` dělá typecheck/lint/testy/build, nederivuj to znovu
+- **vědomě umlčené** — lint-ignore komentář, zdokumentovaná výjimka
+- **hnidopišství bez opory** v pravidlech projektu nebo v grafu
+- **na řádku, kterého se PR nedotkl**
+
+Co přežije, oskóruj 0–100 a ponech `>= review.minScore`. **Nula nálezů je platný výsledek**, ne selhání běhu.
+
+## 5. Zapiš `findings.json`
+
+Tohle je jediný povinný výstup. Do `<RUN_DIR>/findings.json` zapiš pole objektů podle `finding.v1`:
+
+```jsonc
+{
+  "id": "<ULID>",
+  "runId": "<z run.json>",
+  "pack": "review-graph@0.1.0",
+  "dimension": "correctness",
+  "severity": "high",
+  "title": "Jednovětné tvrzení, co je špatně",
+  "body": "Markdown: tvrzení + konkrétní scénář selhání — vstupy/stav → špatný výstup.",
+  "anchor": {
+    "file": "src/foo.ts",          // POSIX, relativní ke kořeni projektu. NIKDY absolutní.
+    "line": 142,
+    "endLine": 158,
+    "commit": "<plných 40 znaků headRefOid>",
+    "snippet": "<text bloku 142..158 z worktree>",
+    "symbol": { "name": "UserService.getUser", "range": [128, 171] },
+    "body": "<tělo symbolu, strop 8 kB>"
+  },
+  "evidence": [
+    { "kind": "graph", "detail": "3 volající v d=1, 0 testů", "source": "code-review-graph impact --depth 2" }
+  ],
+  "score": 92,
+  "state": "candidate"
+}
+```
+
+Ke kotvě, protože na ní stojí použitelnost nálezu za měsíc:
+
+- **`commit` je plných 40 znaků.** Zkrácený SHA může později tiše ukázat na jiný řádek.
+- **`snippet` je celý blok `line..endLine`,** ne jeden řádek. Jednořádkový snippet selže na `/**`, `}` a podobné boilerplatě — a docblock začíná přesně tím.
+- **`symbol` vyplň z grafu,** ne odhadem: `code-review-graph query file_summary <file> --repo <worktree>`. Je to jediná vrstva kotvy, která přežije refaktor.
+- **`anchor.body`** je záchranná síť pro případ, že commit v klonu už nebude — squash-merge se smazanou větví je na GitHubu default.
+
+Doplň `run.json`: `status`, `finishedAt`, `counts` a `cost` (provider, model, počet dimenzí, doba běhu).
+
+## 6. Odvozené sinky — až po zápisu
+
+Až teď, a jen když je v konfiguraci zapnuto:
+
+**`sinks.prComment`** — jeden souhrnný komentář, prosa v jazyce z `review.language`, bez emoji, plných 40 znaků SHA v každém odkazu. Marker pro idempotenci:
+
+```
+<!-- agency:review-graph:<headRefOid> -->
+```
+
+Před postnutím zkontroluj, jestli komentář s tímtéž markerem už na PR není — tentýž commit se nerecenzuje dvakrát. Posílej přes soubor (`gh pr comment <n> --body-file <tmp>`), ne inline `-b`, kvůli diakritice.
+
+U `merged-pull-request` se komentář **defaultně neposílá** — retrospektivní audit starého PR nikdo nečte a jen zašumí historii. Pošli ho jen na výslovné vyžádání.
+
+**`sinks.githubProject`** — jednosměrný export. Zpětný sync se nedělá; kdyby někdo změnil stav přímo v Projectu, další export ho přepíše, a to je zamýšlené.
+
+## 7. Úklid
+
+Worktree odstraní `agency run` samo, i když běh spadne. Nemaž ho ručně — CLI si o něm vede záznam a potřebuje ho ještě k výpočtu kotev.

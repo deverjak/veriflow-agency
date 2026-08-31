@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://veriflow.dev/schemas/run.v1.json",
+  "title": "run.v1",
+  "description": "Záznam jednoho běhu packu. Leží v .agency/runs/<run-id>/run.json a commituje se.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "pack", "project", "target", "trigger", "startedAt", "status"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "ULID běhu; zároveň jméno adresáře.",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "pack": { "type": "string", "pattern": "^[a-z0-9-]+@[0-9]+\\.[0-9]+\\.[0-9]+$" },
+
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["slug"],
+      "properties": {
+        "slug": { "type": "string", "description": "owner/repo" },
+        "defaultBranch": { "type": ["string", "null"] }
+      }
+    },
+
+    "target": {
+      "type": "object",
+      "description": "Co se recenzovalo. Klíč (repo, pr, headRefOid) zajišťuje idempotenci — tentýž commit dvakrát nevyrobí duplikát.",
+      "additionalProperties": false,
+      "required": ["kind", "headRefOid"],
+      "properties": {
+        "kind": {
+          "enum": ["pull-request", "merged-pull-request", "commit-range"],
+          "description": "merged-pull-request je retrospektivní audit — bez něj nemá pack co dělat na projektu s jediným mergnutým PR."
+        },
+        "pr": { "type": ["integer", "null"], "minimum": 1 },
+        "url": { "type": ["string", "null"] },
+        "title": { "type": ["string", "null"] },
+        "headRefOid": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "baseRefOid": { "type": ["string", "null"], "pattern": "^[0-9a-f]{40}$" },
+        "mergedAt": { "type": ["string", "null"], "format": "date-time" },
+        "filesReviewed": { "type": "integer", "minimum": 0 },
+        "filesSkipped": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Lockfily, generované soubory, snapshoty — šum pro graf i pro dimenze."
+        }
+      }
+    },
+
+    "trigger": {
+      "type": "object",
+      "description": "Typ triggeru určuje typ credentialu. Attended → subscription, unattended → API klíč s rozpočtem. Musí to být v datech, ne ve slibu.",
+      "additionalProperties": false,
+      "required": ["kind", "attended"],
+      "properties": {
+        "kind": { "enum": ["manual", "watch", "post-merge", "scheduled"] },
+        "attended": { "type": "boolean" },
+        "heartbeatAgeSeconds": {
+          "type": ["integer", "null"],
+          "description": "Stáří heartbeatu živé session při startu. Když je moc staré, běh se zařadí a neproběhne."
+        }
+      }
+    },
+
+    "graph": {
+      "type": "object",
+      "description": "Stav code-review-graph při běhu. Bez toho se zpětně nepozná, jestli nález stál na čerstvém, nebo měsíc starém indexu.",
+      "additionalProperties": false,
+      "properties": {
+        "tool": { "type": ["string", "null"] },
+        "action": { "enum": ["build", "update", "reused", "missing"] },
+        "nodes": { "type": ["integer", "null"] },
+        "edges": { "type": ["integer", "null"] },
+        "riskScore": { "type": ["number", "null"] },
+        "changedFunctions": { "type": ["integer", "null"] },
+        "untestedFunctions": { "type": ["integer", "null"] }
+      }
+    },
+
+    "cost": {
+      "type": "object",
+      "description": "Bez tohohle nejde zodpovědět, jestli je systém výhodný i při plné API ceně — a to je jedno z kill criteria. Musí vzniknout dřív, než se nasbírá historie, do které se to zpětně nedoplní.",
+      "additionalProperties": false,
+      "properties": {
+        "provider": { "type": ["string", "null"] },
+        "model": { "type": ["string", "null"] },
+        "credential": {
+          "enum": ["subscription", "api-key"],
+          "description": "Musí odpovídat trigger.attended — viz pravidlo výše."
+        },
+        "inputTokens": { "type": ["integer", "null"] },
+        "outputTokens": { "type": ["integer", "null"] },
+        "dimensions": { "type": ["integer", "null"] },
+        "wallClockSeconds": { "type": ["number", "null"] }
+      }
+    },
+
+    "startedAt": { "type": "string", "format": "date-time" },
+    "finishedAt": { "type": ["string", "null"], "format": "date-time" },
+    "status": { "enum": ["running", "ok", "no-findings", "needs-login", "quota", "failed", "queued"] },
+    "exitReason": { "type": ["string", "null"] },
+
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "raw": { "type": "integer", "minimum": 0, "description": "co vrátily dimenze" },
+        "gated": { "type": "integer", "minimum": 0, "description": "zahozeno deterministickou bránou (bez evidence nebo bez file:line)" },
+        "belowScore": { "type": "integer", "minimum": 0 },
+        "duplicates": { "type": "integer", "minimum": 0 },
+        "kept": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

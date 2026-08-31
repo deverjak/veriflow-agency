@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://veriflow.dev/schemas/finding.v1.json",
+  "title": "finding.v1",
+  "description": "Jeden nález z běhu packu. Zdrojem pravdy je soubor findings.json v .agency/runs/<run-id>/; agency.db je jen index, který z něj jde kdykoli přestavět.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "runId", "pack", "severity", "title", "body", "anchor", "evidence", "state"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "ULID. Nikdy autoincrement — jinak vzniknou kolize při slučování dvou historií.",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "runId": { "type": "string" },
+    "pack": {
+      "type": "string",
+      "description": "name@version packu, který nález vyrobil",
+      "pattern": "^[a-z0-9-]+@[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "dimension": {
+      "type": ["string", "null"],
+      "description": "Která dimenze packu nález našla. Umožňuje měřit precision po dimenzích."
+    },
+    "severity": { "enum": ["low", "medium", "high", "blocker"] },
+    "title": { "type": "string", "minLength": 8, "maxLength": 200 },
+    "body": {
+      "type": "string",
+      "minLength": 20,
+      "description": "Markdown. Tvrzení + konkrétní scénář selhání (vstupy/stav → špatný výstup)."
+    },
+
+    "anchor": {
+      "type": "object",
+      "description": "Čtyřvrstvá kotva. Rozlišuje se shora dolů, zastaví se na první vrstvě, která uspěje. Bez ní nález po pár týdnech ukáže na nevinný kód a nijak to nepozná.",
+      "additionalProperties": false,
+      "required": ["file", "line", "commit"],
+      "properties": {
+        "file": {
+          "type": "string",
+          "description": "POSIX cesta relativní ke kořeni projektu. Nikdy absolutní — jinak se run record nedá sdílet ani commitovat.",
+          "pattern": "^[^/].*",
+          "not": { "pattern": "^[A-Za-z]:|\\\\\\\\" }
+        },
+        "line": { "type": "integer", "minimum": 1 },
+        "endLine": { "type": "integer", "minimum": 1 },
+        "commit": {
+          "type": "string",
+          "description": "Plných 40 znaků. Zkrácený SHA může později tiše ukázat jinam.",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "snippet": {
+          "type": ["string", "null"],
+          "description": "Vrstva 2. Text bloku line..endLine v den analýzy. Hledá se v něm nejcharakterističtější řádek — jednořádkový snippet selže na '/**' a podobné boilerplatě."
+        },
+        "symbol": {
+          "type": ["object", "null"],
+          "description": "Vrstva 3, z code-review-graph. Přežije refaktor a přesun bloku tam, kde číslo řádku ne.",
+          "additionalProperties": false,
+          "required": ["name"],
+          "properties": {
+            "name": { "type": "string" },
+            "range": {
+              "type": "array",
+              "items": { "type": "integer", "minimum": 1 },
+              "minItems": 2,
+              "maxItems": 2
+            }
+          }
+        },
+        "body": {
+          "type": ["string", "null"],
+          "maxLength": 8192,
+          "description": "Vrstva 4. Tělo symbolu v den analýzy. Záchranná síť pro případ, kdy commit v klonu už není — squash-merge se smazanou větví je na GitHubu default."
+        }
+      }
+    },
+
+    "evidence": {
+      "type": "array",
+      "description": "Deterministická brána: nález bez evidence se nestane kandidátem. Není to filtr kvality textu, je to schéma — takový nález prostě nevaliduje.",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "detail"],
+        "properties": {
+          "kind": {
+            "enum": ["graph", "rule", "test-gap", "diff", "runtime", "doc"],
+            "description": "graph = fakt z code-review-graph, rule = pravidlo z projektové dokumentace, test-gap = chybějící pokrytí, diff = obsah změny, runtime = pozorované chování, doc = rozpor s dokumentací"
+          },
+          "detail": { "type": "string", "minLength": 3 },
+          "source": {
+            "type": ["string", "null"],
+            "description": "Odkud to pochází — např. 'code-review-graph impact --depth 2' nebo 'CLAUDE.md#rules-that-will-bite-you'"
+          }
+        }
+      }
+    },
+
+    "score": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Jistota po FP filtru. Pod prahem projektu se nález nezveřejňuje, ale v run recordu zůstává."
+    },
+    "fingerprint": {
+      "type": "string",
+      "description": "Deterministický otisk pro dedup napříč běhy. Počítá se ze symbolu a normalizovaného tvrzení, NE z čísla řádku ani z titulku — titulek přežije korekci diagnózy, obsah ne."
+    },
+    "state": {
+      "enum": ["candidate", "duplicate", "accepted", "published"],
+      "description": "Čtyři stavy, ne sedm. Rozhodnutí člověka/agenta žije zvlášť v decisions.jsonl, tohle je stav nálezu v pipeline."
+    },
+    "duplicateOf": { "type": ["string", "null"] },
+    "sinks": {
+      "type": "object",
+      "description": "Kam se nález propsal. Odvozené cíle, ne pravda — když sink selže, nález se neztratí.",
+      "additionalProperties": false,
+      "properties": {
+        "prComment": { "type": ["string", "null"] },
+        "githubProjectItem": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

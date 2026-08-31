@@ -16,6 +16,7 @@ const cp = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const store = require('./store.js');
+const agency = require('./agency.js');
 
 const SCHEME = 'agency';
 const CONTROLLER_ID = 'agency.findings';
@@ -30,6 +31,10 @@ let log;
 let status;
 /** poslední výsledek buildThreads(), krmí strom v sidebaru */
 let lastResults = [];
+/** 'agency' = data z CLI (ostrý provoz) | 'spike' = fixtures (zjišťovací režim) */
+let mode = 'spike';
+/** kořen projektu, ke kterému se všechno vztahuje */
+let repoRoot = null;
 /** Rozhodnutí NEDRŽÍ extension. Vlastníkem je soubor ve store.js, do kterého
  *  zapisuje i CLI (tools/triage.js) — viz §3.4 plánu. Tohle je jen cache. */
 let decisions = new Map();
@@ -192,6 +197,41 @@ function loadFixtures() {
   return JSON.parse(fs.readFileSync(p, 'utf8'));
 }
 
+/**
+ * Nálezy. Primárně z `agency findings --all --json`; fixtures jsou záloha pro
+ * případ, že v projektu ještě žádný běh neproběhl nebo CLI není nainstalované.
+ *
+ * Extension si nálezy nečte ze souborů sama, i když by mohla — jinak vzniknou
+ * dva výklady téhož stavu a agent přestane být rovnocenný klient.
+ */
+async function loadFindings() {
+  const folder = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders[0];
+  const cwd = folder ? folder.uri.fsPath : process.cwd();
+
+  const rows = await agency.findings(cwd);
+  if (rows && rows.length) {
+    mode = 'agency';
+    repoRoot = cwd;
+    return {
+      repo: cwd,
+      head: '',
+      findings: rows.map((r) => ({
+        id: r.id,
+        severity: r.severity || 'medium',
+        title: r.title || '(bez titulku)',
+        case: r.drift || 'unknown',
+        anchor: r.anchor || { file: r.file, line: r.line },
+        _row: r,
+      })),
+    };
+  }
+
+  mode = 'spike';
+  const fx = loadFixtures();
+  repoRoot = fx.repo;
+  return fx;
+}
+
 function severityIcon(sev) {
   return sev === 'high' ? '🔴' : sev === 'medium' ? '🟠' : '🟡';
 }
@@ -228,7 +268,7 @@ let generation = 0;
 async function buildThreads() {
   const gen = ++generation;
   clearThreads();
-  const fx = loadFixtures();
+  const fx = await loadFindings();
   const repo = fx.repo;
   const results = [];
 
@@ -481,7 +521,20 @@ function refreshDecisions() {
  * JEDINÁ cesta, jak vzniká rozhodnutí uvnitř extension. Zapisuje do téhož
  * úložiště jako `node tools/triage.js`, takže člověk i agent jsou rovnocenní.
  */
-function applyDecision(findingId, state, opts = {}) {
+async function applyDecision(findingId, state, opts = {}) {
+  if (mode === 'agency') {
+    const action = { accepted: 'accept', rejected: 'reject', deferred: 'defer' }[state];
+    const res = await agency.triage(repoRoot, findingId, action, opts);
+    if (!res.ok) {
+      vscode.window.showErrorMessage(`Agency: ${res.error}`);
+      log.appendLine(`[rozhodnuti] ODMITNUTO ${findingId}: ${res.error}`);
+      return null;
+    }
+    log.appendLine(`[rozhodnuti] ${findingId} -> ${state} (agency triage)`);
+    await buildThreads();
+    vscode.window.setStatusBarMessage(`Agency: ${findingId} -> ${state}`, 4000);
+    return res.data;
+  }
   try {
     const ev = store.append(findingId, state, { ...opts, by: opts.by || 'vscode' });
     log.appendLine(`[rozhodnutí] ${findingId} → ${ev.state}` +
