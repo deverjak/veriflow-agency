@@ -536,19 +536,27 @@ function activate(context) {
     if (id) applyDecision(id, 'deferred', { note: replyTextOf(arg) });
   });
 
-  reg('agency.finding.reject', async (arg) => {
+  // Zamítnutí je JEDNO kliknutí — důvod je položka podnabídky, ne modál.
+  // Enum důvodů je z baseline.md §7.1; volný text by znemožnil spočítat precision.
+  // Text z pole odpovědi se přiloží jako poznámka, když zrovna dorazí.
+  for (const reason of store.REASONS) {
+    reg(`agency.finding.reject.${reason}`, (arg) => {
+      const id = findingIdOf(arg);
+      if (!id) return;
+      applyDecision(id, 'rejected', { reason, note: replyTextOf(arg) || undefined });
+    });
+  }
+
+  // Záloha pro případ, že se podnabídka někde nevykreslí, a cesta z „…" u komentáře.
+  reg('agency.finding.rejectPick', async (arg) => {
     const id = findingIdOf(arg);
     if (!id) return;
     const typed = replyTextOf(arg);
-    log.appendLine(`[reject] arg.text = ${typed === null ? '(nepřišel)' : JSON.stringify(typed)}`);
-
-    // Důvod je enum z baseline.md §7.1, ne volný text — jinak precision nejde spočítat.
-    // Text z pole odpovědi se použije jako poznámka, když dorazí; nespoléhá se na něj.
     const pick = await vscode.window.showQuickPick(
-      store.REASONS.map(r => ({ label: r, description: REASON_HINTS[r] || '' })),
-      { title: `Zamítnout ${id} — důvod`, placeHolder: 'Vyber důvod zamítnutí' });
+      store.REASONS.map(r => ({ label: REASON_HINTS[r] || r, detail: r, reason: r })),
+      { title: `Zamítnout ${id}`, placeHolder: 'Důvod zamítnutí' });
     if (!pick) return;
-    applyDecision(id, 'rejected', { reason: pick.label, note: typed || undefined });
+    applyDecision(id, 'rejected', { reason: pick.reason, note: typed || undefined });
   });
 
   // Programatická cesta pro cokoli uvnitř extension hostu. Agent mimo VS Code

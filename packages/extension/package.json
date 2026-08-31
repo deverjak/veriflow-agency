@@ -33,6 +33,13 @@
         }
       ]
     },
+    "submenus": [
+      {
+        "id": "agency.rejectMenu",
+        "label": "Zamítnout",
+        "icon": "$(circle-slash)"
+      }
+    ],
     "commands": [
       {
         "command": "agency.spike.run",
@@ -72,8 +79,28 @@
         "icon": "$(clock)"
       },
       {
-        "command": "agency.finding.reject",
-        "title": "Zamítnout s důvodem"
+        "command": "agency.finding.reject.not-reproducible",
+        "title": "Nešlo zopakovat"
+      },
+      {
+        "command": "agency.finding.reject.by-design",
+        "title": "Chová se tak záměrně"
+      },
+      {
+        "command": "agency.finding.reject.wrong-diagnosis",
+        "title": "Špatná diagnóza — problém je jinde"
+      },
+      {
+        "command": "agency.finding.reject.duplicate-missed",
+        "title": "Duplicita, kterou dedup nechytil"
+      },
+      {
+        "command": "agency.finding.reject.out-of-scope",
+        "title": "Mimo rozsah projektu"
+      },
+      {
+        "command": "agency.finding.rejectPick",
+        "title": "Zamítnout (vybrat důvod ze seznamu)"
       },
       {
         "command": "agency.finding.openAtCommit",
@@ -97,7 +124,27 @@
           "when": "false"
         },
         {
-          "command": "agency.finding.reject",
+          "command": "agency.finding.rejectPick",
+          "when": "false"
+        },
+        {
+          "command": "agency.finding.reject.not-reproducible",
+          "when": "false"
+        },
+        {
+          "command": "agency.finding.reject.by-design",
+          "when": "false"
+        },
+        {
+          "command": "agency.finding.reject.wrong-diagnosis",
+          "when": "false"
+        },
+        {
+          "command": "agency.finding.reject.duplicate-missed",
+          "when": "false"
+        },
+        {
+          "command": "agency.finding.reject.out-of-scope",
           "when": "false"
         },
         {
@@ -129,19 +176,46 @@
           "when": "commentController == agency.findings"
         },
         {
-          "command": "agency.finding.openAtCommit",
+          "submenu": "agency.rejectMenu",
           "group": "inline@3",
           "when": "commentController == agency.findings"
         },
         {
-          "command": "agency.finding.diffAgainstHead",
+          "command": "agency.finding.openAtCommit",
           "group": "inline@4",
+          "when": "commentController == agency.findings"
+        },
+        {
+          "command": "agency.finding.diffAgainstHead",
+          "group": "inline@5",
           "when": "commentController == agency.findings"
         }
       ],
-      "comments/commentThread/context": [
+      "agency.rejectMenu": [
         {
-          "command": "agency.finding.reject",
+          "command": "agency.finding.reject.not-reproducible",
+          "group": "1_reasons@1"
+        },
+        {
+          "command": "agency.finding.reject.by-design",
+          "group": "1_reasons@2"
+        },
+        {
+          "command": "agency.finding.reject.wrong-diagnosis",
+          "group": "1_reasons@3"
+        },
+        {
+          "command": "agency.finding.reject.duplicate-missed",
+          "group": "1_reasons@4"
+        },
+        {
+          "command": "agency.finding.reject.out-of-scope",
+          "group": "1_reasons@5"
+        }
+      ],
+      "comments/comment/context": [
+        {
+          "command": "agency.finding.rejectPick",
           "group": "inline@1",
           "when": "commentController == agency.findings"
         }
