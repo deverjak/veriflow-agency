@@ -391,6 +391,25 @@ Všechny jsou chyby v mém návrhu, ne omezení VS Code — což je přesně to,
 
 Řazené podle poměru *co se dozvím / co to stojí*. Každý má pozorovatelné „hotovo".
 
+> ### Stav k 31. 8. večer
+>
+> | Krok | Stav | Co konkrétně chybí |
+> |---|---|---|
+> | 0 | ✅ hotovo | — |
+> | 1 | 🟡 kód hotový | **jedno rozhodnutí na skutečných datech.** Cesta je otestovaná (28 testů nad dočasným repem), ale v `main-panelu` je pořád `decisions.jsonl` prázdný a tři nálezy z PR #467 čekají. |
+> | 2 | 🟡 rozdělaný | CLI má 16 příkazů, ale běží jeden projekt ze čtyř. `kvesteros-platform` (jiný owner, nula testů, jediný mergnutý PR) je ten, který manifest prověří. |
+> | 3 | ✅ kód hotový | brána, dedup, metriky i export existují a mají testy. Export ale ještě nikdy neodešel do skutečného Projectu a metriky nemají z čeho počítat, dokud nezačne triage. |
+> | 4 | 🟡 UI přestavěné | čtyři pohledy, detail nálezu v editoru, nastavení, VSIX. Zbývá to, kvůli čemu krok existuje: 47 `Observed` pod 15. **To není práce pro nástroj, to je práce pro tebe.** |
+> | 5, 6 | ⬜ nezačato | — |
+>
+> **Jedno pozorování, které stojí za zapsání.** Kroky 1 a 3 se nedají dokončit
+> kódem. Chybí jim rozhodnutí o skutečných nálezech — a to je přesně ta věc,
+> kterou nástroj dělat nemá. Když se plán psal, vypadalo „hotovo, když rozhodnutí
+> přežije restart" jako technická podmínka; ve skutečnosti je to podmínka
+> *použití*. Zbytek plánu má stejnou vlastnost: krok 4 se měří frontou, krok 3
+> precision, a ani jedno číslo nevyrobí commit.
+
+
 ### Krok 0 — Stav `Rejected` v Projectu · **½ dne** · ✅ **hotovo 31. 8.**
 
 Z `baseline.md` §7.1–7.2. Přidat `Rejected` + `Reason`, zpětně doplnit 2–3 známé vadné nálezy z `known-regressions.md`.
@@ -402,7 +421,7 @@ Provedeno: volba `Rejected` v poli `Stav`, nové single-select pole `Reason` s p
 
 ---
 
-### Krok 1 — Vertikální řez na `main-panelu` · **3 dny** · *nejdůležitější krok plánu*
+### Krok 1 — Vertikální řez na `main-panelu` · **3 dny** · 🟡 **hotovo až na poslední důkaz (31. 8.)**
 
 Jeden tenký průchod celým stackem. Ne kompletní CLI, ne kompletní extension — **jedna cesta od začátku do konce**:
 
@@ -464,7 +483,7 @@ Každý záměrně láme jinou část konfigurace ze §2.1. Když projdou všech
 
 ---
 
-### Krok 3 — Kontrakt, kotva, rozhodnutí, dedup, metriky, export · **3 dny**
+### Krok 3 — Kontrakt, kotva, rozhodnutí, dedup, metriky, export · **3 dny** · ✅ **kód hotový 31. 8., čeká na data**
 
 `run.v1` a `finding.v1` jako formální schéma (JSON Schema, validované na obou stranách hranice ze §3.2), dedup přes existující fingerprint, a odvozené sinky.
 
@@ -557,7 +576,7 @@ Tři vlastnosti, které z toho plynou a patří do schématu:
 
 ---
 
-### Krok 4 — Extension v2 a rozhýbaná triage fronta · **1½ dne**
+### Krok 4 — Extension v2 a rozhýbaná triage fronta · **1½ dne** · 🟡 **UI přestavěné 31. 8., fronta se ještě nerozhýbala**
 
 Teprve teď se z minimálního TreeView stává použitelné UI. Detaily rozvržení v [`ui-surface-decision.md`](ui-surface-decision.md) §3. Tvar většiny z toho už je ověřený spikem (§3.6), takže tenhle krok je z velké části přepis prototypu do TypeScriptu, ne návrh.
 
@@ -654,10 +673,10 @@ Sepsáno předem, dokud k projektu nejsi upsaný. Vyhodnocení proti stavu k 30.
 | Krok | Doba | Výstup | Co se dozvíš |
 |---|---|---|---|
 | 0 | ½ d ✅ | stav `Rejected` + pole `Reason` | precision je měřitelná dopředu; zpětně není co měřit |
-| 1 | **3 d** | **vertikální řez** CLI → store → sidebar → rozhodnutí | sedí tvar dat na to, co UI potřebuje? |
-| 2 | 1½–2 d | pack #1 dotažený, 4 projekty, `doctor` | funguje instalace packu do cizího projektu? obstojí UX? |
-| 3 | 3 d | kontrakt, lifecycle, kotva, evidence gate, test driftu, cost per run, **sdílené úložiště rozhodnutí**, metriky, export do GH | jsou nálezy dohledatelné i po měsíci? umí triage i agent? kolik běh stojí? |
-| 4 | 1½ d | extension v2, triage fronta | klesne 47 `Observed` pod 15? jaká je **skutečná** precision? |
+| 1 | 3 d 🟡 | **vertikální řez** CLI → store → sidebar → rozhodnutí | sedí tvar dat na to, co UI potřebuje? — **ano, ověřeno na PR #467** |
+| 2 | 1½–2 d 🟡 | pack #1 dotažený, 4 projekty, `doctor` | funguje instalace packu do cizího projektu? obstojí UX? — **zatím jen na jednom** |
+| 3 | 3 d ✅ | kontrakt, lifecycle, kotva, evidence gate, test driftu, cost per run, **sdílené úložiště rozhodnutí**, metriky, export do GH | jsou nálezy dohledatelné i po měsíci? umí triage i agent? kolik běh stojí? — **829 s na 3 nálezy** |
+| 4 | 1½ d 🟡 | extension v2, triage fronta | klesne 47 `Observed` pod 15? jaká je **skutečná** precision? |
 | 5 | 2 d | QA jako pack #2 | je pack formát správný, nebo ho druhý tvar rozbil? |
 | 6 | ½–1 d | attended triggery | drží hranice attended v kódu? |
 
