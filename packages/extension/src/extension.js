@@ -216,7 +216,15 @@ function makeBody(finding, resolution, drift) {
   return md;
 }
 
+/**
+ * Generace běhu. buildThreads() je asynchronní a dá se spustit dvakrát naráz
+ * (aktivace + ruční příkaz). Bez tohohle druhý běh uklidí vlákna prvního,
+ * ale ta, co má první rozdělaná, vzniknou až PO úklidu a přežijí jako duplikáty.
+ */
+let generation = 0;
+
 async function buildThreads() {
+  const gen = ++generation;
   clearThreads();
   const fx = loadFixtures();
   const repo = fx.repo;
@@ -251,8 +259,14 @@ async function buildThreads() {
       }
     }
 
+    if (gen !== generation) {
+      log.appendLine(`[build] generace ${gen} zrušena novějším během ${generation}`);
+      return { fx, results, cancelled: true };
+    }
+
     if (uri && line !== null) {
       const doc = await vscode.workspace.openTextDocument(uri);
+      if (gen !== generation) return { fx, results, cancelled: true };
       const safeLine = Math.min(Math.max(line, 1), doc.lineCount) - 1;
       const range = new vscode.Range(safeLine, 0, safeLine, 0);
       const thread = controller.createCommentThread(uri, range, [{
@@ -275,7 +289,15 @@ async function buildThreads() {
   lastResults = results;
   if (tree) tree.refresh();
   updateStatus();
-  return { fx, results };
+
+  // Pojistka: kdyby se generační kontrola někdy prolomila, ať to není tichý duplikát.
+  const seen = new Set();
+  for (const t of threads) {
+    const key = `${t.uri.toString()}#${t.range.start.line}`;
+    if (seen.has(key)) log.appendLine(`[build] POZOR duplicitní vlákno na ${key}`);
+    seen.add(key);
+  }
+  return { fx, results, cancelled: false };
 }
 
 function clearThreads() {
@@ -338,7 +360,11 @@ function updateStatus() {
 function verdictLine(ok, text) { return `${ok ? '✅' : '❌'} ${text}`; }
 
 async function runAllChecks() {
-  const { fx, results } = await buildThreads();
+  const { fx, results, cancelled } = await buildThreads();
+  if (cancelled) {
+    vscode.window.showWarningMessage('Agency: běh byl přerušen novějším. Spusť znovu.');
+    return results;
+  }
 
   const workingTree = results.filter(r => r.placed === 'working-tree');
   const atCommit = results.filter(r => r.placed === 'at-commit');
