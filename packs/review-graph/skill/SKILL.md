@@ -32,6 +32,7 @@ Recenze pull requestu s **doloženými** nálezy. Strukturální signál, který
 | `review.verifyCommand` | co dělá CI — **k zahazování nálezů, ne ke spouštění** |
 | `review.minScore` / `review.language` | práh a jazyk výstupu |
 | `brief.standing` / `brief.focus` | volitelné zadání od člověka — na co se u téhle recenze zaměřit. `focus` platí pro tenhle běh, `standing` pro projekt pořád. |
+| `by` | čím se podepsat pod rozhodnutí o nálezu (`agency triage … --by <by>`). Hotové z jádra — neskládej ho sám. |
 
 Když `context.json` chybí, běžíš mimo `agency run`. Řekni to uživateli a nabídni `agency run review-graph --pr <n>` — deterministickou přípravu ručně nesimuluj, je to zdroj tichých chyb.
 
@@ -129,6 +130,8 @@ Ke kotvě, protože na ní stojí použitelnost nálezu za měsíc:
 - **`anchor.body`** je záchranná síť pro případ, že commit v klonu už nebude — squash-merge se smazanou větví je na GitHubu default.
 
 Doplň `run.json`: `status`, `finishedAt`, `counts` a `cost` (provider, model, počet dimenzí, doba běhu).
+
+A napiš `<RUN_DIR>/summary.md` — **nejvýš 30 řádků** vlastními slovy: s jakým zadáním jsi běžel, co jsi zkoumal, co jsi našel (počty a to podstatné, ne výpis nálezů), co jsi rozhodl a co doporučuješ dál. Čte to člověk, chronologie paměti projektu a další specialista, který na tenhle běh naváže. `findings.json` to nenahrazuje ani nekopíruje — strukturovaná data jsou tam, tohle jsou tvoje slova.
 
 ## 6. Odvozené sinky — až po zápisu
 

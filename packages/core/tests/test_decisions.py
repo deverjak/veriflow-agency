@@ -19,13 +19,14 @@ def test_rozhodnuti_prezije_znovunacteni(project, make_run):
     run = make_run()
     fid = run.findings()[0]["id"]
 
-    runs.append_decision(run, fid, "accepted", by="test")
+    runs.append_decision(run, fid, "accepted", by="hire:review-graph@claude")
 
     # Čte se z disku novým objektem — jako by mezitím spadl proces.
     znovu = runs.find_run(project, run.id)
     stav = runs.decisions(znovu)
     assert stav[fid]["state"] == "accepted"
-    assert stav[fid]["by"] == "test"
+    assert stav[fid]["by"] == "hire:review-graph@claude", \
+        "kdo rozhodl je vstup dalšího běhu, ne dekorace"
 
 
 def test_posledni_zapis_vyhrava_ale_historie_zustava(project, make_run):
@@ -41,6 +42,8 @@ def test_posledni_zapis_vyhrava_ale_historie_zustava(project, make_run):
 
     radky = [json.loads(l) for l in run.decisions_path.read_text(encoding="utf-8").splitlines() if l]
     assert [r["state"] for r in radky] == ["deferred", "rejected"], "historie se přepsala"
+    assert [r["by"] for r in radky] == ["human", "human"], \
+        "starý zápis (`vscode`, `cli`) je člověk — dveřmi se identita neurčuje"
 
 
 def test_zamitnuti_bez_duvodu_neprojde(project, make_run):
@@ -50,9 +53,9 @@ def test_zamitnuti_bez_duvodu_neprojde(project, make_run):
     fid = run.findings()[0]["id"]
 
     with pytest.raises(SystemExit):
-        runs.append_decision(run, fid, "rejected", by="test")
+        runs.append_decision(run, fid, "rejected", by="human")
     with pytest.raises(SystemExit):
-        runs.append_decision(run, fid, "rejected", reason="protoze-se-mi-nelibi", by="test")
+        runs.append_decision(run, fid, "rejected", reason="protoze-se-mi-nelibi", by="human")
 
     assert runs.decisions(run) == {}
 
@@ -69,7 +72,7 @@ def test_poznamka_neni_rozhodnuti(project, make_run):
 
     assert runs.decisions(run) == {}, "poznámka se započítala jako rozhodnutí"
 
-    runs.append_decision(run, fid, "accepted", by="test")
+    runs.append_decision(run, fid, "accepted", by="human")
     assert runs.decisions(run)[fid]["state"] == "accepted"
 
 
@@ -79,7 +82,7 @@ def test_stejny_nalez_ve_dvou_bezich_ma_vlastni_rozhodnuti(project, make_run):
     stary = make_run(run_id="01AAAAAAAAAAAAAAAAAAAAAAAA")
     novy = make_run(run_id="01BBBBBBBBBBBBBBBBBBBBBBBB")
 
-    runs.append_decision(stary, stary.findings()[0]["id"], "accepted", by="test")
+    runs.append_decision(stary, stary.findings()[0]["id"], "accepted", by="human")
 
     assert len(runs.decisions(stary)) == 1
     assert runs.decisions(novy) == {}

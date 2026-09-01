@@ -106,7 +106,10 @@ const prs = (cwd, { state = 'all', limit = 30 } = {}) =>
  * extension není vlastník, jen jeden ze tří rovnocenných klientů.
  */
 function triage(cwd, findingId, action, { reason, note } = {}) {
-  const args = ['triage', action, findingId, '--by', 'vscode'];
+  // `human`, ne `vscode`: identita odpovídá na „kdo rozhodl", ne „kterými
+  // dveřmi". Člověk, který klikne v editoru, je týž člověk, co píše do
+  // terminálu — a rozdíl, na kterém záleží, je proti `hire:<id>` agenta.
+  const args = ['triage', action, findingId, '--by', 'human'];
   if (reason) args.push('--reason', reason);
   if (note) args.push('--note', note);
   return call(cwd, args);
@@ -114,7 +117,7 @@ function triage(cwd, findingId, action, { reason, note } = {}) {
 
 /** Poznámka. Vlastní příkaz, protože poznámka NENÍ rozhodnutí. */
 const note = (cwd, findingId, text) =>
-  call(cwd, ['note', findingId, text, '--by', 'vscode']);
+  call(cwd, ['note', findingId, text, '--by', 'human']);
 
 /** Brána: kontrakt, existence, práh, dedup. Pouští se po doběhnutí agenta. */
 const ingest = (cwd, runId) =>

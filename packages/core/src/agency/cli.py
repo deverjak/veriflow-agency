@@ -763,7 +763,8 @@ def cmd_run(args) -> int:
 
         runs.write_context(run, cfg, target, wt, files, skipped,
                            brief=brief, worktree_owned=wt_owned, hire=hire,
-                           pack_name=pack.name)
+                           pack_name=pack.name,
+                           provider=getattr(args, "provider", None))
 
         rec = run.record()
         # Paměť není grafový signál. `graph` v run.v1 má zavřený seznam klíčů a
@@ -938,6 +939,7 @@ def cmd_validate(args) -> int:
 
     findings = run.findings()
     errors: list[dict] = []
+    record_errors: list[dict] = []
     try:
         import jsonschema
         schema = read_json(bundled("schemas", "finding.v1.json"))
@@ -946,6 +948,13 @@ def cmd_validate(args) -> int:
             for e in v.iter_errors(f):
                 errors.append({"index": i, "id": f.get("id"),
                                "path": "/".join(str(p) for p in e.path), "message": e.message})
+        # A záznam běhu proti run.v1. Do 1. 9. 2026 ho nekontroloval nikdo —
+        # a stihl se se svým vlastním kontraktem rozejít na třech místech,
+        # aniž by to cokoli poznalo. Kontrakt, který se neověřuje, není kontrakt.
+        rv = jsonschema.Draft202012Validator(read_json(bundled("schemas", "run.v1.json")))
+        for e in rv.iter_errors(run.record()):
+            record_errors.append({"path": "/".join(str(p) for p in e.path) or "(root)",
+                                  "message": e.message})
     except ImportError:
         out.note("jsonschema is not installed, checking required fields only")
         for i, f in enumerate(findings):
@@ -968,7 +977,8 @@ def cmd_validate(args) -> int:
     # `validate` je ČTENÍ. Stav běhu mění `ingest` — kdyby ho psaly obě cesty,
     # nešlo by z run recordu poznat, jestli nálezy prošly bránou, nebo jestli
     # je někdo jen zkontroloval.
-    data = {"run": run.id, "findings": len(findings), "errors": errors, "anchors": resolved}
+    data = {"run": run.id, "findings": len(findings), "errors": errors,
+            "recordErrors": record_errors, "anchors": resolved}
 
     def human():
         print(f"\n  run {out.bold(run.id)}  ·  {len(findings)} findings\n")
@@ -977,16 +987,21 @@ def cmd_validate(args) -> int:
             for e in errors[:20]:
                 print(f"    #{e['index']} {e['path']}: {e['message'][:90]}")
             print()
+        if record_errors:
+            print(f"  {out.err('The run record does not match run.v1:')}")
+            for e in record_errors[:20]:
+                print(f"    {e['path']}: {e['message'][:90]}")
+            print()
         for r in resolved:
             icon = out.ok("✓") if r["resolvedLine"] else out.warn("?")
             loc = f"{r['file']}:{r['resolvedLine'] or r['line']}"
             print(f"  {icon} {loc:56} {out.dim(r['via'])} {out.dim(r['note'])}")
         print()
-        if not errors:
-            print(f"  {out.ok('The findings match finding.v1.')}\n")
+        if not errors and not record_errors:
+            print(f"  {out.ok('The findings match finding.v1, the record matches run.v1.')}\n")
 
     _emit(args, data, human)
-    return 1 if errors else 0
+    return 1 if errors or record_errors else 0
 
 
 # ---------------------------------------------------------------- ingest
@@ -1208,7 +1223,9 @@ def cmd_findings(args) -> int:
                 "decision": d["state"] if d else None,
                 "reason": d.get("reason") if d else None,
                 "note": d.get("note") if d else None,
-                "by": d.get("by") if d else None,
+                # Normalizované, ne surové: starý zápis (`cli`, `vscode`) je
+                # člověk a klient nemá mít dvě jména pro totéž.
+                "by": runs.normalize_by(d.get("by")) if d else None,
             }
             # Kotva a drift jen do --json: konzumentem je extension, která bez
             # nich neumí ani proklik, ani pohled na kód v den analýzy.
@@ -1918,7 +1935,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("finding")
     s.add_argument("--reason", choices=list(runs.REJECT_REASONS))
     s.add_argument("--note")
-    s.add_argument("--by", default="cli")
+    s.add_argument("--by", default=runs.HUMAN,
+                   help="who decides — `hire:<id>` for a specialist (ready-made in context.json), `human` for a person")
     s.set_defaults(fn=cmd_triage)
 
     s = sub.add_parser("config", parents=[common],
@@ -1941,7 +1959,8 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("note", parents=[common], help="a note on a finding — free text, not a decision")
     s.add_argument("finding")
     s.add_argument("text")
-    s.add_argument("--by", default="cli")
+    s.add_argument("--by", default=runs.HUMAN,
+                   help="who decides — `hire:<id>` for a specialist (ready-made in context.json), `human` for a person")
     s.set_defaults(fn=cmd_note)
 
     s = sub.add_parser("status", parents=[common], help="overview of the project runs")

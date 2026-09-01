@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import proc, providers
+from . import hires, proc, providers
 from .config import AGENCY_DIR, Project
 from .util import out, posix, read_json, ulid, write_json
 
@@ -265,6 +265,11 @@ def already_reviewed(target: dict, pack: str = "review-graph",
     return any(m in b for m in markers for b in bodies)
 
 
+def cfg_provider(cfg: dict) -> str:
+    """Kterým providerem projekt jede, když se neřekne jinak."""
+    return (cfg.get("agent") or {}).get("provider") or "claude"
+
+
 def launch_argv(cfg: dict, run_dir: str, prompt: str,
                 provider: str | None = None,
                 model: str | None = None,
@@ -281,7 +286,7 @@ def launch_argv(cfg: dict, run_dir: str, prompt: str,
     configuration. A hire is a PAIR, not two independent fields.
     """
     a = dict(cfg.get("agent") or {})
-    cfg_provider = a.get("provider") or "claude"
+    configured = cfg_provider(cfg)
 
     # A hire is a PAIR (provider, model). Once one is in play the pack
     # configuration no longer decides the model — otherwise "Reviewer · codex"
@@ -290,7 +295,7 @@ def launch_argv(cfg: dict, run_dir: str, prompt: str,
     if hire is not None:
         base_provider, base_model = hire.provider, hire.model
     else:
-        base_provider, base_model = cfg_provider, a.get("model")
+        base_provider, base_model = configured, a.get("model")
 
     name = provider or base_provider
     # Overriding the provider on the command line detaches the model too:
@@ -301,7 +306,7 @@ def launch_argv(cfg: dict, run_dir: str, prompt: str,
     spec = providers.spec(name)
     # Project configuration may tune the launch shape (a different path to the
     # binary, a wrapper) — but only for the provider it was written for.
-    if name == cfg_provider:
+    if name == configured:
         for k in ("bin", "modelFlag", "dirFlag", "promptFlag"):
             if k in a:
                 spec[k] = a[k]
@@ -315,7 +320,7 @@ def launch_argv(cfg: dict, run_dir: str, prompt: str,
     # Bez tohohle se agent ptá na zápis ven z pracovního adresáře v každém běhu.
     if spec.get("dirFlag"):
         argv += [spec["dirFlag"], run_dir]
-    extra = a.get("extraArgs") if name == cfg_provider else None
+    extra = a.get("extraArgs") if name == configured else None
     argv += [str(x) for x in (extra if extra is not None else spec.get("extraArgs") or [])]
     if spec.get("promptFlag"):
         argv += [spec["promptFlag"], prompt]
@@ -483,59 +488,11 @@ MEMORY_STATS = ("knownFindings", "knownSpecs")
 
 
 def known_memory(project: Project, run: Run) -> dict:
-    """What this project already knows — across runs, packs and specialists.
-
-    This is the shared memory. The roster allows several workers over one pack;
-    if each of them remembered only its own runs, the second provider would
-    dutifully repeat everything the first one settled an hour ago, and the
-    queue would grow twice as fast as the value.
-
-    Findings carry their decision with them: "this was already rejected as
-    by-design" is the most valuable sentence a new run can be handed on input.
-    Dedup after ingest is a safety net, not a substitute — a session that
-    starts without knowing past findings is condemned to repeat them.
-    """
-    ev = run.dir / "evidence"
-    ev.mkdir(parents=True, exist_ok=True)
-
-    known: list[dict] = []
-    specs: list[dict] = []
-    for other in load_runs(project):
-        if other.id == run.id:
-            continue
-        rec = other.record()
-        who = (rec.get("agent") or {}).get("hire")
-        dec = decisions(other)
-        for f in other.findings():
-            d = dec.get(f.get("id"))
-            a = f.get("anchor") or {}
-            known.append({
-                "id": f.get("id"), "title": f.get("title"), "dimension": f.get("dimension"),
-                "severity": f.get("severity"), "file": a.get("file"), "line": a.get("line"),
-                "decision": d["state"] if d else None,
-                "reason": d.get("reason") if d else None,
-                "runId": other.id,
-                # Who found it. Without this there is no telling "a colleague
-                # on another model already found this" from "I wrote this
-                # myself last week".
-                "hire": who, "pack": rec.get("pack"),
-                "provider": (rec.get("agent") or {}).get("provider"),
-            })
-        if (other.dir / "specs").is_dir():
-            for f in sorted((other.dir / "specs").rglob("*")):
-                if f.is_file():
-                    specs.append({"runId": other.id, "hire": who,
-                                  "path": posix(f.relative_to(project.root))})
-
-    write_json(ev / "known-findings.json", known[:300])
-    stats = {"knownFindings": len(known)}
-    if specs:
-        # Reproduction tests from earlier runs. This is the thing a repro is
-        # written as an executable file for and not as a paragraph: "is it
-        # fixed yet?" is then answered by running it, not by another session.
-        write_json(ev / "known-specs.json", specs[:200])
-        stats["knownSpecs"] = len(specs)
-    return stats
+    """Paměť projektu do tohohle běhu. Skládá ji `knowledge.for_run`."""
+    # Import až tady: knowledge staví nad tímhle modulem, takže nahoře by to byl
+    # kruh. Paměť se skládá na jednom místě a tohle je jen jeho volání.
+    from . import knowledge
+    return knowledge.for_run(project, run)
 
 
 def _graph_json(ev: Path, name: str, r: proc.Result):
@@ -784,7 +741,8 @@ def discard(project: Project, run: Run, force: bool = False) -> dict:
 def write_context(run: Run, cfg: dict, target: dict, wt: Path,
                   files: list[str], skipped: int,
                   brief: dict | None = None, worktree_owned: bool = True,
-                  hire=None, pack_name: str | None = None) -> None:
+                  hire=None, pack_name: str | None = None,
+                  provider: str | None = None) -> None:
     review = dict(cfg.get("review") or {})
     review.pop("skipPatterns", None)
     # Celá konfigurace packu, aby jádro nemuselo znát klíče jednotlivých packů.
@@ -810,6 +768,12 @@ def write_context(run: Run, cfg: dict, target: dict, wt: Path,
         # one lock the second out of the same commit.
         "hire": ({"id": hire.id, "provider": hire.provider, "model": hire.model,
                   "label": hire.label} if hire else None),
+        # Čím se podepsat pod rozhodnutí (`agency triage … --by <by>`). Skládá
+        # to jádro, aby to byl opis, ne úsudek: identita složená agentem je
+        # první místo, kde se „rozhodl specialista" změní v „rozhodl někdo".
+        # Běh bez hire ji má taky — pracovník je pak `pack@provider`.
+        "by": (f"hire:{worker_id(cfg, pack_name, hire=hire, provider=provider)}"
+               if (hire or pack_name) else None),
         # The marker is computed by the core and handed over ready-made. A pack
         # assembling it itself would be a second place where the rule lives,
         # and `already_reviewed` would stop matching it the day either changes.
@@ -825,9 +789,59 @@ def write_context(run: Run, cfg: dict, target: dict, wt: Path,
 
 # ---------------------------------------------------------------- rozhodnutí
 
+#: Člověk. Volitelně `human:<jméno>`, když je jich u projektu víc.
+HUMAN = "human"
+
+#: Do 1. 9. 2026 psalo CLI `cli` a extension `vscode`. Čtou se jako člověk —
+#: historie se nepřepisuje, jen vykládá.
+LEGACY_BY = {"cli": HUMAN, "vscode": HUMAN, "extension": HUMAN}
+
+
+def normalize_by(value: str | None) -> str | None:
+    """Jak se dnes čte to, co kdo kdy zapsal. Nic zapsaného je `None`.
+
+    Prázdno se schválně nedoplňuje na člověka: „nevím, kdo rozhodl" a „rozhodl
+    člověk" jsou různá tvrzení a jen jedno z nich někdo skutečně udělal.
+    """
+    v = (value or "").strip()
+    return LEGACY_BY.get(v, v) or None
+
+
+def validate_by(value: str | None) -> str:
+    """Tvar identity se hlídá při zápisu, protože z atribuce se počítají tiery.
+
+    Dva tvary, protože jen tenhle rozdíl jde později vážit: `hire:<id>` je
+    pracovník, `human` je člověk. „Jeden model si to myslí" a „druhý model to
+    potvrdil a člověk to přijal" jsou různě silné vstupy pro další běh a zpětně
+    se od sebe nedají odlišit — proto se nepřijímá volný string.
+    """
+    v = normalize_by(value) or ""
+    if v == HUMAN or (v.startswith("human:") and v[len("human:"):].strip()):
+        return v
+    if v.startswith("hire:") and hires.ID_RE.match(v[len("hire:"):]):
+        return v
+    raise SystemExit(
+        f"Unknown identity “{value}”. Use `hire:<id>` for a specialist — the "
+        f"ready-made value is in context.json under `by` — or `human` / "
+        f"`human:<name>` for a person."
+    )
+
+
+def worker_id(cfg: dict, pack_name: str, hire=None, provider: str | None = None) -> str:
+    """Kdo tenhle běh odpracuje — `pack@provider`, ať je v rosteru, nebo ne.
+
+    Hire z rosteru má id sám. Běh bez hire ho dostane odvozený, aby „rozhodl
+    specialista" šlo odlišit od „rozhodl člověk" i v projektu, kde roster nikdo
+    nezaložil — a aby to id mělo týž tvar, kdyby se ten pracovník najal později.
+    """
+    if hire is not None:
+        return hire.id
+    return f"{pack_name}@{provider or cfg_provider(cfg)}"
+
+
 def append_decision(run: Run, finding_id: str, state: str,
                     reason: str | None = None, note: str | None = None,
-                    by: str = "cli") -> dict:
+                    by: str = HUMAN) -> dict:
     """Append-only událost.
 
     Rozhodnutí NENÍ příkaz UI. Zapisuje sem extension i agent přes tutéž cestu —
@@ -844,13 +858,13 @@ def append_decision(run: Run, finding_id: str, state: str,
         raise SystemExit(f"Unknown reason “{reason}”. Allowed: {', '.join(REJECT_REASONS)}")
 
     ev = {"kind": "decision", "findingId": finding_id, "state": state,
-          "reason": reason, "note": note, "by": by, "at": now()}
+          "reason": reason, "note": note, "by": validate_by(by), "at": now()}
     with open(run.decisions_path, "a", encoding="utf-8", newline="\n") as f:
         f.write(json.dumps(ev, ensure_ascii=False) + "\n")
     return ev
 
 
-def append_note(run: Run, finding_id: str, text: str, by: str = "cli") -> dict:
+def append_note(run: Run, finding_id: str, text: str, by: str = HUMAN) -> dict:
     """Poznámka NENÍ rozhodnutí.
 
     Rozhodnutí má strukturovaný důvod z pevného seznamu, protože se z něj počítá
@@ -863,7 +877,8 @@ def append_note(run: Run, finding_id: str, text: str, by: str = "cli") -> dict:
     text = (text or "").strip()
     if not text:
         raise SystemExit("Empty note. Write something, or write nothing at all.")
-    ev = {"kind": "note", "findingId": finding_id, "text": text, "by": by, "at": now()}
+    ev = {"kind": "note", "findingId": finding_id, "text": text,
+          "by": validate_by(by), "at": now()}
     with open(run.decisions_path, "a", encoding="utf-8", newline="\n") as f:
         f.write(json.dumps(ev, ensure_ascii=False) + "\n")
     return ev

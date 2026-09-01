@@ -25,7 +25,7 @@ import re
 
 from . import proc
 from .config import Project
-from .runs import Run, decisions
+from .runs import Run, decisions, normalize_by
 from .util import write_json
 
 MARKER = "<!-- agency:finding:{id} -->"
@@ -124,7 +124,7 @@ def item_body(finding: dict, decision: dict | None, run: Run) -> str:
         mark = {"accepted": "accepted", "rejected": "rejected", "deferred": "deferred"}
         lines += ["", f"**Triage:** {mark.get(decision['state'], decision['state'])}"
                   + (f" — `{decision['reason']}`" if decision.get("reason") else "")
-                  + (f" ({decision.get('by')})" if decision.get("by") else "")]
+                  + (f" ({normalize_by(decision.get('by'))})" if decision.get("by") else "")]
         if decision.get("note"):
             lines.append(f"> {decision['note']}")
     return "\n".join(lines)

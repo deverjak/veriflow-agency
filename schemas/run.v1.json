@@ -32,8 +32,11 @@
       ],
       "properties": {
         "slug": {
-          "type": "string",
-          "description": "owner/repo"
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "owner/repo, nebo null — repozitář bez remote je legitimní projekt, packy bez sinků ho nepotřebují"
         },
         "defaultBranch": {
           "type": [
@@ -146,6 +149,17 @@
             "null"
           ],
           "description": "Stáří heartbeatu živé session při startu. Když je moc staré, běh se zařadí a neproběhne."
+        }
+      }
+    },
+    "outputs": {
+      "type": "object",
+      "description": "Co po sobě běh nechal vedle findings.json. Jádro to nevyrábí, jen zaznamenává, že to pack napsal.",
+      "additionalProperties": false,
+      "properties": {
+        "summary": {
+          "type": "boolean",
+          "description": "RUN_DIR/summary.md — krátké shrnutí vlastními slovy specialisty: co zkoumal, co našel, co rozhodl, co doporučuje dál."
         }
       }
     },
@@ -288,6 +302,7 @@
         "running",
         "ok",
         "no-findings",
+        "gated-out",
         "needs-login",
         "quota",
         "abandoned",

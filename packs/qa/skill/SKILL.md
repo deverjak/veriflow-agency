@@ -28,6 +28,7 @@ Průzkum **běžící aplikace** podle zadání, které napsal člověk. Metoda 
 |---|---|
 | `brief.standing` | co o projektu platí **pořád** — z `.agency/qa.json` |
 | `brief.focus` | zadání **tohohle** běhu, z `--prompt` nebo ze scénáře |
+| `by` | čím se podepsat pod rozhodnutí o nálezu (`agency triage … --by <by>`). Hotové z jádra — neskládej ho sám. |
 | `config.app` | kde aplikace běží, v jakém prostředí, čím se pozná, že jede |
 | `config.playwright` | jestli a čím se řídí prohlížeč — a co smíš v projektu založit |
 | `config.personas` | za koho se vydávat |
@@ -224,6 +225,8 @@ Jediný povinný výstup. Do `<RUN_DIR>/findings.json` pole objektů podle `find
 - Piš v jazyce z `review.language`.
 
 Doplň `run.json`: `status`, `finishedAt`, `counts` a `cost` (provider, model, počet dimenzí, doba běhu).
+
+A napiš `<RUN_DIR>/summary.md` — **nejvýš 30 řádků** vlastními slovy: s jakým zadáním jsi běžel, co jsi prošel, co jsi našel (počty a to podstatné, ne výpis nálezů), co jsi rozhodl a co doporučuješ dál. Čte to člověk, chronologie paměti projektu a další specialista, který na tenhle běh naváže. `findings.json` to nenahrazuje ani nekopíruje — strukturovaná data jsou tam, tohle jsou tvoje slova.
 
 ## 8. Paměť projektu
 

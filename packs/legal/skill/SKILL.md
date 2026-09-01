@@ -29,6 +29,7 @@ Most legal answers a general model gives are defensible and wrong in the same wa
 |---|---|
 | `brief.standing` | what holds for this project **always** — from `.agency/legal.json` |
 | `brief.focus` | the assignment for **this** run, from `--prompt` or a scenario |
+| `by` | how to sign a decision on a finding (`agency triage … --by <by>`). Ready-made by the core — do not assemble it yourself. |
 | `config.business` | who this company is — **the applicability gate**, see step 2 |
 | `config.documents` | where the terms, the privacy policy and the version store live |
 | `config.product` | where the code that implements them lives |
@@ -236,6 +237,8 @@ The `evidence.kind` enum is fixed and shared with the other packs, so map onto i
 Write in the language from `review.language`. Quote the provision in its own language — a Czech provision quoted in Czech, an EU regulation from its Czech wording — and keep the quote short and exact.
 
 Then complete `run.json`: `status`, `finishedAt`, `counts`, `cost`, and an `exitReason` that names what was **not** covered: regimes you could not establish, documents you could not find, questions that belong to counsel.
+
+And write `<RUN_DIR>/summary.md` — **at most 30 lines** in your own words: what you ran with, what you examined, what you found (counts and the substance, not a list of findings), what you decided and what you recommend next. It is read by a person, by the project's memory log, and by the next specialist building on this run. It neither replaces nor copies `findings.json` — the structured data is there, this is your voice.
 
 ### When the brief is a question, not a review
 

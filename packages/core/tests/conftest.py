@@ -107,7 +107,9 @@ def make_run(project: config.Project):
         rec = {
             "id": rid, "pack": "review-graph@0.1.0",
             "project": {"slug": project.slug, "defaultBranch": "main"},
-            "target": {"kind": "pull-request", "pr": 1},
+            # `headRefOid` je v run.v1 povinné — bez něj by fixture vyráběla
+            # záznam, jaký by skutečný běh nikdy nezapsal.
+            "target": {"kind": "pull-request", "pr": 1, "headRefOid": git(project.root, "rev-parse", "HEAD")},
             "trigger": {"kind": "manual", "attended": True},
             "startedAt": runs.now(), "status": "running",
             "agent": {"provider": "claude", "model": "sonnet", "bin": "claude"},

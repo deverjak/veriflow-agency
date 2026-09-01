@@ -32,7 +32,7 @@ Tři vazby, zbytek je volný:
 
 - **`changedFiles` se přestalo číst z grafu.** V JSON to číslo není (jen ve větě shrnutí) a graf navíc počítá svůj diff, ne ten po `skipPatterns`. Bere se ze seznamu, který jádro samo odfiltrovalo — stejně jako u workspace běhu.
 - **CRG řeže změněné funkce na 500** (`CRG_MAX_CHANGED_FUNCS`) a ten strop hlásí ve shrnutí jako výsledek. Nový příznak `changedFunctionsTruncated` v `run.v1` z toho dělá dolní odhad místo tichého faktu.
-- **`knownFindings`/`knownSpecs` se slévaly do `run.graph`**, který má v `run.v1` zavřený seznam klíčů — každý grafový běh tedy psal neplatný záznam. Nikdo si toho nevšiml, protože `agency validate` kontroluje `finding.v1` a `run.v1` nikdo. Paměť teď bydlí v `evidence`; **`run.v1` pořád nikdo nevaliduje** — kandidát na samostatný úkol.
+- **`knownFindings`/`knownSpecs` se slévaly do `run.graph`**, který má v `run.v1` zavřený seznam klíčů — každý grafový běh tedy psal neplatný záznam. Nikdo si toho nevšiml, protože `agency validate` kontroluje `finding.v1` a `run.v1` nikdo. Paměť teď bydlí v `evidence`; validaci `run.v1` doplnila Fáze 1.
 - **Promptová plocha se musela posunout hned:** `packs/review-graph/skill/SKILL.md` odkazovalo na `detect-changes.txt`, `dead-code.txt` a na seznam „Untested:" z panelu, který přestal existovat. Zbytek promptové plochy zůstává na Fázi 3.
 
 ### Souběžně, na ničem nezávisle
@@ -41,15 +41,24 @@ Tři vazby, zbytek je volný:
 
 ---
 
-## Fáze 1 — společný základ (~1 den)
+## Fáze 1 — společný základ (~1 den) — **hotovo 1. 9. 2026**
 
 > [`shared-memory.md`](shared-memory.md) → **Krok 1** (= [`teams.md`](teams.md) Krok 1, dělá se jednou). Plná specifikace tam.
 
-- [ ] **a)** strukturovaná identita `by`: `hire:<id>` / `human`; legacy `cli` a `extension` se při čtení mapují na `human`. Dotčené: `runs.py:804`, `cli.py:1905,1930`, zápis z extension, SKILL.md packů, které triagují
-- [ ] **b)** `RUN_DIR/summary.md` jako výstup běhu (~30 řádků); kontrakt v SKILL.md, `ingest` zaznamená přítomnost
-- [ ] **c)** `knowledge.py` — `assemble` / `for_run` / `upstream` / `bundle`; `known_memory()` se stává jeho konzumentem, výstupní soubory beze změny
+- [x] **a)** strukturovaná identita `by`: `hire:<id>` / `human` (i `human:<jméno>`); legacy `cli` a `vscode` se při čtení mapují na `human`. Tvar se validuje při zápisu, čte se normalizovaně (`agency findings`, export)
+- [x] **b)** `RUN_DIR/summary.md` jako výstup běhu (~30 řádků); kontrakt v SKILL.md všech čtyř packů, `ingest` zaznamená přítomnost do `run.outputs.summary`
+- [x] **c)** `knowledge.py` — `assemble` / `for_run` / `upstream`; `known_memory()` je jeho konzument, výstupní soubory beze změny
 
-**Hotovo, když:** rozhodnutí agenta nese `hire:<id>`, běh po sobě nechává `summary.md`, a `runs.py` už paměť neskládá — jen volá `knowledge.py`.
+**Hotovo, když:** rozhodnutí agenta nese `hire:<id>`, běh po sobě nechává `summary.md`, a `runs.py` už paměť neskládá — jen volá `knowledge.py`. — ✅ ověřeno i přes CLI (`agency triage`, `agency ingest`), `tests/test_knowledge.py` a `tests/test_run_record.py`.
+
+### Co plán nepředpokládal
+
+- **Identitu skládá jádro, ne agent.** `context.json` nese hotové `by` (`hire:<id>`), takže `--by` je pro packa opis, ne úsudek. Běh bez rosteru má pracovníka taky — `pack@provider` — jinak by se v projektu bez rosteru „rozhodl specialista" nedalo odlišit od „rozhodl člověk".
+- **Extension píše `human`, ne `vscode`.** Identita odpovídá na „kdo rozhodl", ne „kterými dveřmi"; člověk klikající v editoru je týž člověk, co píše do terminálu.
+- **Prázdná identita se nedoplňuje na `human`.** „Nevím, kdo rozhodl" a „rozhodl člověk" jsou různá tvrzení a jen jedno z nich někdo udělal.
+- **`bundle()` se nepsal.** Patří do Fází 4–6 a stub, který nic nedělá, je horší než jeho absence.
+- **`agency validate` kontroluje i `run.v1`** — to je ten samostatný úkol, který si Fáze 0 zapsala. Odhalil rovnou dva další drifty: `gated-out` nebyl v enumu stavů (píše ho `ingest`, ikonu pro něj má i extension) a `project.slug` nesměl být `null` (doctor přitom repozitář bez remote podporuje). Obojí byla chyba schématu, ne kódu — opraveno tam.
+- **Fixture v testech vyráběla neplatný záznam** (`target` bez `headRefOid`). Opraveno; jinak by nová validace byla testovaná proti něčemu, co skutečný běh nikdy nezapíše.
 
 ---
 

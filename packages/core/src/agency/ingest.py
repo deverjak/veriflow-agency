@@ -170,6 +170,10 @@ def ingest(project: Project, run: Run, min_score: int | None = None) -> dict:
         "kept": len([f for f in kept if f.get("state") != "duplicate"]),
     }
     rec["gatedBy"] = by_reason or None
+    # Shrnutí běhu je kontrakt packu (`RUN_DIR/summary.md`). Brána ho nečte ani
+    # nedopisuje — jen zaznamená, že existuje. Konzument je člověk, chronologie
+    # paměti a další specialista v řetězu.
+    rec["outputs"] = {"summary": (run.dir / "summary.md").is_file()}
     rec["status"] = "ok" if kept else ("no-findings" if raw_count == 0 else "gated-out")
     rec.setdefault("finishedAt", now())
     run.save_record(rec)

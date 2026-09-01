@@ -38,6 +38,7 @@ A decision is about one request. A finding is about the system that produced it.
 |---|---|
 | `brief.standing` | what holds for this product **always** — from `.agency/po.json` |
 | `brief.focus` | the assignment for **this** run, from `--prompt` or a scenario |
+| `by` | how to sign a decision on a finding (`agency triage … --by <by>`). Ready-made by the core — do not assemble it yourself. |
 | `config.roadmap` | the commitments, the cycle, what capacity there is |
 | `config.board` | where the queue lives — repository, Project number, columns, labels |
 | `config.policy` | how hard you say no, and who overrules you |
@@ -259,6 +260,8 @@ Into `config.memory.dir`:
 - **`roadmap-state.md`** — the table from step 1.
 
 Then `run.json`: `status`, `finishedAt`, `counts`, `cost`, and an `exitReason` that names what was **not** covered — requests you could not decide because the roadmap is silent, writes a switch refused, questions that belong to a human. What you could not decide is more useful to read than what you could.
+
+And `<RUN_DIR>/summary.md` — **at most 30 lines** in your own words: what you ran with, what you went through, what you found (counts and the substance, not a list of findings), what you decided and what you recommend next. It is read by a person, by the project's memory log, and by the next specialist building on this run. It neither replaces nor copies `findings.json` — the structured data is there, this is your voice.
 
 ## 8. What you do not touch
 
