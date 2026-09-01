@@ -58,6 +58,26 @@ def which(tool: str) -> str | None:
     return shutil.which(tool)
 
 
+def attend(args: Sequence[str], cwd: str | Path | None = None) -> int:
+    """Spustit a počkat — s terminálem, ne s rourou. Vrací exit code.
+
+    `run()` sbírá výstup, protože ho volající čte. Agent je opak: mluví
+    s uživatelem a čeká na odpověď. Roura by z attended běhu udělala
+    neattended, který zamrzne na první otázce, kterou nemá kdo přečíst — proto
+    si tenhle proces stdio nechává zdědit.
+
+    Binárku hledá `which`, i když by ji CreateProcess našlo samo: umí si totiž
+    domyslet jen `.exe`. `codex` je na Windows `codex.CMD` a bez rozvinutí
+    PATHEXT skončí jako FileNotFoundError. Ověřeno, ne odhad.
+    """
+    exe = which(args[0]) or args[0]
+    try:
+        return subprocess.call([exe, *args[1:]], cwd=str(cwd) if cwd else None)
+    except OSError:
+        # Týž kód jako u `run()`: shell hlásí nespustitelný příkaz 127.
+        return 127
+
+
 # ---------------------------------------------------------------- git
 
 def git(*args: str, cwd: str | Path | None = None) -> Result:

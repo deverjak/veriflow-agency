@@ -677,6 +677,14 @@ def _one_line(text: str, limit: int = 400) -> str:
 
 
 def cmd_run(args) -> int:
+    if getattr(args, "wait", False) and getattr(args, "json", False):
+        # Agent píše do téhož stdout jako tenhle proces. Slíbit u toho, že na
+        # výstupu bude jeden JSON dokument, nejde — a kontrakt, který se dá
+        # rozbít cizím výpisem, je horší než chybějící kombinace přepínačů.
+        raise SystemExit(
+            "--wait and --json do not go together: the agent writes to this same "
+            "stdout, so nothing could promise the output is a single JSON document. "
+            "Prepare the run with --json and close it with `agency ingest`.")
     project = _project(args)
     # The positional argument names a WORKER, or a method when the project has
     # only one worker for it. Resolving it here is what lets two providers be
@@ -892,10 +900,15 @@ def cmd_run(args) -> int:
         out.say(f"  {out.dim('Brief:')} {_one_line(brief['focus'] or brief['standing'], 120)}")
     out.say()
 
+    if args.wait:
+        return _wait_for_agent(project, run, launch, wt, wt_owned)
+
     if args.launch:
         os.chdir(wt)
         out.say(f"  {out.bold('launching ' + launch[0] + '…')}\n")
-        os.execvp(launch[0], launch)
+        # `which` kvůli Windows: spouštění si domyslí jen `.exe`, takže `codex`
+        # — fakticky `codex.CMD` — by jinak spadl na FileNotFoundError.
+        os.execvp(proc.which(launch[0]) or launch[0], launch)
 
     print(f"  {out.bold('Start it:')}")
     print(f"    cd {posix(wt)}")
@@ -909,15 +922,71 @@ def cmd_run(args) -> int:
     return 0
 
 
+def _duration(seconds: float) -> str:
+    """Doba běhu tak, jak ji čte člověk."""
+    s = int(round(seconds))
+    return f"{s}s" if s < 60 else f"{s // 60}m {s % 60:02d}s"
+
+
+def _wait_for_agent(project, run, launch: list[str], wt: Path, wt_owned: bool) -> int:
+    """`--wait`: spustit agenta, počkat na něj a pustit bránu rovnou.
+
+    Attended charakter se nemění — agent píše do tohohle terminálu a dá se do
+    něj vstoupit. Mění se, kdo drží konec: dosud musel uživatel po doběhnutí
+    napsat `agency ingest` a když na to zapomněl, zůstal běh navždycky
+    `running` — bez nálezů, bez čísel a s worktree navíc.
+    """
+    out.say(f"  {out.bold('launching ' + launch[0] + '…')}  "
+            f"{out.dim('Ctrl-C stops the run')}\n")
+    try:
+        result = runs.attend(project, run, launch, wt)
+    except KeyboardInterrupt:
+        # Přerušení není pád. Běh se zavírá jako opuštěný — a protože tenhle
+        # proces na rozdíl od `--launch` pořád žije, uklidí i worktree, na který
+        # by jinak musel uživatel přijít sám.
+        info = runs.abandon(project, run, "stopped with Ctrl-C while the agent was running")
+        out.say()
+        out.note(f"stopped — {run.id[:10]} closed as abandoned"
+                 + ("  ·  worktree removed" if info.get("worktreeRemoved") else ""))
+        return 130
+
+    code = result["exitCode"]
+    out.say()
+    out.say(f"  {out.dim('agent finished')}  exit {code}  {out.dim('·')}  "
+            f"{_duration(result['wallClockSeconds'])}")
+
+    # Co agent stihl zapsat, projde branou i po nenulovém konci. Zahodit hotové
+    # nálezy kvůli chybě na konci sezení by byla ztráta, ne přísnost.
+    if code == 0 or run.findings_path.is_file() or (run.dir / "findings.raw.json").is_file():
+        _ingest_report(run, ingest.ingest(project, run))
+
+    if code != 0:
+        # Až po bráně: ta by z běhu bez findings.json udělala `no-findings`,
+        # což je tvrzení „díval se a nic nenašel“. Exit code říká něco jiného.
+        runs.failed(run, f"the agent exited with {code}")
+        out.fail(f"the agent exited with {code} — the run is recorded as failed")
+        if proc.which(launch[0]) is None:
+            out.say(f"  {out.dim(launch[0] + ' is not on PATH; `agency doctor` checks that up front')}")
+        out.say()
+
+    if wt_owned:
+        print(f"  {out.dim('Cleanup:')}  agency cleanup --run {run.id[:8]}\n")
+    return 0 if code == 0 else 1
+
+
 def cmd_cleanup(args) -> int:
     """Close a run that is not coming back, and take its worktree with it.
 
     Killing the terminal leaves two things behind: a record that still says
-    `running`, and a worktree nobody will ever look at. Neither closes itself —
-    the CLI prepares a run and prints a command, and whatever runs that command
-    lives in a terminal this process knows nothing about. So there is no pid to
-    watch and no exit code to catch; closing the run is the same act as closing
-    the terminal, and it belongs to the person who did it.
+    `running`, and a worktree nobody will ever look at. Neither closes itself
+    when the run was prepared and handed over: the CLI prints a command, and
+    whatever runs it lives in a terminal this process knows nothing about. No
+    pid to watch, no exit code to catch — closing the run is the same act as
+    closing the terminal, and it belongs to the person who did it.
+
+    `agency run --wait` is the way around it: that one owns the process, so it
+    closes its own run. This command is for everything else — and for the runs
+    that were left behind before it existed.
     """
     project = _project(args)
 
@@ -1097,6 +1166,37 @@ def _emit_json(data: dict) -> int:
 
 # ---------------------------------------------------------------- ingest
 
+def _ingest_report(run, data: dict) -> None:
+    """Výstup brány. Tiskne ho `agency ingest` i `agency run --wait` — týž běh
+    má vypadat stejně, ať branou prošel hned, nebo o hodinu později."""
+    c = data["counts"]
+    print(f"\n  run {out.bold(run.id)}\n")
+    print(f"  {c['raw']:3} findings written by the pack")
+    if data["dropped"]:
+        print(f"  {out.err(str(c['gated']).rjust(3))} dropped by the gate")
+        for d in data["dropped"]:
+            label = (d["title"] or d["id"] or "")[:52]
+            print(f"      {out.dim('·')} {label:54} {out.err(d['reason'])} "
+                  f"{out.dim(d['detail'][:60])}")
+    if data["duplicates"]:
+        print(f"  {out.warn(str(len(data['duplicates'])).rjust(3))} duplicates of older findings")
+        for d in data["duplicates"]:
+            label = (d["title"] or "")[:52]
+            ref = "= " + (d["duplicateOf"] or "")[:10]
+            print(f"      {out.dim('·')} {label:54} {out.dim(ref)} {out.dim(d['how'])}")
+    print(f"  {out.ok(str(c['kept']).rjust(3))} candidates to decide\n")
+    b = data.get("bundle") or {}
+    if b.get("error"):
+        print(f"  {out.warn('knowledge bundle not written')} {out.dim(b['error'])}")
+        print(f"  {out.dim('The findings are safe in .agency/runs/ — `agency knowledge --rebuild` catches it up.')}\n")
+    elif b.get("changed") or b.get("removed"):
+        touched = len(b.get("changed") or []) + len(b.get("removed") or [])
+        print(f"  {out.dim('knowledge')}  {touched} file{'' if touched == 1 else 's'} "
+              f"updated in {out.dim(b['path'])}\n")
+    if c["kept"]:
+        print(f"  Next: {out.bold('agency findings')}  or the Agency panel in VS Code\n")
+
+
 def cmd_ingest(args) -> int:
     """Brána mezi tím, co napsal agent, a tím, co se stane nálezem."""
     project = _project(args)
@@ -1105,36 +1205,7 @@ def cmd_ingest(args) -> int:
         raise SystemExit("No run found.")
 
     data = ingest.ingest(project, run, min_score=args.min_score)
-
-    def human():
-        c = data["counts"]
-        print(f"\n  run {out.bold(run.id)}\n")
-        print(f"  {c['raw']:3} findings written by the pack")
-        if data["dropped"]:
-            print(f"  {out.err(str(c['gated']).rjust(3))} dropped by the gate")
-            for d in data["dropped"]:
-                label = (d["title"] or d["id"] or "")[:52]
-                print(f"      {out.dim('·')} {label:54} {out.err(d['reason'])} "
-                      f"{out.dim(d['detail'][:60])}")
-        if data["duplicates"]:
-            print(f"  {out.warn(str(len(data['duplicates'])).rjust(3))} duplicates of older findings")
-            for d in data["duplicates"]:
-                label = (d["title"] or "")[:52]
-                ref = "= " + (d["duplicateOf"] or "")[:10]
-                print(f"      {out.dim('·')} {label:54} {out.dim(ref)} {out.dim(d['how'])}")
-        print(f"  {out.ok(str(c['kept']).rjust(3))} candidates to decide\n")
-        b = data.get("bundle") or {}
-        if b.get("error"):
-            print(f"  {out.warn('knowledge bundle not written')} {out.dim(b['error'])}")
-            print(f"  {out.dim('The findings are safe in .agency/runs/ — `agency knowledge --rebuild` catches it up.')}\n")
-        elif b.get("changed") or b.get("removed"):
-            touched = len(b.get("changed") or []) + len(b.get("removed") or [])
-            print(f"  {out.dim('knowledge')}  {touched} file{'' if touched == 1 else 's'} "
-                  f"updated in {out.dim(b['path'])}\n")
-        if c["kept"]:
-            print(f"  Next: {out.bold('agency findings')}  or the Agency panel in VS Code\n")
-
-    _emit(args, data, human)
+    _emit(args, data, lambda: _ingest_report(run, data))
     return 0
 
 
@@ -1978,7 +2049,11 @@ def build_parser() -> argparse.ArgumentParser:
                    help="what this run should focus on — free text, for packs that take a brief")
     s.add_argument("--scenario", help="a named brief from the pack configuration (brief.scenarios)")
     s.add_argument("--since", help="base ref for a run over the project (default: the default branch)")
-    s.add_argument("--launch", action="store_true", help="start the agent right away")
+    start = s.add_mutually_exclusive_group()
+    start.add_argument("--launch", action="store_true",
+                       help="start the agent right away and hand this terminal over to it")
+    start.add_argument("--wait", action="store_true",
+                       help="start the agent, wait for it, and run the gate when it ends")
     s.add_argument("--model", help="model for this run (overrides the hire and the configuration)")
     s.add_argument("--provider",
                    help="run this one on a different runner — `agency providers` lists them")

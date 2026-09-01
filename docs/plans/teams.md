@@ -31,7 +31,7 @@ Ověřeno v kódu 1. 9. 2026. Většina „chainování“ v projektu existuje j
 | marker idempotence nese hire | `review_marker()`, [`runs.py:242`](../../packages/core/src/agency/runs.py) | dva specialisté nad jedním PR se nevylučují |
 | launch kontrakt pro klienty | `agency run --json`, [`cli.py:801`](../../packages/core/src/agency/cli.py); [`review.js:313`](../../packages/extension/src/review.js) | tvar spuštění vlastní CLI, klient ho jen posílá do terminálu — chain tuhle hranici nemění |
 
-**Co chybí, je jediná schopnost jádra: spustit agenta a vědět, kdy skončil.** `cmd_run` připraví běh a příkaz vytiskne (nebo se do něj `--launch` promění přes `execvp`, [`cli.py:838`](../../packages/core/src/agency/cli.py)); docstring `cmd_cleanup` to říká výslovně — *„no pid to watch and no exit code to catch“*. Chain je běh → počkej → ingest → další běh. Zbytek je kontrakt handoffu, ne nová infrastruktura.
+**Co chybělo, byla jediná schopnost jádra: spustit agenta a vědět, kdy skončil.** `cmd_run` běh připravil a příkaz vytiskl (nebo se do něj `--launch` proměnil přes `execvp`); docstring `cmd_cleanup` to říkal výslovně — *„no pid to watch and no exit code to catch“*. Chain je běh → počkej → ingest → další běh. Zbytek je kontrakt handoffu, ne nová infrastruktura. **Krok 2 to doplnil 1. 9. 2026** — `agency run --wait` čeká, zapisuje `agent.exitCode` a bránu pouští sám.
 
 ---
 
@@ -61,13 +61,23 @@ Plná specifikace v [`shared-memory.md`](shared-memory.md), Krok 1 — je to tý
 - **`RUN_DIR/summary.md`** jako výstup běhu — kompaktní „co jsem zjistil a co jsem s tím udělal“ pro dalšího v řadě; 300 položek `known-findings.json` není handoff, je to pozadí,
 - **`knowledge.py`** — jediné místo, kde se skládá „co projekt ví“; příprava kroku N v chainu z něj bere upstream výběr místo vlastního průchodu přes `load_runs()`.
 
-### Krok 2 — `agency run --wait` (~půl dne)
+### Krok 2 — `agency run --wait` (~půl dne) — **hotovo 1. 9. 2026**
 
-- Spustit `launch` argv jako subprocess ve worktree, počkat, exit code zapsat do run recordu (`agent.exitCode`), po doběhnutí automaticky `ingest`.
-- `--launch` (execvp) zůstává pro ruční použití; `--wait` je nová cesta a jediná, kterou chain volá. (`os.execvp` je na Windows beztak polospolehlivý — nahrazení procesu tam ve skutečnosti neexistuje.)
-- Attended charakter se nemění: subprocess běží v témže terminálu, uživatel ho vidí a může do něj vstoupit. Mění se jen to, že po skončení má jádro exit code a nemusí prosit o `agency ingest` ručně.
+- [x] Spustit `launch` argv jako subprocess ve worktree, počkat, exit code zapsat do run recordu (`agent.exitCode`), po doběhnutí automaticky `ingest`.
+- [x] `--launch` (execvp) zůstává pro ruční použití; `--wait` je nová cesta a jediná, kterou chain volá. (`os.execvp` je na Windows beztak polospolehlivý — nahrazení procesu tam ve skutečnosti neexistuje.)
+- [x] Attended charakter se nemění: subprocess běží v témže terminálu, uživatel ho vidí a může do něj vstoupit. Mění se jen to, že po skončení má jádro exit code a nemusí prosit o `agency ingest` ručně.
 
-> **Kontrola hotovosti:** `agency run legal --wait` doběhne, ingest proběhl bez druhého příkazu, běh není `running` a record má `agent.exitCode`.
+> **Kontrola hotovosti:** `agency run legal --wait` doběhne, ingest proběhl bez druhého příkazu, běh není `running` a record má `agent.exitCode`. — ✅ ověřeno end-to-end proti `legal@fake` (provider s `.CMD` binárkou) ve všech čtyřech koncích: 0, nenulový bez zápisu, nenulový se zápisem, chybějící binárka. `tests/test_wait.py` (10 testů).
+
+### Co plán nepředpokládal
+
+- **Windows si k příkazu domyslí jen `.exe`.** `subprocess` i `os.execvp` hledají holé jméno v PATH bez rozvinutí PATHEXT, takže `codex` — fakticky `codex.CMD` — skončí jako `FileNotFoundError`. Ověřeno na skutečné instalaci, ne odvozeno z dokumentace. Binárka se proto před spuštěním rozvine přes `shutil.which`; tentýž řádek dostal i `--launch`, kde ta díra byla celou dobu a nikdo o ní nevěděl, protože `claude` je `.EXE`.
+- **`--wait` a `--json` se vylučují.** Agent píše do téhož stdout jako CLI. Kontrakt „na výstupu je jeden JSON dokument“, na kterém stojí extension, se u toho nedá slíbit — a slib, který rozbije cizí výpis, je horší než chybějící kombinace přepínačů. Chain volá jádro zevnitř, takže o nic nepřichází.
+- **Exit code musí bránu přebít, ne nahradit.** Brána bez `findings.json` napíše `no-findings`, což je tvrzení „díval se a nic nenašel“ — u agenta, který skončil jedničkou, je to nepravda. Pořadí je proto: co agent stihl zapsat, projde branou jako vždycky, a teprve pak se stav přepíše na `failed` s `exitReason`. Nálezy se nezahazují, ale běh se netváří jako úspěšný.
+- **`needs-login` a `quota` zůstávají nevyplněné.** `run.v1` je v enumu stavů má a exit code by se na ně dal mapovat — jenže žádný z providerů své návratové kódy nedokumentuje. Odhad by vyrobil číslo, které nikdo neověří, a metriky stojí na tom, že se v nich nehádá.
+- **`cost.wallClockSeconds` se zapnulo mimochodem.** V `run.v1` je od začátku, metriky ho čtou (`s per candidate`) a nikdy ho nic nevyplnilo — protože nebyl proces, který by měřil. Vlastnictví procesu to spravuje zadarmo; přibylo k němu `cost.provider/model/credential`, credential odvozený z `trigger.attended`, ne z domněnky.
+- **Ctrl-C konečně něco znamená.** U `--launch` přerušení nikdo nezaznamená. Tady rodičovský proces žije dál, takže běh zavře jako `abandoned` a uklidí worktree, na který by uživatel jinak musel přijít sám.
+- **Worktree se po doběhnutí nemaže.** Brána je automatická, úklid ne: běh sice skončil, ale worktree je jediné místo, kde se dá dohledat, nad čím agent pracoval. `agency cleanup` zůstává rozhodnutím člověka — u chainu (Krok 3) to bude vlastní rozhodnutí, protože tam se worktree hromadí po krocích.
 
 ### Krok 3 — `agency chain` (~1–1,5 dne)
 
@@ -133,7 +143,7 @@ Dělá se, až pipeline doběhne aspoň na dvou reálných případech. Tvar:
 | krok | rozsah | kdy |
 |---|---|---|
 | 1 — společný základ (identita, summary, `knowledge.py`) | ~1 den | první; společný se [`shared-memory.md`](shared-memory.md) |
-| 2 — `agency run --wait` + auto-ingest | ~půl dne | po 1 |
+| 2 — `agency run --wait` + auto-ingest | ~půl dne | **hotovo 1. 9. 2026** |
 | 3 — `agency chain` + handoff + skládání promptu + `run.v1` | ~1–1,5 dne | po 2 |
 | 4 — SKILL.md: soud nad upstreamem + `handoff.md` | ~3 h | po 3 |
 | 5 — steering a druhé kolo | ~1 den | **v2 — až pipeline doběhne na reálných případech** |

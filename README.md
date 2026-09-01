@@ -68,6 +68,13 @@ agency metrics               # precision, dedup, fronta
 Totéž klikáním: ikona **Agency** v activity baru VS Code.
 (`agency add` je totéž pod starším jménem.)
 
+První tři řádky umí `agency run … --wait` najednou: pustí agenta v tomhle
+terminálu — pořád je vidět a dá se do něj vstoupit — počká na něj a bránu spustí
+sám. Nejde o pohodlí. Běh, u kterého se na `agency ingest` zapomene, zůstane
+navždycky `running` a jeho nálezy pro nástroj neexistují. Navíc je poprvé vidět,
+**jak** agent skončil: `agent.exitCode` v záznamu, `failed` místo mlčení, a
+změřený čas běhu, ze kterého metriky spočítají cenu za kandidáta.
+
 ## Víc providerů nad jednou metodou
 
 **Pack je metoda, hire je pracovník**, který se jí drží. Táž metoda jde najmout

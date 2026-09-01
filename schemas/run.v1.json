@@ -384,6 +384,13 @@
             "null"
           ],
           "description": "Id of the roster entry from .agency/hires.json, e.g. review-graph@codex. null = the run was handed over straight from the pack configuration."
+        },
+        "exitCode": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "How the agent process ended. Only a run started with `agency run --wait` has one: `--launch` replaces this process and leaves nobody to catch it, and a command copied into another terminal is not watched at all. Non-zero means the run failed even if findings.json was written — status says failed and the findings stay."
         }
       }
     },

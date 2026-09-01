@@ -13,7 +13,7 @@ Tři vazby, zbytek je volný:
 
 1. **Společný Krok 1 je první.** Identita `by`, `summary.md`, `knowledge.py`. Bez nich nemá ledger nálezů z čeho stavět `verified` tiery a rozhodnutí agenta se nedá odlišit od ručního v CLI.
 2. **Graf jde před ledgerem nálezů.** `evidence.source` má jmenovat `agency graph …`, ne `code-review-graph` ([`graph-abstraction.md`](graph-abstraction.md) Krok 4/4). Ledger ta jména zhmotní do markdownu — přejmenovat se musí dřív, než vzniknou.
-3. **Hindsight orchestrátor je poslední** — potřebuje `agency run --wait` z [`teams.md`](teams.md) Kroku 2. Harness hooky nezávisejí na ničem a jdou zkusit hned.
+3. **Hindsight orchestrátor je poslední** — potřebuje `agency run --wait` z [`teams.md`](teams.md) Kroku 2. Ten je hotový od 1. 9. 2026, takže vazba je splněná. Harness hooky nezávisejí na ničem a jdou zkusit hned.
 
 ---
 
@@ -170,9 +170,9 @@ Tři vazby, zbytek je volný:
 
 ## Fáze 7 — Hindsight recall adaptér (experiment, za flagem)
 
-> [`shared-memory.md`](shared-memory.md) → **Krok 5**, orchestrátorová část. Blokuje ji [`teams.md`](teams.md) **Krok 2** (`agency run --wait`, ~půl dne) — jinak není kam recall/retain zavěsit.
+> [`shared-memory.md`](shared-memory.md) → **Krok 5**, orchestrátorová část. Blokovala ji [`teams.md`](teams.md) **Krok 2** (`agency run --wait`) — ta překážka padla 1. 9. 2026, recall i retain teď mají kam zavěsit.
 
-- [ ] `agency run --wait` z [`teams.md`](teams.md) Kroku 2 (subprocess, exit code, auto-ingest)
+- [x] `agency run --wait` z [`teams.md`](teams.md) Kroku 2 (subprocess, exit code, auto-ingest) — hotovo 1. 9. 2026, „Co plán nepředpokládal“ je u [Kroku 2](teams.md) v jeho vlastním plánu
 - [ ] `hindsight-client`, výhradně lokální daemon (`--server daemon`), banka `coding-agent::{gitProject}`
 - [ ] **recall** před spuštěním → `evidence/recall.json` · **retain** po `ingest` → `summary.md` + přijaté nálezy
 - [ ] po ~10 bězích vyhodnotit kill criteria; když recall nepřinesl nic nad bundle, adaptér zhasnout
@@ -184,7 +184,7 @@ Tři vazby, zbytek je volný:
 | co | odkud | spouštěč |
 |---|---|---|
 | `graph/drivers/`, workspace strategie | [`graph-abstraction.md`](graph-abstraction.md) Krok 3 | až fyzicky přibývá druhý grafový nástroj |
-| `agency chain`, handoff, steering, extension | [`teams.md`](teams.md) Kroky 3–6 | vlastní plán; z tohoto pořadí se z něj bere jen Krok 2 do Fáze 7 |
+| `agency chain`, handoff, steering, extension | [`teams.md`](teams.md) Kroky 3–6 | vlastní plán; z tohoto pořadí se z něj bral jen Krok 2 do Fáze 7 — a ten je hotový |
 
 ---
 

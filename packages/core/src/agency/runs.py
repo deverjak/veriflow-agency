@@ -21,6 +21,7 @@ import fnmatch
 import json
 import os
 import shutil
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -661,13 +662,63 @@ def start(project: Project, pack_ref: str, cfg: dict, target: dict,
     return run
 
 
+def attend(project: Project, run: Run, launch: list[str], cwd: Path) -> dict:
+    """Spustit agenta, počkat na něj a zapsat, jak dopadl.
+
+    Tohle je celý rozdíl mezi `--launch` a `--wait`: proces, který se nenahradí,
+    má rodiče — a ten se dočká exit codu i hodin na stopkách. `cmd_cleanup`
+    dodnes říká „no pid to watch and no exit code to catch"; pro běh spuštěný
+    touhle cestou to přestává platit.
+
+    Stav běhu tady nevzniká. O tom, jestli je běh `ok`, rozhoduje brána podle
+    toho, co agent napsal — exit code je do toho rozhodnutí vstup, ne ono samo.
+    """
+    started = time.monotonic()
+    code = proc.attend(launch, cwd=cwd)
+    seconds = round(time.monotonic() - started, 1)
+
+    rec = run.record()
+    agent = {**(rec.get("agent") or {}), "exitCode": code}
+    rec["agent"] = agent
+    # `cost.wallClockSeconds` je v `run.v1` od začátku a dodnes ho nic
+    # nevyplňovalo — nebylo co měřit. Metriky ho čtou (`s per candidate`),
+    # takže tenhle zápis nezapíná nic nového, jen dosud mrtvé číslo.
+    rec["cost"] = {
+        **(rec.get("cost") or {}),
+        "provider": agent.get("provider"),
+        "model": agent.get("model"),
+        # Credential se odvozuje z triggeru, ne z domněnky: attended běh jede na
+        # předplatném, unattended by musel mít klíč s rozpočtem.
+        "credential": "subscription" if (rec.get("trigger") or {}).get("attended") else "api-key",
+        "wallClockSeconds": seconds,
+    }
+    rec["finishedAt"] = now()
+    run.save_record(rec)
+    return {"exitCode": code, "wallClockSeconds": seconds}
+
+
+def failed(run: Run, reason: str) -> dict:
+    """Běh, jehož agent skončil chybou.
+
+    Píše se AŽ po bráně, ne místo ní. Co agent stihl zapsat, projde branou
+    jako vždycky — ale záznam nesmí skončit na `no-findings`, protože to je
+    tvrzení „díval se a nic nenašel“, a exit code říká něco jiného.
+    """
+    rec = run.record()
+    rec["status"] = "failed"
+    rec["exitReason"] = reason
+    rec.setdefault("finishedAt", now())
+    run.save_record(rec)
+    return {"run": run.id, "status": "failed", "exitReason": reason}
+
+
 def unfinished(project: Project) -> list[Run]:
     """Runs still marked as running.
 
-    Nothing here can tell whether one is alive: the CLI prepares the run and
-    prints the command, and a terminal somewhere else runs it. There is no pid
-    to check, so "unfinished" means what the record says — and closing one is
-    the user's call, made when they close the terminal.
+    A run prepared with `--launch` or by hand is run by a terminal this process
+    knows nothing about: there is no pid to check, so "unfinished" means what
+    the record says, and closing one is the user's call. `--wait` is the way
+    around it — that one waits for the agent and closes the run itself.
     """
     return [r for r in load_runs(project) if r.record().get("status") == "running"]
 
