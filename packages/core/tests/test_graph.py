@@ -158,6 +158,20 @@ def test_priprava_zkopiruje_index_a_doindexuje(project, tmp_path, fake_crg):
     assert (wt / graph.DB_PATH).read_bytes() == b"index"
 
 
+def test_priprava_v_projektu_samotnem_nekopiruje_index_na_sebe(project, fake_crg):
+    """Pack s grafem a bez worktree pracuje v projektu — index je už na místě.
+    Kopie sebe na sebe je na Windows tvrdá chyba, ne hraniční případ."""
+    fake_crg(update=proc.Result(True, 0, "ok", ""))
+    src = project.root / graph.DB_PATH
+    src.parent.mkdir(parents=True, exist_ok=True)
+    src.write_bytes(b"index")
+
+    info = graph.prepare(src, project.root)
+
+    assert info["action"] == "update"
+    assert src.read_bytes() == b"index"
+
+
 def test_priprava_neaktualizuje_kdyz_si_to_projekt_neprejeje(project, tmp_path, fake_crg):
     fake_crg()
     src = project.root / graph.DB_PATH

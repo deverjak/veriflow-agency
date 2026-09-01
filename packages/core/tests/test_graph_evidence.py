@@ -113,6 +113,20 @@ def test_chyba_grafu_nekonci_v_json_souboru(project, make_run, fake_crg):
     assert stats["changedFiles"] == 1, "co jádro ví samo, přežije výpadek grafu"
 
 
+def test_beh_zapise_na_co_se_driver_umi_zeptat(project, make_run, fake_crg):
+    """Pack podle toho pozná, kterou dimenzi má přeskočit. Co driver neumí, se
+    nedokládá — a bez tohohle souboru by to musel hádat z prázdné evidence."""
+    _all_stubbed(fake_crg)
+    run = make_run(findings=[])
+
+    runs.collect_evidence(project, project.root, run, {"baseRefOid": "b" * 40}, [])
+
+    caps = json.loads((run.dir / "evidence" / "graph-capabilities.json")
+                      .read_text(encoding="utf-8"))
+    assert caps["driver"]
+    assert "tests-for" in caps["capabilities"]
+
+
 def test_statistiky_se_vejdou_do_run_v1(project, make_run, fake_crg):
     """`graph` má v `run.v1` zavřený seznam klíčů. Nový statistický klíč bez
     zápisu do schématu nespadne tady, ale až při validaci hotového běhu."""
@@ -121,10 +135,13 @@ def test_statistiky_se_vejdou_do_run_v1(project, make_run, fake_crg):
 
     stats = runs.collect_evidence(project, project.root, run,
                                   {"baseRefOid": "b" * 40}, ["src/auth.ts"])
+    ginfo = runs.prepare_graph(project, project.root, {})
 
     allowed = set(json.loads(SCHEMA.read_text(encoding="utf-8"))
                   ["properties"]["graph"]["properties"])
     # Paměť se sbírá při téže přípravě, ale do `graph` ji jádro nepíše.
-    graph_keys = set(stats) - set(runs.MEMORY_STATS)
+    graph_keys = (set(stats) | set(ginfo)) - set(runs.MEMORY_STATS)
     assert graph_keys <= allowed, f"neznámé pro schéma: {sorted(graph_keys - allowed)}"
     assert set(runs.MEMORY_STATS) & set(stats), "paměť se pořád sbírá, jen bydlí jinde"
+    assert ginfo["driver"] and ginfo["capabilities"], \
+        "bez driveru a schopností nejde výměnu vyhodnotit"

@@ -15,7 +15,7 @@ Recenze pull requestu s **doloženými** nálezy. Strukturální signál, který
 
 ```
 <RUN_DIR>/context.json     konfigurace projektu, metadata PR, seznam souborů k recenzi
-<RUN_DIR>/evidence/        výstupy code-review-graph — detect-changes, impact, dead-code
+<RUN_DIR>/evidence/        grafový signál — detect-changes, impact, dead-code, graph-capabilities
 <RUN_DIR>/run.json         záznam běhu, který na konci doplníš
 ```
 
@@ -61,15 +61,16 @@ Když `brief.focus` nebo `brief.standing` není `null`, **projdi zadanou oblast 
 Než dimenze cokoli označí za podezřelé, **ověř to dotazem do grafu**:
 
 ```bash
-code-review-graph search "<name>" --repo <worktree>
-code-review-graph query callers_of <name> --repo <worktree>
+agency graph locate "<name>" --repo <worktree>
+agency graph neighbors <name> --direction in --repo <worktree>
+agency graph tests-for <name> --repo <worktree>
 ```
 
 To je přesně ta věc, která z dohadu dělá doložitelný nález.
 
-> **Windows:** každé volání `code-review-graph`, jehož výstup čteš, prefixuj `PYTHONIOENCODING=utf-8`. Jeho Rich panely používají rámečkové znaky, které v `cp1250` konzoli spadnou na `UnicodeEncodeError`.
->
-> **Cesty v JSON výstupu jsou na Windows absolutní a OS-native**, ne relativní k repu. Normalizuj je dřív, než je páruješ proti POSIX cestám z `gh`.
+Ptej se přes `agency graph`, ne přímo nástrojem: odpověď je JSON s cestami relativními k repu (přímý nástroj vrací na Windows absolutní OS-native cesty, které se pak nespárují s POSIX cestami z `gh`), a `evidence.source` pak přežije výměnu grafového nástroje.
+
+> **Co driver neumí, se nedokládá.** `evidence/graph-capabilities.json` říká, na které otázky tenhle driver odpovídá. Chybí-li `tests-for` nebo `unreferenced`, dimenze, která na nich stojí, se **přeskočí a napíše se to do `exitReason`** — nedohaduje se z diffu. Chybějící schopnost je legitimní výsledek, vymyšlený nález ne.
 
 ## 3. Deterministická brána — dřív než filtr kvality
 
@@ -115,7 +116,7 @@ Tohle je jediný povinný výstup. Do `<RUN_DIR>/findings.json` zapiš pole obje
     "body": "<tělo symbolu, strop 8 kB>"
   },
   "evidence": [
-    { "kind": "graph", "detail": "3 volající v d=1, 0 testů", "source": "code-review-graph impact --depth 2" }
+    { "kind": "graph", "detail": "3 volající v d=1, 0 testů", "source": "agency graph impact --depth 2" }
   ],
   "score": 92,
   "state": "candidate"
@@ -126,7 +127,7 @@ Ke kotvě, protože na ní stojí použitelnost nálezu za měsíc:
 
 - **`commit` je plných 40 znaků.** Zkrácený SHA může později tiše ukázat na jiný řádek.
 - **`snippet` je celý blok `line..endLine`,** ne jeden řádek. Jednořádkový snippet selže na `/**`, `}` a podobné boilerplatě — a docblock začíná přesně tím.
-- **`symbol` vyplň z grafu,** ne odhadem: `code-review-graph query file_summary <file> --repo <worktree>`. Je to jediná vrstva kotvy, která přežije refaktor.
+- **`symbol` vyplň z grafu,** ne odhadem: `agency graph locate "<name>" --repo <worktree>` vrátí `file`, `line` a `endLine`. Je to jediná vrstva kotvy, která přežije refaktor.
 - **`anchor.body`** je záchranná síť pro případ, že commit v klonu už nebude — squash-merge se smazanou větví je na GitHubu default.
 
 Doplň `run.json`: `status`, `finishedAt`, `counts` a `cost` (provider, model, počet dimenzí, doba běhu).

@@ -172,8 +172,8 @@ Nález z UI musí ukázat na kód, jinak z něj nikdo neudělá opravu. Postup o
 # co obsluhuje tu cestu / ten text z chybové hlášky
 rg -n "<řetězec z UI>" --glob '!node_modules'
 # když je v projektu graf, je to rychlejší a přesnější
-code-review-graph search "<name>" --repo <project.root>
-code-review-graph query callers_of <name> --repo <project.root>
+agency graph locate "<name>" --repo <project.root>
+agency graph neighbors <name> --direction in --repo <project.root>
 ```
 
 Pomůže i trace ze spadlého specu: nese poslední request, jeho stav a stack — a odtud je k handleru krok.

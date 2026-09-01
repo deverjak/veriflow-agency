@@ -251,8 +251,12 @@ def prepare(src_db: Path, wt: Path, on_stale: str = "update") -> dict:
         return info
 
     dst = Path(wt) / DB_PATH
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(src_db, dst)
+    if Path(src_db).resolve() != dst.resolve():
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src_db, dst)
+    # Běh bez worktree pracuje v projektu samotném — index už je na místě.
+    # Kopie sebe na sebe je na Windows tvrdá chyba (soubor drží jiný proces)
+    # a jinde nesmysl; doindexovat se ale pořád má.
 
     if on_stale == "ignore":
         info["action"] = "reused"

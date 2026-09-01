@@ -165,7 +165,7 @@
     },
     "graph": {
       "type": "object",
-      "description": "Stav code-review-graph při běhu. Bez toho se zpětně nepozná, jestli nález stál na čerstvém, nebo měsíc starém indexu.",
+      "description": "Stav grafového indexu při běhu — včetně toho, který driver ho obsluhoval. Bez toho se zpětně nepozná, jestli nález stál na čerstvém, nebo měsíc starém indexu.",
       "additionalProperties": false,
       "properties": {
         "tool": {
@@ -173,6 +173,17 @@
             "string",
             "null"
           ]
+        },
+        "driver": {
+          "type": "string",
+          "description": "Který grafový driver běh obsloužil. Bez toho po výměně nepoznáš, jestli nálezů ubylo kvůli horšímu nástroji, nebo kvůli chybějící schopnosti."
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Na které otázky driver v tomhle běhu odpovídal. Dimenze, která stojí na chybějící schopnosti, se přeskočí — a tady je vidět proč."
         },
         "action": {
           "enum": [

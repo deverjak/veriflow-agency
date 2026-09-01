@@ -84,16 +84,21 @@ Tři vazby, zbytek je volný:
 
 ---
 
-## Fáze 3 — graf v promptu a v záznamu (~2 h)
+## Fáze 3 — graf v promptu a v záznamu (~2 h) — **hotovo 1. 9. 2026**
 
 > [`graph-abstraction.md`](graph-abstraction.md) → **Krok 4**. Dělá se před ledgerem (vazba 2 nahoře).
 
-- [ ] `packs/review-graph/skill/SKILL.md:63-64,128` a `packs/qa/skill/SKILL.md:174-175` → `agency graph locate|neighbors|tests-for`
-- [ ] běh zapíše `RUN_DIR/evidence/graph-capabilities.json`; SKILL.md pravidlo *„co driver neumí, se nedokládá“*
-- [ ] `schemas/run.v1.json:152` — ke `graph.tool` přidat `driver` a `capabilities`
-- [ ] `schemas/finding.v1.json:90,95` — popisy `evidence.kind` / `evidence.source` přestanou jmenovat `code-review-graph`
+- [x] `packs/review-graph/skill/SKILL.md` a `packs/qa/skill/SKILL.md` → `agency graph locate|neighbors|tests-for`; `evidence.source` v příkladu nálezu taky
+- [x] běh zapíše `RUN_DIR/evidence/graph-capabilities.json`; SKILL.md pravidlo *„co driver neumí, se nedokládá“* — dimenze se přeskočí a napíše se to do `exitReason`
+- [x] `schemas/run.v1.json` — ke `graph.tool` přidán `driver` a `capabilities`
+- [x] `schemas/finding.v1.json` — popisy `evidence.kind` / `evidence.source` už nejmenují konkrétní nástroj
 
-**Hotovo, když:** po výměně driveru se pozná, jestli nálezů ubylo kvůli horšímu nástroji, nebo jen proto, že zmizel `dead-code`.
+**Hotovo, když:** po výměně driveru se pozná, jestli nálezů ubylo kvůli horšímu nástroji, nebo jen proto, že zmizel `dead-code`. — ✅ záznam s `driver` + `capabilities` validuje proti `run.v1`; ve `schemas/` už není jediná zmínka o `code-review-graph`.
+
+### Co plán nepředpokládal
+
+- **Windowsí poznámka v SKILL.md zmizela a nenahradila se.** `PYTHONIOENCODING` a normalizace absolutních cest byly obcházení toho, že se pack ptal nástroje přímo; přes `agency graph` je odpověď JSON s cestami relativními k repu, takže obojí odpadlo.
+- **Pack s grafem a bez worktree kopíroval index sám na sebe.** Latentní od začátku (žádný z dnešních packů tu kombinaci nemá), na Windows tvrdá `PermissionError`. Vyšlo to najevo při ověřování záznamu; opraveno v `graph.prepare`.
 
 ---
 

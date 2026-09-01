@@ -456,7 +456,13 @@ def remove_worktree(project: Project, wt: Path) -> None:
 def prepare_graph(project: Project, wt: Path, cfg: dict) -> dict:
     """Index pro tenhle běh. Jak se tam dostane, je věc driveru (`graph.py`)."""
     src = project.root / ((cfg.get("graph") or {}).get("db") or graph.DB_PATH)
-    return graph.prepare(src, wt, (cfg.get("graph") or {}).get("onStale", "update"))
+    info = graph.prepare(src, wt, (cfg.get("graph") or {}).get("onStale", "update"))
+    # Který driver a co uměl. Bez toho po výměně nepoznáš, jestli nálezů ubylo
+    # kvůli horšímu nástroji, nebo jen proto, že zmizela schopnost — a to je
+    # jediná věc, kvůli které se dá výměna vůbec vyhodnotit.
+    info["driver"] = graph.DRIVER
+    info["capabilities"] = graph.capabilities()
+    return info
 
 
 #: Co z připravených statistik je paměť, ne grafový signál. Sbírá se při téže
@@ -494,6 +500,12 @@ def collect_evidence(project: Project, wt: Path, run: Run, target: dict,
     # Číst to z grafu znamená číst číslo z jeho shrnutí — a shrnutí počítá svůj
     # diff, ne ten po `skipPatterns`. Workspace běh to má stejně.
     stats: dict = {"changedFiles": len(files), **known_memory(project, run)}
+
+    # Na co se tenhle driver umí zeptat. Čte to pack: co driver neumí, se
+    # nedokládá — dimenze se přeskočí a napíše se to, místo aby se dohadovala.
+    write_json(ev / "graph-capabilities.json",
+               {"driver": graph.DRIVER, "tool": graph.version(),
+                "capabilities": graph.capabilities()})
 
     base = target.get("baseRefOid")
     if base:

@@ -55,7 +55,7 @@
         },
         "symbol": {
           "type": ["object", "null"],
-          "description": "Vrstva 3, z code-review-graph. Přežije refaktor a přesun bloku tam, kde číslo řádku ne.",
+          "description": "Vrstva 3, ze symbolu v grafu. Přežije refaktor a přesun bloku tam, kde číslo řádku ne.",
           "additionalProperties": false,
           "required": ["name"],
           "properties": {
@@ -87,12 +87,12 @@
         "properties": {
           "kind": {
             "enum": ["graph", "rule", "test-gap", "diff", "runtime", "doc"],
-            "description": "graph = fakt z code-review-graph, rule = pravidlo z projektové dokumentace, test-gap = chybějící pokrytí, diff = obsah změny, runtime = pozorované chování, doc = rozpor s dokumentací"
+            "description": "graph = fakt z grafového driveru (`agency graph`), rule = pravidlo z projektové dokumentace, test-gap = chybějící pokrytí, diff = obsah změny, runtime = pozorované chování, doc = rozpor s dokumentací"
           },
           "detail": { "type": "string", "minLength": 3 },
           "source": {
             "type": ["string", "null"],
-            "description": "Odkud to pochází — např. 'code-review-graph impact --depth 2' nebo 'CLAUDE.md#rules-that-will-bite-you'"
+            "description": "Odkud to pochází — např. 'agency graph impact --depth 2' nebo 'CLAUDE.md#rules-that-will-bite-you'"
           }
         }
       }
