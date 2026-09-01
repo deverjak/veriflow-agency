@@ -47,9 +47,9 @@ Pusť dimenze z `review.dimensions` jako **paralelní čerstvé agenty**. Nemaj�
 
 | Dimenze | Na co se dívá | Čím ji nakrmit |
 |---|---|---|
-| `correctness` | Logické chyby, rozbitá volající místa, změny kontraktu | `evidence/impact.json`, `evidence/detect-changes.txt` |
-| `tests` | Jestli testy v PR skutečně pokrývají změněné chování | seznam „Untested:", `code-review-graph query tests_for <symbol> --repo <worktree>` |
-| `reuse` | Duplicitní read modely napříč vrstvami, nově mrtvý kód, zbytečná abstrakce | `evidence/dead-code.txt` |
+| `correctness` | Logické chyby, rozbitá volající místa, změny kontraktu | `evidence/impact.json`, `evidence/detect-changes.json` |
+| `tests` | Jestli testy v PR skutečně pokrývají změněné chování | `evidence/detect-changes.json` → `test_gaps[]`, `code-review-graph query tests_for <symbol> --repo <worktree>` |
+| `reuse` | Duplicitní read modely napříč vrstvami, nově mrtvý kód, zbytečná abstrakce | `evidence/dead-code.json` |
 | `errors` | Spolknuté chyby, chybějící `await`, neidempotentní handlery | diff |
 | `repo-rules` | Pravidla z `review.rules` — **obsah je projektový, ne packový** | sekce z `review.rules` |
 

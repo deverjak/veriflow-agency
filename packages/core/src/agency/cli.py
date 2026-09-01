@@ -417,8 +417,12 @@ def cmd_doctor(args) -> int:
 
     if needed("code-review-graph"):
         graph = proc.crg_status(project.root)
+        gstats = graph.get("stats") or {}
         check("code graph", graph["exists"],
-              f"{graph.get('sizeBytes', 0) // 1_000_000} MB" if graph["exists"]
+              f"{graph.get('sizeBytes', 0) // 1_000_000} MB"
+              + (f" · {gstats['nodes']} nodes, {gstats['files']} files"
+                 if gstats.get("nodes") is not None else "")
+              if graph["exists"]
               else "missing — build it with `code-review-graph build`", fatal=False)
 
     for p in packs.available():
@@ -762,10 +766,16 @@ def cmd_run(args) -> int:
                            pack_name=pack.name)
 
         rec = run.record()
+        # Paměť není grafový signál. `graph` v run.v1 má zavřený seznam klíčů a
+        # `knownFindings` mezi ně nepatří — slité dohromady dělaly ze záznamu
+        # neplatný dokument, na který se nikdy nikdo nezeptal: `agency validate`
+        # kontroluje findings.v1, run.v1 nikdo.
+        memory = {k: stats.pop(k) for k in runs.MEMORY_STATS if k in stats}
         if ginfo:
             rec["graph"] = {**ginfo, **stats}
+            rec["evidence"] = memory
         else:
-            rec["evidence"] = stats
+            rec["evidence"] = {**stats, **memory}
         rec["brief"] = brief
         rec["target"]["filesReviewed"] = len(files)
         rec["target"]["filesSkipped"] = skipped
@@ -816,6 +826,7 @@ def cmd_run(args) -> int:
             "files": len(files),
             "filesSkipped": skipped,
             "graph": {**ginfo, **stats},
+            "evidence": memory if ginfo else {**stats, **memory},
         }, ensure_ascii=False, indent=2))
         return 0
 

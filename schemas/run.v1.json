@@ -192,6 +192,10 @@
             "null"
           ]
         },
+        "changedFunctionsTruncated": {
+          "type": "boolean",
+          "description": "Graf ořízl seznam změněných funkcí (CRG: CRG_MAX_CHANGED_FUNCS, výchozí 500). Pak je changedFunctions dolní odhad, ne počet."
+        },
         "untestedFunctions": {
           "type": [
             "integer",

@@ -232,6 +232,9 @@ def crg_status(repo: str | Path) -> dict:
     if not info["exists"]:
         return info
     info["sizeBytes"] = db.stat().st_size
-    r = crg("status", "--repo", str(repo))
-    info["raw"] = r.stdout.strip() if r.ok else None
+    r = crg("status", "--repo", str(repo), "--json")
+    # `nodes`, `edges`, `files`, `languages`, `built_at_commit`, `current_sha`…
+    # Čerstvost indexu se pozná porovnáním posledních dvou — z lidského panelu
+    # se to dalo jen přečíst očima.
+    info["stats"] = r.json()
     return info

@@ -477,6 +477,11 @@ def prepare_graph(project: Project, wt: Path, cfg: dict) -> dict:
     return info
 
 
+#: Co z připravených statistik je paměť, ne grafový signál. Sbírá se při téže
+#: přípravě, ale v run recordu patří jinam — `graph` popisuje stav indexu.
+MEMORY_STATS = ("knownFindings", "knownSpecs")
+
+
 def known_memory(project: Project, run: Run) -> dict:
     """What this project already knows — across runs, packs and specialists.
 
@@ -533,38 +538,57 @@ def known_memory(project: Project, run: Run) -> dict:
     return stats
 
 
+def _graph_json(ev: Path, name: str, r: proc.Result):
+    """Strojový výstup grafu do evidence — a když nepřišel, ať je to vidět.
+
+    Běh bez grafového signálu je legitimní výsledek, takže se nepadá. Ale zapsat
+    chybovou hlášku do `.json` znamená, že se nad ní dimenze bude dohadovat jako
+    nad daty; proto jde chyba vedle, do `.error.txt`.
+    """
+    data = r.json()
+    if data is None:
+        (ev / f"{name}.error.txt").write_text(
+            (r.stderr or r.stdout).strip()[:2000] or "no output", encoding="utf-8")
+        return None
+    write_json(ev / f"{name}.json", data)
+    return data
+
+
 def collect_evidence(project: Project, wt: Path, run: Run, target: dict,
                      files: list[str]) -> dict:
     """Grafový signál. Tohle je ta část, kterou samotný diff nedá."""
     ev = run.dir / "evidence"
     ev.mkdir(parents=True, exist_ok=True)
-    stats: dict = dict(known_memory(project, run))
+    # Kolik souborů běh recenzuje, ví jádro ze seznamu, který samo odfiltrovalo.
+    # Číst to z grafu znamená číst číslo z jeho shrnutí — a shrnutí počítá svůj
+    # diff, ne ten po `skipPatterns`. Workspace běh to má stejně.
+    stats: dict = {"changedFiles": len(files), **known_memory(project, run)}
 
     base = target.get("baseRefOid")
     if base:
-        r = proc.crg("detect-changes", "--repo", str(wt), "--base", base, "--brief")
-        (ev / "detect-changes.txt").write_text(r.stdout or r.stderr, encoding="utf-8")
-        # Pozor na pořadí slov: `(\d+)\s+changed` chytí „10 changed file(s)"
-        # dřív než „23 changed function(s)" a tiše podhlásí objem změny.
-        import re as _re
-        for key, pat in (("changedFiles", r"(\d+)\s+changed file"),
-                         ("changedFunctions", r"(\d+)\s+changed function"),
-                         ("affectedFlows", r"(\d+)\s+affected flow"),
-                         ("untestedFunctions", r"(\d+)\s+test gap"),
-                         ("riskScore", r"risk score:\s*([0-9.]+)")):
-            m = _re.search(pat, r.stdout or "", _re.I)
-            if m:
-                stats[key] = float(m.group(1)) if "." in m.group(1) else int(m.group(1))
+        changes = _graph_json(ev, "detect-changes", proc.crg(
+            "detect-changes", "--repo", str(wt), "--base", base))
+        if changes:
+            stats["changedFunctions"] = len(changes.get("changed_functions") or [])
+            stats["affectedFlows"] = len(changes.get("affected_flows") or [])
+            stats["untestedFunctions"] = len(changes.get("test_gaps") or [])
+            if changes.get("risk_score") is not None:
+                stats["riskScore"] = changes["risk_score"]
+            if changes.get("functions_truncated"):
+                # CRG řeže na `CRG_MAX_CHANGED_FUNCS` (500) a ten strop hlásí ve
+                # shrnutí jako výsledek. Bez příznaku by se do záznamu zapsalo
+                # „500 změněných funkcí" jako fakt, ne jako dolní odhad.
+                stats["changedFunctionsTruncated"] = True
 
     if files:
-        r = proc.crg("impact", "--repo", str(wt), "--files", *files[:40],
-                     "--depth", "2", "--max-results", "30")
-        (ev / "impact.json").write_text(r.stdout or r.stderr, encoding="utf-8")
+        _graph_json(ev, "impact", proc.crg(
+            "impact", "--repo", str(wt), "--files", *files[:40],
+            "--depth", "2", "--max-results", "30"))
 
         dirs = sorted({posix(Path(f).parent) for f in files if Path(f).parent != Path(".")})
         if dirs:
-            r = proc.crg("dead-code", "--repo", str(wt), "--file-pattern", dirs[0])
-            (ev / "dead-code.txt").write_text(r.stdout or r.stderr, encoding="utf-8")
+            _graph_json(ev, "dead-code", proc.crg(
+                "dead-code", "--repo", str(wt), "--file-pattern", dirs[0], "--json"))
 
     return stats
 
