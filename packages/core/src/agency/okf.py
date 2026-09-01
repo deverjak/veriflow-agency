@@ -274,22 +274,49 @@ def _today() -> str:
     return datetime.now(timezone.utc).date().isoformat()
 
 
-def read(path: Path, root: Path | None = None) -> dict:
-    """Jeden koncept jako dict. Rozbitý koncept se ohlásí, nezmizí."""
+def _heading(body: str) -> str | None:
+    """První nadpis textu. Stránka psaná před koncepty má jméno uvnitř sebe."""
+    for line in body.splitlines():
+        if line.startswith("# "):
+            return line[2:].strip() or None
+        if line.strip():
+            return None
+    return None
+
+
+def read(path: Path, root: Path | None = None, plain_ok: bool = False) -> dict:
+    """Jeden koncept jako dict. Rozbitý koncept se ohlásí, nezmizí.
+
+    `plain_ok` je pro adresáře, kde markdown bez frontmatteru dává smysl sám
+    o sobě — stránky packů se psaly dřív, než koncepty existovaly, a nazvat
+    fungující paměť „rozbitou" by byla nepravda. U pravidel se to nepovoluje:
+    pravidlo bez hlavičky neví, jestli ještě platí, a nález na něm nesmí stát.
+    """
     rel = str(path if root is None else path.relative_to(root)).replace("\\", "/")
     out: dict = {"id": path.stem, "path": rel}
     try:
-        front, body = parse(path.read_text(encoding="utf-8"))
-    except (ConceptError, OSError) as e:
-        # Pravidlo, které se nedá přečíst, nesmí mizet mezi ostatními: dimenze
-        # by pak běžela s tichou dírou v zadání a nikdo by nevěděl proč.
+        text = path.read_text(encoding="utf-8")
+    except OSError as e:
         out["error"] = str(e)
         return out
+
+    try:
+        front, body = parse(text)
+        out["frontmatter"] = True
+    except ConceptError as e:
+        if not (plain_ok and not text.lstrip().startswith(FENCE)):
+            # Pravidlo, které se nedá přečíst, nesmí mizet mezi ostatními:
+            # dimenze by pak běžela s tichou dírou v zadání a nikdo by nevěděl
+            # proč. Rozbitá hlavička je něco jiného než žádná hlavička.
+            out["error"] = str(e)
+            return out
+        front, body = {}, text.strip()
+        out["frontmatter"] = False
 
     stale_after = front.get("stale_after")
     out.update({
         "type": front.get("type"),
-        "title": front.get("title") or path.stem,
+        "title": front.get("title") or _heading(body) or path.stem,
         "status": front.get("status") or "stable",
         "tags": front.get("tags") or [],
         "staleAfter": stale_after,
@@ -308,11 +335,12 @@ def read(path: Path, root: Path | None = None) -> dict:
     return out
 
 
-def load_dir(directory: Path, kind: str | None = None, root: Path | None = None) -> list[dict]:
+def load_dir(directory: Path, kind: str | None = None, root: Path | None = None,
+             plain_ok: bool = False) -> list[dict]:
     """Všechny koncepty v adresáři, seřazené podle id. Chybějící adresář = nic."""
     if not directory.is_dir():
         return []
-    found = [read(p, root=root) for p in sorted(directory.glob("*.md"))]
+    found = [read(p, root=root, plain_ok=plain_ok) for p in sorted(directory.glob("*.md"))]
     if kind is None:
         return found
     return [c for c in found if c.get("type") == kind or "error" in c]

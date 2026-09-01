@@ -297,8 +297,9 @@ databáze.
 .agency/knowledge/
   index.md            přehled — co projekt ví, co kdo rozhodl
   log.md              chronologie: čím se který běh zabýval, jeho vlastními slovy
-  findings/<id>.md    nálezy napříč běhy, packy a specialisty
-  rules/<id>.md       pravidla projektu — jediná část, kterou píše člověk
+  findings/<id>.md    nálezy napříč běhy, packy a specialisty — generované
+  rules/<id>.md       pravidla projektu — píše člověk
+  pages/<pack>/       závěry specialisty: co ví QA, PO nebo právník o tomhle projektu
 ```
 
 ### Pravidla — píše je člověk
@@ -377,6 +378,41 @@ v `.agency/runs/` a bundle se dá kdykoli zahodit a postavit znovu.
 agency knowledge            # je bundle v souladu s běhy?
 agency knowledge --rebuild  # přestav ho z .agency/runs/
 ```
+
+### Stránky packů — píše je specialista
+
+Nález je jednotlivost. „Payment state machine je dlouhodobě nejrizikovější část"
+nebo „u monetizace preferujeme Free jako growth engine" jednotlivost není a do
+`findings/` se to nevejde. Od toho jsou `pages/<pack>/`: kurátorovaná znalost
+packu, kterou na konci běhu aktualizuje sám specialista.
+
+```markdown
+---
+type: Page
+title: "Co je prozkoumané a co ne"
+status: stable
+stale_after: 2026-12-01
+verified:
+  - by: hire:qa@claude
+    at: 2026-09-01T12:00:00Z
+---
+```
+
+Pravidlo, které dostaly QA, PO i právník do SKILL.md, zní **závěry, ne log**.
+Chronologii běhů vede `log.md`; kdyby ji stránka vedla podruhé, jedna z těch
+dvou verzí bude časem lhát. Co přestalo platit, se přepíše, nebo dostane
+`status: deprecated` a **zůstane** — smazat závěr znamená zahodit i důvod, proč
+se k němu nemá příště docházet znovu.
+
+Stránka **bez hlavičky** se čte dál a v přehledu je označená jako
+„no frontmatter". Paměť se psala dřív, než koncepty existovaly, a prohlásit
+fungující soubor za rozbitý by byla nepravda. U pravidla to neplatí: pravidlo
+bez hlavičky neví, jestli ještě platí, a nález na něm stavět nelze.
+
+Výchozí místo je v bundlu, ale `memory.dir` v konfiguraci packu vyhrává —
+projekt, který má paměť v `.agency/qa/`, ji tam má dál a odkaz v přehledu vede
+tam. Pack běžící ve worktree stránky nedostane vůbec: worktree stojí na hlavičce
+PR a `agency run` ho po sobě smaže.
 
 Formát je [Open Knowledge Format](https://github.com/google/open-knowledge-format)
 v0.2, ale je to **konvence, ne závislost**: povinné je jediné pole `type`

@@ -103,8 +103,8 @@
   },
 
   "memory": {
-    "$comment": "The project's memory, not the pack's. What has already been covered and what is known to be broken belongs to the project — that is exactly the split that let one QA agent grow into a specialist any project can hire.",
-    "dir": ".agency/qa",
+    "$comment": "The project's memory, not the pack's. Pages are OKF concepts in the knowledge bundle (`type: Page`, `status`, `stale_after`), so a conclusion that stopped holding can be marked instead of deleted. A project that already has this directory elsewhere keeps it — the path below is what the core reads. What has already been covered and what is known to be broken belongs to the project — that is exactly the split that let one QA agent grow into a specialist any project can hire.",
+    "dir": ".agency/knowledge/pages/qa",
     "coverage": "coverage.md",
     "regressions": "known-regressions.md"
   },

@@ -18,6 +18,9 @@ v editoru, provider, o kterém dnes nevíme. Proto je to markdown a ne databáze
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 from . import okf
 from . import runs as _runs
 from .config import Project
@@ -34,6 +37,7 @@ FOR_RUN_SPECS = 200
 #: negeneruje. Stránky packů přibudou ve Fázi 6.
 BUNDLE = "knowledge"
 LEDGER = "findings"
+PAGES = "pages"
 
 #: Kolik běhů se vypíše do chronologie. Strop je vidět přímo v souboru — na
 #: rozdíl od stropu projekce, který tiše zapomínal (`docs/plans/tasks.md`
@@ -123,6 +127,56 @@ def rules_summary(project: Project) -> dict:
     }
 
 
+# ------------------------------------------------------------------ stránky
+
+def installed_packs(project: Project) -> list[str]:
+    return sorted((project.installed().get("packs") or {}).keys())
+
+
+def pages_dir(project: Project, pack: str, cfg: dict | None = None) -> Path:
+    """Kde bydlí kurátorovaná znalost packu.
+
+    Výchozí místo je v bundlu, ale `memory.dir` v konfiguraci packu vyhrává:
+    QA, PO i právník si paměť psali do `.agency/<pack>/` dřív, než bundle
+    existoval, a konfiguraci vlastní projekt — upgrade ji nepřepisuje. Přesun
+    je tedy nabídka, ne migrace za zády uživatele.
+    """
+    cfg = cfg if cfg is not None else (project.pack_config(pack) or {})
+    custom = str((cfg.get("memory") or {}).get("dir") or "").strip()
+    return (project.root / custom) if custom else (project.agency_dir / BUNDLE / PAGES / pack)
+
+
+def pages(project: Project, pack: str, cfg: dict | None = None) -> list[dict]:
+    """Stránky packu — závěry, které si nese mezi běhy.
+
+    Na rozdíl od nálezů je nikdo negeneruje: píše je specialista na konci běhu
+    a projekt je vlastní. Proto se čtou shovívavě — stránka bez frontmatteru je
+    starší stránka, ne rozbitá.
+    """
+    return okf.load_dir(pages_dir(project, pack, cfg), root=project.root, plain_ok=True)
+
+
+def pages_summary(project: Project) -> dict:
+    """Stav stránek všech najatých packů — pro doctor a `agency knowledge`."""
+    out = {"total": 0, "expired": 0, "deprecated": 0, "plain": 0,
+           "broken": [], "byPack": {}}
+    for pack in installed_packs(project):
+        found = pages(project, pack)
+        if not found:
+            continue
+        ok = [p for p in found if "error" not in p]
+        out["byPack"][pack] = len(ok)
+        out["total"] += len(ok)
+        out["expired"] += len([p for p in ok if p.get("expired")])
+        out["deprecated"] += len([p for p in ok if p.get("status") == "deprecated"])
+        # Stránka bez hlavičky se čte dál, ale neví, jestli ještě platí. Je to
+        # nedodělaná migrace, ne chyba — a jako taková má být vidět.
+        out["plain"] += len([p for p in ok if not p.get("frontmatter")])
+        out["broken"] += [{"path": p["path"], "error": p["error"]}
+                          for p in found if "error" in p]
+    return out
+
+
 def for_run(project: Project, run) -> dict:
     """What this project already knows — across runs, packs and specialists.
 
@@ -152,6 +206,14 @@ def for_run(project: Project, run) -> dict:
         # díra v zadání, ne zkrácené pozadí.
         write_json(ev / "known-rules.json", known_rules)
         stats["knownRules"] = len(known_rules)
+    pack = (run.record().get("pack") or "").split("@")[0]
+    own_pages = [p for p in pages(project, pack) if "error" not in p] if pack else []
+    if own_pages:
+        # Taky bez stropu, a ze stejného důvodu jako pravidla: tohle nejsou cizí
+        # nálezy na pozadí, tohle jsou vlastní závěry specialisty. Oříznout je
+        # znamená nechat ho dojít k některému z nich podruhé.
+        write_json(ev / "known-pages.json", own_pages)
+        stats["knownPages"] = len(own_pages)
     if known["specs"]:
         # Reproduction tests from earlier runs. This is the thing a repro is
         # written as an executable file for and not as a paragraph: "is it
@@ -332,6 +394,11 @@ def _cell(text: str | None) -> str:
     return (text or "").replace("|", "\\|").replace("\n", " ").strip()
 
 
+def _rel_link(from_dir: Path, target: Path) -> str:
+    """Odkaz z bundlu jinam do repa. Stránky packu nemusí být uvnitř."""
+    return posix(os.path.relpath(target, from_dir))
+
+
 def _where(anchor: dict) -> str:
     f, line = anchor.get("file"), anchor.get("line")
     if not f:
@@ -414,6 +481,27 @@ def _index_md(project: Project, concepts: list[dict]) -> str:
                 f"| [{_cell(c['title'])}]({LEDGER}/{c['id']}.md) "
                 f"| {c['severity'] or ''} | `{_where(c['anchor'])}` "
                 f"| `{c['generated']['by']}` | {reviewed} |")
+        lines.append("")
+
+    by_pack = [(pack, pages(project, pack)) for pack in installed_packs(project)]
+    by_pack = [(pack, own) for pack, own in by_pack if own]
+    if by_pack:
+        lines += ["## Pages", "",
+                  "Written by the specialist at the end of a run — conclusions, "
+                  "not a log. The chronology of runs is in [`log.md`](log.md).", ""]
+    for pack, own in by_pack:
+        # Odkaz musí vést tam, kde stránka opravdu je. Pack, který si paměť
+        # nechal mimo bundle, tady není chyba — jen se to musí poznat.
+        rel = _rel_link(project.agency_dir / BUNDLE, pages_dir(project, pack))
+        lines += [f"### {pack}", "", "| page | status | |", "|---|---|---|"]
+        for p in own:
+            if "error" in p:
+                lines.append(f"| `{p['path']}` | broken | {_cell(p['error'])} |")
+                continue
+            flags = " · ".join(f for f in ("expired" if p.get("expired") else "",
+                                           "" if p.get("frontmatter") else "no frontmatter") if f)
+            lines.append(f"| [{_cell(p['title'])}]({rel}/{p['id']}.md) "
+                         f"| {p.get('status') or ''} | {flags} |")
         lines.append("")
 
     known_rules = rules(project)

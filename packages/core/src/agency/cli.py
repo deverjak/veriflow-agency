@@ -441,6 +441,20 @@ def cmd_doctor(args) -> int:
             detail += f"\n{' ' * 29}{bad['path']}: {bad['error']}"
         check("project rules", not rules["broken"], detail, fatal=False)
 
+    # Kurátorovaná znalost packů. Stránka bez hlavičky se čte dál — jen neví,
+    # jestli ještě platí, a to je informace pro člověka, ne důvod k selhání.
+    pg = knowledge.pages_summary(project)
+    if pg["total"] or pg["broken"]:
+        detail = " · ".join(f"{pack} {n}" for pack, n in pg["byPack"].items())
+        for label, count in (("expired", pg["expired"]),
+                             ("deprecated", pg["deprecated"]),
+                             ("without frontmatter", pg["plain"])):
+            if count:
+                detail += f" · {count} {label}"
+        for bad in pg["broken"]:
+            detail += f"\n{' ' * 29}{bad['path']}: {bad['error']}"
+        check("pack pages", not pg["broken"], detail, fatal=False)
+
     for p in packs.available():
         ref = packs.installed_ref(project, p.name)
         if not ref:
@@ -1136,11 +1150,16 @@ def cmd_knowledge(args) -> int:
     project = _project(args)
     data = knowledge.bundle(project, write=args.rebuild)
     data["rules"] = knowledge.rules_summary(project)
+    data["pages"] = knowledge.pages_summary(project)
 
     def human():
         print(f"\n  {out.bold('knowledge')}  {out.dim(data['path'])}\n")
+        pages = data["pages"]
         print(f"  {str(data['findings']).rjust(3)} findings"
-              f"  {out.dim('·')}  {data['rules']['total']} rules")
+              f"  {out.dim('·')}  {data['rules']['total']} rules"
+              f"  {out.dim('·')}  {pages['total']} pages"
+              + (f"  {out.dim('(' + ', '.join(f'{k} {v}' for k, v in pages['byPack'].items()) + ')')}"
+                 if pages["byPack"] else ""))
         touched = data["changed"] + data["removed"]
         plural = "" if len(touched) == 1 else "s"
         if args.rebuild:

@@ -18,6 +18,7 @@ Most legal answers a general model gives are defensible and wrong in the same wa
 ```
 <RUN_DIR>/context.json                 the brief, the project configuration, the state of the working copy
 <RUN_DIR>/evidence/known-findings.json what this project already found and how it ended
+<RUN_DIR>/evidence/known-pages.json    your own pages: what past runs concluded
 <RUN_DIR>/evidence/recent-commits.txt  what has been happening in the project
 <RUN_DIR>/evidence/changes.txt         the diff against the base branch, when there is one
 <RUN_DIR>/run.json                     the run record you complete at the end
@@ -36,7 +37,8 @@ Most legal answers a general model gives are defensible and wrong in the same wa
 | `config.product` | where the code that implements them lives |
 | `config.posture` | how strict the output may be, and whether citations are mandatory |
 | `config.lawSources` | where to look the law up, and whether this run may go online |
-| `config.memory` | where the project's applicability register lives |
+| `pages` | the directory you write your own conclusions into (`.agency/knowledge/pages/legal`, unless the project moved it). What they say right now is in `evidence/known-pages.json`. |
+| `config.memory` | the page names — which one is the register and which one holds accepted risks |
 | `review.dimensions` | which dimensions to run |
 | `review.minScore` / `review.language` | the threshold and the output language |
 | `target.headRefOid` | the commit findings are anchored to — **all 40 characters** |
@@ -48,7 +50,7 @@ When `context.json` is missing you are running outside `agency run`. Say so and 
 ## Boundaries that do not move
 
 - **This is not legal advice and the findings must not pretend otherwise.** What you produce is a reviewed list of gaps, each with the provision and the cheapest compliant fix, prepared so that `config.business.counsel` spends their hour on the hard part. Say that once in `run.json`, not in every finding.
-- **The working copy is not yours.** `worktreeOwned: false` means the user is working in this repository right now. Source code and documents are for **reading**. You write to `<RUN_DIR>/` and to the memory directory from `config.memory.dir`, nowhere else. Do not rewrite the terms unless the brief explicitly asks for a draft — and then the draft goes to `<RUN_DIR>/drafts/`, never over the live document.
+- **The working copy is not yours.** `worktreeOwned: false` means the user is working in this repository right now. Source code and documents are for **reading**. You write to `<RUN_DIR>/` and to the page directory from `context.json` → `pages`, nowhere else. Do not rewrite the terms unless the brief explicitly asks for a draft — and then the draft goes to `<RUN_DIR>/drafts/`, never over the live document.
 - **No provision, no finding.** With `posture.requireCitation: true` a claim you cannot tie to a named provision, to regulator guidance, or to the project's own document is dropped before scoring. Not softened, not marked uncertain. Dropped.
 - **Uncertain applicability is not applicability.** With `posture.assumeWorstCase: false`, when you genuinely cannot tell whether a regime applies, you write down what would settle it and move on. Applying a regime "to be safe" is exactly the failure this pack exists to stop.
 - **Jurisdiction is `config.business.markets`.** Do not import a rule from another Member State, and never from the USA. A CCPA-shaped finding in a Czech product is noise.
@@ -247,10 +249,26 @@ And write `<RUN_DIR>/summary.md` — **at most 30 lines** in your own words: wha
 
 ## 8. The project's memory
 
-Into `config.memory.dir`:
+Into the directory from `context.json` → `pages`. The pages are **concepts** — markdown with a header that says whether the conclusion still holds:
+
+```markdown
+---
+type: Page
+title: "Which regimes apply to this product"
+status: stable
+stale_after: 2026-12-01
+verified:
+  - by: hire:legal@claude
+    at: 2026-09-01T12:00:00Z
+---
+```
 
 - **`applicability.md`** — the register from step 2: regime → applies here? → why → who decided → when. This is the most valuable artifact this pack produces. The second run reads it instead of re-deriving the whole gate, and a human can see at a glance which regime was ruled out on what basis.
 - **`accepted-risks.md`** — what the company decided to live with and on whose authority. A risk accepted once must not come back as a finding every month.
+
+`stale_after` earns its keep here: the law moves. A register entry past its date is not wrong, it is **unconfirmed** — say so in the finding rather than leaning on it.
+
+**Conclusions, not a log.** When something stops holding, rewrite it — or give it `status: deprecated` and leave the reason next to it. Deleting a conclusion throws away the reason nobody should arrive at it again; a page that only grows stops being read within three months. The chronology of runs is `.agency/knowledge/log.md`, built from `summary.md` — do not keep a second copy of it here.
 
 Both belong to the **project**, not to the pack. Write them and leave them there; no git ceremony around them.
 

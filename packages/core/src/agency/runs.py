@@ -467,7 +467,7 @@ def prepare_graph(project: Project, wt: Path, cfg: dict) -> dict:
 
 #: Co z připravených statistik je paměť, ne grafový signál. Sbírá se při téže
 #: přípravě, ale v run recordu patří jinam — `graph` popisuje stav indexu.
-MEMORY_STATS = ("knownFindings", "knownSpecs", "knownRules")
+MEMORY_STATS = ("knownFindings", "knownSpecs", "knownRules", "knownPages")
 
 
 def known_memory(project: Project, run: Run) -> dict:
@@ -741,6 +741,12 @@ def write_context(run: Run, cfg: dict, target: dict, wt: Path,
         # z toho commitu. Relativní cesta by specialistu poslala číst starší
         # paměť, než jakou projekt má.
         "knowledge": posix(run.project.agency_dir / knowledge.BUNDLE),
+        # Kam si pack zapisuje vlastní závěry. `null` pro běh ve worktree, a to
+        # ne z opatrnosti: worktree stojí na hlavičce PR a zápis by skončil
+        # v jednorázovém adresáři, který `agency run` po sobě smaže. Cesta přes
+        # RUN_DIR pro recenzenta přijde, až bude co aplikovat při `ingest`.
+        "pages": (posix(knowledge.pages_dir(run.project, pack_name, cfg))
+                  if pack_name and not worktree_owned else None),
         "worktree": posix(wt),
         # Kdo worktree vlastní. False = běh jede v pracovní kopii uživatele
         # a nesmí do ní psát nic, co po sobě neuklidí.

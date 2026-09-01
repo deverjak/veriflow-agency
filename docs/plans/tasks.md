@@ -146,14 +146,25 @@ Tři vazby, zbytek je volný:
 
 ---
 
-## Fáze 6 — knowledge pages packů (~1 den)
+## Fáze 6 — knowledge pages packů (~1 den) — **hotovo 1. 9. 2026**
 
 > [`shared-memory.md`](shared-memory.md) → **Krok 4**.
 
-- [ ] `.agency/knowledge/pages/<pack>/` — PO `product-decisions.md`, `roadmap-context.md` · QA `weak-areas.md`, `test-lore.md` · legal `obligations-map.md`
-- [ ] SKILL.md: na konci běhu aktualizuj svoje stránky — **závěry, ne log**; co přestalo platit, smaž nebo `deprecated`
-- [ ] příprava běhu stránky packu přibalí do kontextu
-- [ ] v1 jen packy s `worktree: false` (po, qa, legal); reviewer až v druhé vlně přes RUN_DIR
+- [x] `.agency/knowledge/pages/<pack>/` — stránky jako koncepty (`type: Page`, `status`, `stale_after`, `verified`); jména stránek zůstala ta, která packy psaly už dřív
+- [x] SKILL.md: na konci běhu aktualizuj svoje stránky — **závěry, ne log**; co přestalo platit, přepiš nebo `deprecated`
+- [x] příprava běhu stránky packu přibalí do kontextu (`evidence/known-pages.json` + `context.json` → `pages`)
+- [x] v1 jen packy s `worktree: false` (po, qa, legal); reviewer až v druhé vlně přes RUN_DIR
+
+**Hotovo, když:** znalost packu má domov, který přežije běh, a je vidět, kdy přestala platit. — ✅ `tests/test_pages.py` (13 testů), ověřeno na reálné konfiguraci: doctor hlásí `legal 1 · qa 2 · 1 expired · 1 without frontmatter`.
+
+### Co plán nepředpokládal
+
+- **Znalost packu domov měla.** §1 bod 2 plánu („nemá domov") platil jen zpola: QA, PO i právník píšou `config.memory.dir` (`.agency/qa/coverage.md`, `.agency/po/decisions.md`, `.agency/legal/applicability.md`) od svého vzniku. Co scházelo, byly tři jiné věci: **tvar** (volný markdown neumí říct, že závěr přestal platit), **viditelnost** (jádro o tom adresáři nevědělo — nepřipravovalo ho do běhu, doctor ho nehlásil, bundle na něj neodkazoval) a **jedno místo** (tři packy, tři layouty téhož nápadu).
+- **Jména stránek z plánu už existovala pod jinými.** `weak-areas` + `test-lore` je `coverage` + `known-regressions`, `product-decisions` + `roadmap-context` je `decisions` + `roadmap-state`, `obligations-map` je `applicability`. Zavést obojí by znamenalo dvě paměti na tutéž věc — vyhrála jména, která packy píšou a která reálné projekty mají.
+- **`coverage.md` musel přestat být deník.** Kontrakt zněl „jeden řádek na sezení" — jenže chronologii běhů vede od Fáze 5 `log.md` ze `summary.md`. Dvě verze téhož znamenají, že jedna z nich bude časem lhát; `coverage.md` je teď stav pokrytí, ne historie sezení.
+- **Stránka bez hlavičky není rozbitá stránka.** Fáze 4 zavedla „co parser nepozná, ohlásí" — jenže tady by to označilo za rozbitou fungující paměť, kterou packy psaly měsíce. `okf.read` dostal `plain_ok`: soubor **bez** frontmatteru je starší stránka (čte se, v přehledu je „no frontmatter"), soubor **s rozbitým** frontmatterem je chyba s číslem řádku. U pravidel shovívavost neplatí a hlídá to test — pravidlo bez hlavičky neví, jestli platí, a nález na něm stavět nelze.
+- **`memory.dir` z konfigurace vyhrává nad bundlem.** Konfiguraci vlastní projekt a upgrade ji nepřepisuje, takže projekt s `.agency/qa/` ho má dál — jádro čte, kam ukazuje, a odkaz v `index.md` vede tam. Přesouvat uživateli paměť za zády kvůli hezčí cestě se nesmí; nové projekty dostanou bundle ze šablony.
+- **Vyloučení recenzenta je mechanické, ne konvence.** `context.json` → `pages` je `null`, když běh vlastní worktree. Důvod není opatrnost: worktree stojí na hlavičce PR a `agency run` ho po sobě smaže, takže zapsaný závěr by zmizel. Cesta přes RUN_DIR přijde, až bude co aplikovat při `ingest`.
 
 ---
 

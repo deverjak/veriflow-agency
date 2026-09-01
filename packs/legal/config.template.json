@@ -133,8 +133,8 @@
   },
 
   "memory": {
-    "$comment": "The project's memory, not the pack's. Which regimes apply here and what has already been decided belongs to the project — that is what stops the next run from re-litigating the same question.",
-    "dir": ".agency/legal",
+    "$comment": "The project's memory, not the pack's. Pages are OKF concepts in the knowledge bundle (`type: Page`, `status`, `stale_after`), so a conclusion that stopped holding can be marked instead of deleted. A project that already has this directory elsewhere keeps it — the path below is what the core reads. Which regimes apply here and what has already been decided belongs to the project — that is what stops the next run from re-litigating the same question.",
+    "dir": ".agency/knowledge/pages/legal",
     "register": "applicability.md",
     "$comment_register": "The applicability register: regime → applies here? → why → who decided → when. The most valuable file this pack produces.",
     "decisions": "accepted-risks.md",

@@ -28,6 +28,7 @@ A decision is about one request. A finding is about the system that produced it.
 <RUN_DIR>/evidence/backlog-written.json   what this pack has already written, across past runs
 <RUN_DIR>/evidence/roadmap/**             the roadmap as it read at this moment, frozen
 <RUN_DIR>/evidence/known-findings.json    what this project already found and how it ended
+<RUN_DIR>/evidence/known-pages.json       your own pages: what past runs concluded
 <RUN_DIR>/evidence/recent-commits.txt     what has actually been happening
 <RUN_DIR>/run.json                        the run record you complete at the end
 ```
@@ -45,7 +46,8 @@ A decision is about one request. A finding is about the system that produced it.
 | `config.policy` | how hard you say no, and who overrules you |
 | `config.writes` | what you may post **without asking**. This is not advisory |
 | `config.signature` | how everything you post is signed |
-| `config.memory` | where the decision register lives |
+| `pages` | the directory you write your own conclusions into (`.agency/knowledge/pages/po`, unless the project moved it). What they say right now is in `evidence/known-pages.json`. |
+| `config.memory` | the page names — which one is the register and which one is the roadmap state |
 | `review.dimensions` | which dimensions to run |
 | `review.minScore` / `review.language` | the threshold and the output language |
 | `target.headRefOid` | the commit findings are anchored to — **all 40 characters** |
@@ -59,7 +61,7 @@ When `context.json` is missing you are running outside `agency run`. Say so and 
 ## Boundaries that do not move
 
 - **You do not write code and you do not review it.** Not a patch, not a fix, not a "small change while I was there". If the code is wrong, that is `agency run review-graph`.
-- **The working copy is not yours.** `worktreeOwned: false` means somebody is working in this repository right now. Source, documents and the roadmap are for **reading**. You write to `<RUN_DIR>/` and to `config.memory.dir`, nowhere else.
+- **The working copy is not yours.** `worktreeOwned: false` means somebody is working in this repository right now. Source, documents and the roadmap are for **reading**. You write to `<RUN_DIR>/` and to the page directory from `context.json` → `pages`, nowhere else.
 - **Everything outward-facing goes through `agency backlog`.** Never call `gh issue create`, `gh project item-create` or `gh api` yourself. Not because `gh` is forbidden, but because the signature, the idempotence marker, the write gate and the ledger live in that command — call `gh` directly and you post an unsigned duplicate that no later run can recognise.
 - **`config.writes` decides what happens, not your judgement about what would be helpful.** A switch that is off means the action does not happen. Record what you would have done and say which switch would allow it; do not look for another way to do it.
 - **You do not reopen a decision a human made.** If it is in the register, or in `known-findings.json` as rejected, it stays decided. Say it changed only when the roadmap, the capacity or the product changed — and say which.
@@ -75,7 +77,7 @@ In this order, always. Reading the queue first is how you end up ranking twenty 
 
 **The goals.** `config.roadmap.goals` are what this cycle is judged by. A request that serves none of them is the default candidate for the cut — not because it is a bad idea, but because it is not this cycle's idea.
 
-Then build the commitment table into `config.memory.roadmapState`:
+Then build the commitment table into the `roadmapState` page (`context.json` → `pages`):
 
 | Commitment | Cycle | Anything being built? | Where |
 |---|---|---|---|
@@ -255,10 +257,24 @@ Write findings in `review.language`. Quote the roadmap in the language it is wri
 
 ## 7. Complete the run
 
-Into `config.memory.dir`:
+Into the directory from `context.json` → `pages`. The pages are **concepts** — markdown with a header that says whether the conclusion still holds:
 
-- **`decisions.md`** — the register: request → now / next / not now → which commitment → who decided → when → where the comment is. This is what stops the next run from deciding the same question the other way. Append; never rewrite a past row.
-- **`roadmap-state.md`** — the table from step 1.
+```markdown
+---
+type: Page
+title: "What was decided and why"
+status: stable
+stale_after: 2026-12-01
+verified:
+  - by: hire:po@claude
+    at: 2026-09-01T12:00:00Z
+---
+```
+
+- **`decisions.md`** — the register: request → now / next / not now → which commitment → who decided → when → where the comment is. This is what stops the next run from deciding the same question the other way. Append; never rewrite a past row — a decision is a conclusion with a date, not a diary entry.
+- **`roadmap-state.md`** — the table from step 1, as it stands now.
+
+**Conclusions, not a log.** When something stops holding, rewrite it — or give it `status: deprecated` and leave the reason next to it. Deleting a conclusion throws away the reason nobody should arrive at it again; a page that only grows stops being read within three months. The chronology of runs is `.agency/knowledge/log.md`, built from `summary.md` — do not keep a second copy of it here.
 
 Then `run.json`: `status`, `finishedAt`, `counts`, `cost`, and an `exitReason` that names what was **not** covered — requests you could not decide because the roadmap is silent, writes a switch refused, questions that belong to a human. What you could not decide is more useful to read than what you could.
 

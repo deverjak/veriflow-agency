@@ -17,6 +17,7 @@ Průzkum **běžící aplikace** podle zadání, které napsal člověk. Metoda 
 <RUN_DIR>/context.json                 zadání, konfigurace projektu, stav pracovní kopie
 <RUN_DIR>/evidence/known-findings.json co už tenhle projekt našel a jak to dopadlo
 <RUN_DIR>/evidence/known-specs.json    reprodukční testy ze starších běhů — dají se pustit znovu
+<RUN_DIR>/evidence/known-pages.json    tvoje vlastní stránky: k čemu jsi došel v minulých sezeních
 <RUN_DIR>/evidence/recent-commits.txt  co se v projektu poslední dobou dělo
 <RUN_DIR>/evidence/changes.txt         diff proti základní větvi, když nějaký je
 <RUN_DIR>/run.json                     záznam běhu, který na konci doplníš
@@ -34,7 +35,8 @@ Průzkum **běžící aplikace** podle zadání, které napsal člověk. Metoda 
 | `config.playwright` | jestli a čím se řídí prohlížeč — a co smíš v projektu založit |
 | `config.personas` | za koho se vydávat |
 | `config.safety` | co se nesmí — hranice, ne doporučení |
-| `config.memory` | kde v projektu bydlí paměť QA |
+| `pages` | adresář, kam si zapisuješ vlastní závěry (`.agency/knowledge/pages/qa`, pokud si ho projekt nepřesunul). Co v nich stojí teď, máš v `evidence/known-pages.json`. |
+| `config.memory` | jména stránek — která je pokrytí a která regrese |
 | `config.session` | rozpočet času, strop nálezů, screenshoty |
 | `review.dimensions` | které dimenze pustit |
 | `review.minScore` / `review.language` | práh a jazyk výstupu |
@@ -46,7 +48,7 @@ Když `context.json` chybí, běžíš mimo `agency run`. Řekni to uživateli a
 
 ## Hranice, které se neposouvají
 
-- **Pracovní kopie není tvoje.** `worktreeOwned: false` znamená, že jsi v repozitáři, ve kterém uživatel právě pracuje. Zdrojový kód je ke **čtení**. Zapisuje se do `<RUN_DIR>/` a do adresáře paměti z `config.memory.dir` — nikam jinam. Necommituj, nepřepínej větev, nesahej na rozdělanou práci.
+- **Pracovní kopie není tvoje.** `worktreeOwned: false` znamená, že jsi v repozitáři, ve kterém uživatel právě pracuje. Zdrojový kód je ke **čtení**. Zapisuje se do `<RUN_DIR>/` a do adresáře stránek z `context.json` → `pages` — nikam jinam. Necommituj, nepřepínej větev, nesahej na rozdělanou práci.
 - **`config.app.startPolicy: "manual"`** znamená, že aplikaci nespouštíš. Když neběží, běh **skonči** a napiš, čím ji uživatel nastartuje (`config.app.start`). Vymyšlené nálezy z nedostupné aplikace jsou horší než žádné.
 - **`config.app.env: "production"`** bez `safety.allowProduction` je důvod běh odmítnout. QA sezení zapisuje data.
 - **`safety.allowDestructive: false`** platí doslova: nemazat, nerušit, neplatit. Když se flow bez destruktivního kroku dokončit nedá, zapiš to jako nepokrytou část, ne jako nález.
@@ -54,7 +56,7 @@ Když `context.json` chybí, běžíš mimo `agency run`. Řekni to uživateli a
 ## 1. Přečti zadání a paměť projektu
 
 1. `brief.standing` + `brief.focus`. Focus je konkrétní úkol, standing je kontext, ve kterém platí. Když si odporují, vyhrává focus a zmíníš to v `run.json` → `exitReason`.
-2. `config.memory.dir` — `coverage.md` (co už se zkoušelo) a `known-regressions.md` (co se opakovaně vrací). Když adresář neexistuje, projekt zatím paměť nemá; založíš ji v kroku 8.
+2. `evidence/known-pages.json` — tvoje vlastní stránky, jak je zanechalo minulé sezení: co je prozkoumané a co se opakovaně vrací. Když je pole prázdné, projekt zatím paměť nemá; založíš ji v kroku 8.
 3. `evidence/known-findings.json` — **dřív, než začneš.** Nález, který projekt už jednou zamítl s důvodem `by-design`, nehlas podruhé. Dedup po ingestu je pojistka, ne náhrada za tohle.
 4. `files[]` a `evidence/recent-commits.txt` — co se v kódu poslední dobou hnulo. Tam se rozbíjí nejvíc věcí.
 
@@ -231,10 +233,24 @@ A napiš `<RUN_DIR>/summary.md` — **nejvýš 30 řádků** vlastními slovy: s
 
 ## 8. Paměť projektu
 
-Do `config.memory.dir`:
+Do adresáře z `context.json` → `pages`. Stránky jsou **koncepty**: markdown s hlavičkou, která říká, jestli závěr ještě platí.
 
-- **`coverage.md`** — jeden řádek na sezení: datum, zadání, co se prošlo, co zůstalo nezkoušené. Bez toho se za měsíc nepozná, jestli je flow v pořádku, nebo se na něj jen nikdo nepodíval.
+```markdown
+---
+type: Page
+title: "Co je prozkoumané a co ne"
+status: stable
+stale_after: 2026-12-01
+verified:
+  - by: hire:qa@claude
+    at: 2026-09-01T12:00:00Z
+---
+```
+
+- **`coverage.md`** — co je prozkoumané a co ne. **Stav, ne deník**: chronologii sezení vede `.agency/knowledge/log.md` ze `summary.md`, a psát ji podruhé znamená, že jedna z těch dvou verzí bude časem lhát. Sem patří „platba kartou prošlá, 3D Secure nezkoušené", ne „1. 9. jsem zkoušel platby".
 - **`known-regressions.md`** — přidej jen to, co se vrátilo **podruhé**. Seznam, do kterého se píše všechno, nikdo nečte.
+
+**Závěry, ne log.** Když závěr přestal platit, přepiš ho — nebo mu dej `status: deprecated` a nech u něj, proč padl. Smazat závěr znamená zahodit i důvod, proč se k němu nemá příště docházet znovu; stránka, která jen roste, se za tři měsíce přestane číst.
 
 Specy zůstávají v běhovém adresáři a commitují se s ním — jsou to reprodukce nálezů, ne testovací sada projektu. Přesunout spec do sady projektu je rozhodnutí člověka a dělá se až u přijatého nálezu; nabídni to, neudělej to sám (výjimka: `specTarget: "suite"`, kde si to projekt vyžádal předem).
 
