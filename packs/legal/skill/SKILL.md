@@ -19,7 +19,6 @@ Most legal answers a general model gives are defensible and wrong in the same wa
 <RUN_DIR>/context.json                 the brief, the project configuration, the state of the working copy
 <RUN_DIR>/evidence/known-findings.json what this project already found and how it ended
 <RUN_DIR>/evidence/known-pages.json    your own pages: what past runs concluded
-<RUN_DIR>/evidence/recall.json      only when the project switched recall on: semantic hits from this machine's memory. Background, never a source for a finding.
 <RUN_DIR>/evidence/recent-commits.txt  what has been happening in the project
 <RUN_DIR>/evidence/changes.txt         the diff against the base branch, when there is one
 <RUN_DIR>/run.json                     the run record you complete at the end

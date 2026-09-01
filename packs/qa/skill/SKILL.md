@@ -18,7 +18,6 @@ Průzkum **běžící aplikace** podle zadání, které napsal člověk. Metoda 
 <RUN_DIR>/evidence/known-findings.json co už tenhle projekt našel a jak to dopadlo
 <RUN_DIR>/evidence/known-specs.json    reprodukční testy ze starších běhů — dají se pustit znovu
 <RUN_DIR>/evidence/known-pages.json    tvoje vlastní stránky: k čemu jsi došel v minulých sezeních
-<RUN_DIR>/evidence/recall.json  jen když si projekt zapnul recall: sémantické zásahy z paměti na tomhle stroji. Pozadí, nikdy zdroj nálezu.
 <RUN_DIR>/evidence/recent-commits.txt  co se v projektu poslední dobou dělo
 <RUN_DIR>/evidence/changes.txt         diff proti základní větvi, když nějaký je
 <RUN_DIR>/run.json                     záznam běhu, který na konci doplníš

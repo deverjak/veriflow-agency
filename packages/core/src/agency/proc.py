@@ -10,12 +10,10 @@ import json
 import os
 import re
 import shutil
-import socket
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
-from urllib.parse import urlsplit
 
 
 @dataclass
@@ -58,29 +56,6 @@ def run(
 
 def which(tool: str) -> str | None:
     return shutil.which(tool)
-
-
-def port_open(url: str, timeout: float = 1.0) -> tuple[bool, str]:
-    """Poslouchá na té adrese vůbec něco?
-
-    Schválně jen TCP, ne HTTP dotaz: doctor má odpovědět „démon tam je / není“
-    dřív, než běh začne, a nemá kvůli tomu potřebovat klienta, který je
-    volitelná závislost. Víc než otevřený port to netvrdí — a tak se to i
-    jmenuje.
-    """
-    parts = urlsplit(url)
-    host, port = parts.hostname, parts.port or (443 if parts.scheme == "https" else 80)
-    if not host:
-        return False, "no host in the address"
-    s = socket.socket()
-    s.settimeout(timeout)
-    try:
-        code = s.connect_ex((host, port))
-    except OSError as e:
-        return False, str(e)
-    finally:
-        s.close()
-    return (True, "") if code == 0 else (False, f"nothing listens on {host}:{port}")
 
 
 def attend(args: Sequence[str], cwd: str | Path | None = None) -> int:

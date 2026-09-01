@@ -16,7 +16,6 @@ Recenze pull requestu s **doloženými** nálezy. Strukturální signál, který
 ```
 <RUN_DIR>/context.json     konfigurace projektu, metadata PR, seznam souborů k recenzi
 <RUN_DIR>/evidence/        grafový signál — detect-changes, impact, dead-code, graph-capabilities
-<RUN_DIR>/evidence/recall.json  jen když si projekt zapnul recall: sémantické zásahy z paměti na tomhle stroji. Pozadí, nikdy zdroj nálezu.
 <RUN_DIR>/run.json         záznam běhu, který na konci doplníš
 ```
 

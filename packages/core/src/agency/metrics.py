@@ -143,10 +143,6 @@ def collect(project: Project, runs: list[Run] | None = None) -> dict:
         return None
 
     agreement = {"crossHire": 0, "sameHire": 0}
-    # Kill criteria adaptéru recallu, mechanicky. `foreign` je počet zásahů,
-    # které nezapsala Agency — když po deseti bězích zůstane nula, dostával
-    # běh zpátky jen to, co má v bundlu, a adaptér nepřinesl nic.
-    recall = {"runs": 0, "hits": 0, "foreign": 0, "errors": 0}
 
     for run in selected:
         rec = run.record()
@@ -158,13 +154,6 @@ def collect(project: Project, runs: list[Run] | None = None) -> dict:
         for k, v in (rec.get("gatedBy") or {}).items():
             gated_by[k] += v
         wall += ((rec.get("cost") or {}).get("wallClockSeconds") or 0)
-
-        evidence = rec.get("evidence") or {}
-        if "recalled" in evidence or "recallError" in evidence:
-            recall["runs"] += 1
-            recall["hits"] += evidence.get("recalled") or 0
-            recall["foreign"] += evidence.get("recalledForeign") or 0
-            recall["errors"] += 1 if evidence.get("recallError") else 0
 
         model, provider, hire = _who(rec)
         started = _parse(rec.get("startedAt"))
@@ -249,8 +238,5 @@ def collect(project: Project, runs: list[Run] | None = None) -> dict:
             "wallClockSeconds": round(wall) or None,
             "secondsPerKeptFinding": round(wall / kept) if kept and wall else None,
         },
-        # None, dokud si recall nikdo nezapnul — o vypnutém experimentu nemá
-        # smysl reportovat nulu.
-        "recall": recall if recall["runs"] else None,
         "runRows": run_rows,
     }

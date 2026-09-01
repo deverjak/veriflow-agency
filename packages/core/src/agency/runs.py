@@ -468,18 +468,21 @@ def prepare_graph(project: Project, wt: Path, cfg: dict) -> dict:
 
 #: Co z připravených statistik je paměť, ne grafový signál. Sbírá se při téže
 #: přípravě, ale v run recordu patří jinam — `graph` popisuje stav indexu.
-#: `recall*` je tu ze stejného důvodu jako `knownFindings`: `run.graph` má
-#: v `run.v1` zavřený seznam klíčů a cokoli navíc z běhu dělá neplatný záznam.
 MEMORY_STATS = ("knownFindings", "knownSpecs", "knownRules", "knownPages",
-                "recalled", "recalledForeign", "recallError")
+                "knownFindingsQuery")
 
 
-def known_memory(project: Project, run: Run) -> dict:
-    """Paměť projektu do tohohle běhu. Skládá ji `knowledge.for_run`."""
+def known_memory(project: Project, run: Run, query: str | None = None) -> dict:
+    """Paměť projektu do tohohle běhu. Skládá ji `knowledge.for_run`.
+
+    `query` je zadání běhu. Nálezů bývá víc, než kolik se vejde do okna, a bez
+    dotazu se ořezávají podle stáří — tedy tiše zapomíná to důležité ve prospěch
+    toho čerstvého. S dotazem rozhoduje relevance.
+    """
     # Import až tady: knowledge staví nad tímhle modulem, takže nahoře by to byl
     # kruh. Paměť se skládá na jednom místě a tohle je jen jeho volání.
     from . import knowledge
-    return knowledge.for_run(project, run)
+    return knowledge.for_run(project, run, query=query)
 
 
 def _graph_evidence(ev: Path, name: str, answer: graph.Answer) -> None:
@@ -496,14 +499,14 @@ def _graph_evidence(ev: Path, name: str, answer: graph.Answer) -> None:
 
 
 def collect_evidence(project: Project, wt: Path, run: Run, target: dict,
-                     files: list[str]) -> dict:
+                     files: list[str], query: str | None = None) -> dict:
     """Grafový signál. Tohle je ta část, kterou samotný diff nedá."""
     ev = run.dir / "evidence"
     ev.mkdir(parents=True, exist_ok=True)
     # Kolik souborů běh recenzuje, ví jádro ze seznamu, který samo odfiltrovalo.
     # Číst to z grafu znamená číst číslo z jeho shrnutí — a shrnutí počítá svůj
     # diff, ne ten po `skipPatterns`. Workspace běh to má stejně.
-    stats: dict = {"changedFiles": len(files), **known_memory(project, run)}
+    stats: dict = {"changedFiles": len(files), **known_memory(project, run, query)}
 
     # Na co se tenhle driver umí zeptat. Čte to pack: co driver neumí, se
     # nedokládá — dimenze se přeskočí a napíše se to, místo aby se dohadovala.
@@ -536,7 +539,7 @@ def collect_evidence(project: Project, wt: Path, run: Run, target: dict,
 
 
 def collect_workspace_evidence(project: Project, run: Run, target: dict,
-                               files: list[str]) -> dict:
+                               files: list[str], query: str | None = None) -> dict:
     """Signal for a run without a pull request: what has been happening lately.
 
     The project's shared memory is added by `known_memory` — the same for both
@@ -545,7 +548,7 @@ def collect_workspace_evidence(project: Project, run: Run, target: dict,
     """
     ev = run.dir / "evidence"
     ev.mkdir(parents=True, exist_ok=True)
-    stats: dict = {"changedFiles": len(files), **known_memory(project, run)}
+    stats: dict = {"changedFiles": len(files), **known_memory(project, run, query)}
 
     base = target.get("baseRefOid")
     if base and base != target.get("headRefOid"):

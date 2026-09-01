@@ -21,7 +21,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from . import okf
+from . import okf, rank
 from . import runs as _runs
 from .config import Project
 from .util import posix, write_json
@@ -177,7 +177,29 @@ def pages_summary(project: Project) -> dict:
     return out
 
 
-def for_run(project: Project, run) -> dict:
+def query_for(pack_name: str | None, brief: dict | None, target: dict | None) -> str:
+    """Na co se tenhle běh ptá — vstup pro `rank`.
+
+    Zadání běhu, jinak cíl. Víc než to je balast: jméno packu a titulek PR nesou
+    slovník, ve kterém jsou nálezy psané, kdežto konfigurace a cesty by dotaz
+    naředily termíny, které má každý nález stejné.
+    """
+    brief, target = brief or {}, target or {}
+    parts = [brief.get("focus"), brief.get("standing"), target.get("title"), pack_name]
+    return " ".join(str(p).strip() for p in parts if p)[:600]
+
+
+#: Co z nálezu se skóruje. Právě to, co pack dostane do `known-findings.json` —
+#: vybírat nález podle věty, kterou konzument neuvidí, by znamenalo řadit podle
+#: něčeho jiného, než co se předává.
+RANKED_FIELDS = ("title", "dimension", "file", "reason", "pack")
+
+
+def _searchable(finding: dict) -> str:
+    return " ".join(str(finding.get(k)) for k in RANKED_FIELDS if finding.get(k))
+
+
+def for_run(project: Project, run, query: str | None = None) -> dict:
     """What this project already knows — across runs, packs and specialists.
 
     This is the shared memory. The roster allows several workers over one pack;
@@ -197,8 +219,16 @@ def for_run(project: Project, run) -> dict:
     # navazujícího specialistu ano.
     known = assemble(project, exclude=run.id, with_notes=False)
 
-    write_json(ev / "known-findings.json", known["findings"][:FOR_RUN_FINDINGS])
+    # Strop se nezvedá, mění se kritérium. Bez dotazu (běh bez zadání i bez
+    # cíle) zůstává pořadí podle stáří — vymýšlet dotaz z ničeho by znamenalo
+    # řadit podle šumu, a to je horší než řadit podle času.
+    picked = rank.top(query or "", known["findings"], _searchable, FOR_RUN_FINDINGS)
+    write_json(ev / "known-findings.json", picked)
     stats = {"knownFindings": len(known["findings"])}
+    if query and len(known["findings"]) > FOR_RUN_FINDINGS:
+        # Proč zrovna těchhle tři sta. Bez toho se po čase nedá říct, jestli
+        # nález ve vstupu chyběl kvůli stropu, nebo kvůli dotazu.
+        stats["knownFindingsQuery"] = query[:200]
 
     known_rules = [r for r in rules(project) if "error" not in r]
     if known_rules:

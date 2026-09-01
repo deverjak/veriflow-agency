@@ -15,7 +15,7 @@ Slovo „paměť“ tady znamená tři různé věci a plán stojí na tom, že 
 |---|---|---|---|
 | **paměť harnessu** | uživatele | claude-mem, Claude Code Auto Memory | **nic** — je osobní, necommituje se, patří člověku, ne projektu |
 | **paměť projektu** | projektu, commituje se | `.agency/runs/`, budoucí `.agency/knowledge/` | **jádro plánu** — Kroky 1–4 |
-| **sémantický recall** | odvozený index, kdykoli přestavitelný | Hindsight banka, `agency.db` | **volitelný adaptér** — Krok 5, experiment |
+| **sémantický recall** | odvozený index, kdykoli přestavitelný | `agency.db`, pořadí paměti do běhu | **lexikální ranker** — Krok 5, bez modelu a bez démona |
 
 Stejné pravidlo, jaké už platí pro `agency.db` ([`implementation-plan-v0.md`](../implementation-plan-v0.md) §2): co se nedá přestavět z repa, nesmí bydlet jen v cizí databázi.
 
@@ -34,13 +34,13 @@ Webový průzkum s ověřením proti dokumentaci a registrům; vstupní přehled
 
 | nástroj | co to je | orchestrátor-API (ne jen MCP) | Windows | verdikt pro nás |
 |---|---|---|---|---|
-| **Hindsight** (Vectorize) | OSS (MIT) agent memory: banky, retain/recall/reflect, knowledge pages; plugin `@vectorize-io/hindsight-coding-agents` instaluje hooky do Claude Code, Codex CLI, Cursor CLI, Grok Build ad.; výchozí banka `coding-agent::{gitProject}` — jedno repo = jedna banka napříč harnessy | **ano** — REST + `hindsight-client` (Python), lokální daemon bez účtu (`--server daemon`), embedded režim | podporované (x86_64, wheels) | **kandidát na Krok 5** — jediný s čistým orchestrátor-API a sdílenou per-repo bankou |
+| **Hindsight** (Vectorize) | OSS (MIT) agent memory: banky, retain/recall/reflect, knowledge pages; plugin `@vectorize-io/hindsight-coding-agents` instaluje hooky do Claude Code, Codex CLI, Cursor CLI, Grok Build ad.; výchozí banka `coding-agent::{gitProject}` — jedno repo = jedna banka napříč harnessy | **ano** — REST + `hindsight-client` (Python), lokální daemon bez účtu (`--server daemon`), embedded režim | podporované (x86_64, wheels) | **zkusili jsme, zamítnuto** — [Krok 5](#krok-5): démon extrahuje fakta vlastním LLM, takže „lokální“ neznamená „nikam to nejde“ |
 | **claude-mem** | plugin Claude Code (hooks + MCP search), lokální SQLite; installer detekuje i Cursor/Windsurf/OpenCode/Codex/Antigravity, ale dokumentované jsou jen OpenCode/Antigravity — Codex manifest v repu existuje, hloubka nedoložená | ne — jen in-session MCP | běží (ověřeno lokálně) | zůstává **vrstvou harnessu** uživatele; pro paměť packů nepoužitelný (bez API) |
 | **Cognee** | OSS memory engine s knowledge graphem; MCP server (`remember`/`recall`/`forget`); default plně lokální | ano — Python knihovna in-process; vyžaduje LLM klíč pro extrakci | ano | zajímavý, až bude potřeba graf přes zdroje mimo repo (Slack, docs) — teď ne |
 | **Mem0 / OpenMemory** | SDK `mem0ai` (lokálně Qdrant + OpenAI klíč) nebo cloud platforma; Claude Code integrace je **cloud plugin**; OpenMemory = lokální Docker stack, nástroje `add_memories`/`search_memory`/… (vstupní přehled měl jména i harness-trojici špatně) | ano (SDK) | ano | cloud plugin porušuje self-hosted princip; SDK by šlo, ale nepřináší nic nad Hindsight |
 | **GBrain** | OSS (Garry Tan), 7 memory verbs, brain = markdown v git repu + PGLite; CLI i MCP | ano (CLI) | funkční, ale druhá liga (Bun) | filozoficky nejblíž (markdown v repu!), ale Bun závislost a mladé Windows — sledovat, nestavět na tom |
 
-**Závěr průzkumu:** žádný z nástrojů nedává to, co repo-filozofie vyžaduje jako základ — **commitovanou paměť projektu čitelnou bez nástroje a bez účtu**. Zároveň Hindsight potvrzuje, že vrstva sémantického recallu nad ní má smysl a nemusí se stavět vlastní: lokální daemon, žádný cloud, Python klient přímo z jádra. Proto: **bundle vlastníme, recall adaptujeme.**
+**Závěr průzkumu:** žádný z nástrojů nedává to, co repo-filozofie vyžaduje jako základ — **commitovanou paměť projektu čitelnou bez nástroje a bez účtu**. Zároveň Hindsight potvrzuje, že vrstva sémantického recallu nad ní má smysl a nemusí se stavět vlastní: lokální daemon, žádný cloud, Python klient přímo z jádra. Proto: **bundle vlastníme.** Recall se měl adaptovat — Hindsight byl postavený a zamítnutý ([Krok 5](#krok-5)); zbylá potřeba „seřaď mi, co mám“ se ukázala menší, než na jakou se kupoval démon.
 
 Proč je „adresář markdownu v repu“ správný základ pro cross-provider paměť, je vyargumentované v [`graph-abstraction.md`](graph-abstraction.md) §5.2: roster už dnes míchá runtimy, které Agency neovládá, a formát čitelný bez SDK je jediný, který obslouží všechny — OKF (v0.2) k tomu přidává hotová pole `provenance`/`trust`/`freshness`/`lifecycle`.
 
@@ -54,7 +54,7 @@ Týž krok jako Krok 1 plánu týmů — dělá se jednou, tady je plná specifi
 
 **a) Strukturovaná identita `by`.** Formát: `hire:<id>` (agent — id z rosteru, agent ho má v `context.json.hire`), `human` (člověk; volitelně `human:<jméno>`). Dnešní hodnoty `cli` / `extension` se při čtení mapují na `human` — historie se nepřepisuje. Dotčená místa: `append_decision`/`append_note` ([`runs.py:804`](../../packages/core/src/agency/runs.py)) validace tvaru, `agency triage`/`note` (`--by`, [`cli.py:1905,1930`](../../packages/core/src/agency/cli.py)), zápis z extension, instrukce v SKILL.md packů, které triagují.
 
-**b) `RUN_DIR/summary.md` jako výstup běhu.** Pack na konci běhu zapíše krátké shrnutí (~do 30 řádků): co zkoumal, co našel (počty + to podstatné), co rozhodl, co doporučuje dál. Kontrakt v SKILL.md; `ingest` jen zaznamená přítomnost do run recordu. Konzumenti: handoff v chainu (teams Krok 3), chronologie `log.md` (Krok 3 zde), retain adaptéru (Krok 5). Nálezová data to nenahrazuje — `findings.json` zůstává jediný strukturovaný výstup.
+**b) `RUN_DIR/summary.md` jako výstup běhu.** Pack na konci běhu zapíše krátké shrnutí (~do 30 řádků): co zkoumal, co našel (počty + to podstatné), co rozhodl, co doporučuje dál. Kontrakt v SKILL.md; `ingest` jen zaznamená přítomnost do run recordu. Konzumenti: handoff v chainu (teams Krok 3), chronologie `log.md` (Krok 3 zde). Nálezová data to nenahrazuje — `findings.json` zůstává jediný strukturovaný výstup.
 
 **c) `knowledge.py` — jediné místo skládání „co projekt ví“.** Nový modul; `known_memory()` se stává jeho konzumentem (výstupní soubory `known-findings.json`/`known-specs.json` beze změny — žádný pack se nerozbije). Náčrt:
 
@@ -88,16 +88,29 @@ To, co Hindsight řeší „knowledge pages“ a co dnes nemá domov (§1 bod 2)
 - SKILL.md dostane pravidlo: na konci běhu aktualizuj svoje stránky — **závěry, ne log**; co přestalo platit, smaž nebo označ `deprecated`. Příprava běhu stránky packu přibalí do kontextu.
 - v1 jen pro packy s `worktree: false` (po, qa, legal — běží v projektu a můžou psát přímo). Reviewer běží ve worktree na jiné hlavičce; jeho zápis stránek musí jít přes RUN_DIR a aplikovat se při `ingest` — až v druhé vlně, ať v1 nestojí na nejsložitějším případu.
 
-### Krok 5 — Hindsight jako recall adaptér (experiment, ~1 den + vyhodnocení; **za flagem**) — postavené 1. 9. 2026
+### Krok 5 — sémantický recall: ~~Hindsight adaptér~~ → **zamítnuto, nahrazeno lexikálním rankerem** {#krok-5}
 
-> Adaptér stojí, vyhodnocení běží. Co se při stavbě ukázalo jinak — port `9077` místo `8888`, `cloud` jako výchozí režim pluginu, „přijaté nálezy“ neexistující v okamžiku brány — je v [`tasks.md`](tasks.md), Fáze 7, „Co plán nepředpokládal“. Harness hooky (třetí odrážka) zůstávají nenainstalované: sahají do konfigurace uživatelova harnessu, ne do projektu.
+> Postaveno 1. 9. 2026 (`edbf924`), týž den revertováno. Zápis zůstává, aby se to nezkoušelo podruhé.
 
-Bundle dává strukturu a přenositelnost, ale ne sémantické „najdi relevantní“ přes stovky konceptů. To se nestaví — adaptuje se (stejné pravidlo jako u grafu: engine nestavíme, [`implementation-plan-v0.md`](../implementation-plan-v0.md) §3.1).
+Bundle dává strukturu a přenositelnost, ale ne „najdi mi z tří set konceptů těch dvacet, které se týkají tohohle běhu". Ta potřeba je skutečná. Odpověď „adaptuj cizí engine" byla špatná — a rozbila se o vlastní poznámku z implementace:
 
-- **Režim výhradně lokální daemon** (`--server daemon`, bez účtu, bez cloudu). Banka `coding-agent::{gitProject}` — táž, kterou plní harness pluginy, takže interaktivní session a `agency` běh sdílejí paměť.
-- Zapojení v jádru přes `hindsight-client`, dvě místa kolem `agency run --wait` (teams Krok 2): **recall** před spuštěním → `evidence/recall.json` (zaznamenaný vstup, ne volná magie), **retain** po `ingest` → `summary.md` + přijaté nálezy.
-- Volitelně navíc harness hooky (`npx @vectorize-io/hindsight-coding-agents install claude-code` / `codex` — Codex vyžaduje `codex_hooks = true` v `~/.codex/config.toml`; zda hooky střílí i pod `codex exec`, není doložené — ověřit empiricky, stejně jako unixové log cesty na Windows). **Hooky nezávisejí na ničem z tohoto plánu** — dají se nainstalovat a vyhodnotit kdykoli, klidně souběžně s Krokem 1; na Krocích z plánů závisí jen orchestrátorová část (recall/retain kolem `--wait`).
-- **Kill criteria:** po ~10 bězích se změří, jestli recall přinesl něco, co bundle nedal (nález/rozhodnutí, ke kterému by se běh jinak nedostal). Když ne, adaptér se vypne a zůstane bundle. Flag v konfiguraci packu, výchozí vypnuto.
+> **Démon extrahuje fakta vlastním LLM.** Lokální adresa tedy neznamená, že obsah nikam nejde — daemon si volá model, na který je nastavený.
+
+Tím padá jediné, co tu složitost drželo. Celá cena — npx démon, 18 balíčků s aiohttp a pydantic, port 9077, banka pojmenovaná podle hlavního worktree — se platila za slib „self-hosted, nic neopustí stroj". `is_local()` ale hlídá **adresu, ne data**: nálezy projektu odejdou do modelu tak jako tak. Zaplaceno za záruku, která se nedodává.
+
+Přitěžující okolnosti, každá sama o sobě nedostatečná, dohromady jednoznačné:
+
+- **Výchozí režim pluginu je `cloud`.** Adaptér musel aktivně odmítat konfiguraci, kterou si uživatel sám nainstaloval. Závislost, před kterou se bráníte vlastním kódem, si tu obranu neodpracuje.
+- **Kill criteria se neměla z čeho spustit.** „Po ~10 bězích vyhodnotit" předpokládá deset běhů se zapnutým flagem a běžícím démonem. Experiment, jehož vyhodnocení stojí na tom, že si napřed nainstalujete démona, se nevyhodnotí — zůstane viset jako mrtvá větev v `run`, `ingest`, `triage`, `metrics` i `doctor`.
+- **Docker/daemon je pro single-user nástroj špatná jednotka provozu.** Agency je CLI, které buď běží, nebo neběží. Druhý proces, který musí běžet vedle, aby paměť fungovala naplno, je přesně ta složitost, kterou `.agency/knowledge/` jako markdown v repu odstraňoval.
+
+**Co se dělá místo toho:** `rank.py` — BM25 nad tím, co projekt už má. Žádný model, žádné API, žádná síť, žádná další závislost; `math` a `re` ze standardní knihovny. Neřeší to synonyma (embeddings ano, tohle ne) — ale slovník dotazu i konceptů je slovník téhož repa (cesty, jména symbolů, dimenze, packy), takže je ta mezera menší, než se z tabulky v §2 zdálo.
+
+Ranker nepřidává plochu: `for_run` dnes bere `findings[:300]` z pořadí `load_runs`, které řadí od nejnovějšího — strop tedy znamená „posledních 300". Ranker mění jen **které**, ne kolik. Tím se mimochodem zavírá bod §1.1: strop přestává tiše zapomínat to důležité ve prospěch toho čerstvého.
+
+**Co z Kroku 5 přežilo:** nic z kódu. Z průzkumu §2 zůstává platný závěr, že commitovaná paměť projektu je základ — jen se ukázalo, že vrstva nad ním nepotřebuje cizí engine, protože potřeba je „seřaď mi, co mám", ne „pochop, co mám".
+
+**Harness hooky** (`npx @vectorize-io/hindsight-coding-agents install claude-code`) tímhle rozhodnutím dotčené nejsou. Instalují se do konfigurace **uživatele**, s Agency nemají nic společného a kdykoli se dají zkusit samostatně. Zamítnuta je závislost jádra, ne nástroj.
 
 ---
 
@@ -105,7 +118,7 @@ Bundle dává strukturu a přenositelnost, ale ne sémantické „najdi relevant
 
 - **Žádné cloudové paměťové účty.** Mem0 platform plugin, Hindsight Cloud, claude-mem sign-in sync — všechno proti principu self-hosted single-user. Lokální daemon je hranice.
 - **claude-mem se nepřebírá pro packy.** Je to paměť harnessu (vrstva 1, osobní) a nemá orchestrátor-API. Zůstává, k čemu je.
-- **Nestaví se vlastní embeddings/sémantické hledání.** Od toho je adaptér v Kroku 5 — a když neobstojí, je odpovědí „bundle stačí“, ne vlastní engine.
+- **Nestaví se vlastní embeddings.** Vektory znamenají model, a model znamená API klíč nebo GPU — tedy přesně to, kvůli čemu padl Hindsight. Lexikální ranking modelem není a v [Kroku 5](#krok-5) se staví; hranice vede tudy, ne u „vlastního hledání“ obecně.
 - **Cognee/GBrain/Mem0-SDK jako jádro ne.** LLM-klíč v extrakci, Bun na Windows, respektive nic navíc proti Hindsightu. GBrain (markdown v git repu) sledovat — filozoficky je nejblíž a konverguje k témuž závěru jako §5.2.
 - **Paměť není databáze ticketů.** Backlog má zdroj pravdy na GitHubu a per-run snapshoty ([`runs.py:596`](../../packages/core/src/agency/runs.py)); do knowledge patří „proč jsme se tak rozhodli“, ne kopie fronty.
 - **Nečeká se na OKF v1.0.** Spec je v0.2 a sám se prohlašuje za nehotový; pole se mapují dnes a případné přejmenování ve v0.3 je mechanická migrace nad odvozeným (přestavitelným) bundlem.
@@ -120,6 +133,6 @@ Bundle dává strukturu a přenositelnost, ale ne sémantické „najdi relevant
 | 2 — `rules/` koncepty | ~1 den | po 1 |
 | 3 — `findings/` ledger + `index.md` + `log.md` | ~1–2 dny | po 2 |
 | 4 — knowledge pages packů | ~1 den | po 3 |
-| 5 — Hindsight recall adaptér (za flagem) | ~1 den + vyhodnocení | harness hooky **kdykoli** (nezávislé); orchestrátorová část po 3 + `--wait` z teams Kroku 2 |
+| 5 — lexikální ranker nad bundlem | ~2 h | po 3 |
 
-Kroky 1–4 jsou **~4 dny** a dávají paměť, která patří projektu, commituje se, a čte ji každý provider i holá session bez Agency. Krok 5 je ohraničený experiment s kill criteria — přidá recall, ne závislost.
+Kroky 1–4 jsou **~4 dny** a dávají paměť, která patří projektu, commituje se, a čte ji každý provider i holá session bez Agency. Krok 5 je dvě hodiny a nepřidává závislost — původní verze přidávala démona a byla proto zamítnuta.

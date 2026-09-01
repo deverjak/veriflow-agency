@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 from . import (anchor, backlog, config, dedup, export, graph, hires, ingest,
-               knowledge, metrics, packs, proc, providers, recall, registry, runs)
+               knowledge, metrics, packs, proc, providers, registry, runs)
 from .util import bundled, out, posix, read_json, strip_comments, ulid, write_json
 
 # ---------------------------------------------------------------- pomůcky
@@ -455,19 +455,6 @@ def cmd_doctor(args) -> int:
             detail += f"\n{' ' * 29}{bad['path']}: {bad['error']}"
         check("pack pages", not pg["broken"], detail, fatal=False)
 
-    # Recall se hlásí, jen když ho někdo zapnul. Řádek „vypnuto" u experimentu,
-    # o který nikdo nepožádal, je šum — a doctor má odpovídat na to, co běhu
-    # opravdu hrozí.
-    for name, st in _recall_states(project):
-        if st.get("error"):
-            check(f"recall {name}", False, st["error"], fatal=False)
-        else:
-            ok, why = proc.port_open(st["url"])
-            check(f"recall {name}", ok,
-                  f"{st['bank']} at {st['url']}" if ok
-                  else f"no daemon at {st['url']} ({st['source']}) — {why}; "
-                       f"runs continue without it", fatal=False)
-
     for p in packs.available():
         ref = packs.installed_ref(project, p.name)
         if not ref:
@@ -615,18 +602,6 @@ def _playwright_checks(project: config.Project, pw: dict) -> list[tuple]:
                  cache or "not downloaded — `npx playwright install "
                           + " ".join(pw.get("browsers") or ["chromium"]) + "`", False))
     return rows
-
-
-def _recall_states(project: config.Project) -> list[tuple[str, dict]]:
-    """Packy, které mají recall zapnutý — prázdné, dokud ho někdo nezapne."""
-    found = []
-    for p in packs.available():
-        if not packs.installed_ref(project, p.name):
-            continue
-        st = recall.settings(project, project.pack_config(p.name) or {})
-        if st["enabled"]:
-            found.append((p.name, st))
-    return found
 
 
 def _dig(d: dict, dotted: str):
@@ -814,6 +789,11 @@ def cmd_run(args) -> int:
             # Zdrojový kód je pro takový běh ke ČTENÍ, zapisuje se do RUN_DIR.
             out.done(f"working in the project itself  {out.dim(posix(wt))}")
 
+        # Na co se tenhle běh ptá. Paměti projektu bývá víc, než kolik se vejde
+        # do okna, a bez dotazu se ořezává podle stáří — tedy zapomíná to
+        # důležité ve prospěch toho čerstvého.
+        query = knowledge.query_for(pack.name, brief, target)
+
         if policy["graph"]:
             out.step("updating the graph")
             ginfo = runs.prepare_graph(project, wt, cfg)
@@ -821,11 +801,11 @@ def cmd_run(args) -> int:
                      + (f"  {out.dim(ginfo['tool'] or '')}" if ginfo.get("tool") else ""))
 
             out.step("collecting graph signal")
-            stats = runs.collect_evidence(project, wt, run, target, files)
+            stats = runs.collect_evidence(project, wt, run, target, files, query)
             out.done("evidence/ filled" + (f"  {out.dim(str(stats))}" if stats else ""))
         else:
             out.step("collecting signal from the project")
-            stats = runs.collect_workspace_evidence(project, run, target, files)
+            stats = runs.collect_workspace_evidence(project, run, target, files, query)
             out.done(f"evidence/ filled  {out.dim(str(stats))}")
 
         if policy.get("backlog"):
@@ -841,21 +821,6 @@ def cmd_run(args) -> int:
                 out.done(f"{queue.get('openIssues', 0)} open issues · "
                          f"{queue.get('draftItems', 0)} drafts · "
                          f"{queue.get('roadmapFiles', 0)} roadmap files")
-
-        # Sémantický recall je volitelný adaptér za flagem a stojí VEDLE
-        # přípravy, ne v ní: co se z něj vrátí, je pozadí navíc, a když démon
-        # neběží, běh se o tom dozví řádkem a jede dál.
-        got = recall.for_run(project, run, cfg, brief=brief, target=target)
-        if got["enabled"]:
-            stats["recalled"] = len(got.get("results") or [])
-            stats["recalledForeign"] = got.get("foreign", 0)
-            if got.get("error"):
-                stats["recallError"] = got["error"]
-                out.fail(f"recall skipped — {got['error']}")
-            else:
-                n, foreign = stats["recalled"], stats["recalledForeign"]
-                out.done(f"recall: {n} memor{'y' if n == 1 else 'ies'}, "
-                         f"{foreign} not written here  {out.dim(got['bank'])}")
 
         runs.write_context(run, cfg, target, wt, files, skipped,
                            brief=brief, worktree_owned=wt_owned, hire=hire,
@@ -1339,15 +1304,6 @@ def cmd_metrics(args) -> int:
         if r["cost"]["secondsPerKeptFinding"]:
             print(f"  {out.dim('Cost')}            "
                   f"{r['cost']['secondsPerKeptFinding']} s per candidate")
-        if rc := r.get("recall"):
-            # Kill criteria adaptéru, ne statistika pro statistiku: zásahy,
-            # které nezapsala Agency, jsou to jediné, co bundle nedal.
-            errs = f", {rc['errors']} without a daemon" if rc["errors"] else ""
-            print(f"  {out.dim('Recall')}          {rc['hits']} memories over "
-                  f"{rc['runs']} runs, {rc['foreign']} not written here{errs}")
-            if rc["runs"] >= 10 and not rc["foreign"]:
-                print(out.dim("                  Ten runs, nothing the bundle did not "
-                              "already hold — the adapter can be switched off."))
         print()
         table("by dimension", r["byDimension"])
         table("by severity", r["bySeverity"])
@@ -1535,12 +1491,6 @@ def cmd_triage(args) -> int:
 
     state = {"accept": "accepted", "reject": "rejected", "defer": "deferred"}[args.action]
     ev = runs.append_decision(run, args.finding, state, args.reason, args.note, args.by)
-
-    # Rozhodnutí je jediná chvíle, kdy se z tvrzení stává znalost — a proto
-    # jediná, kdy má smysl něco ukládat do banky. Za flagem, výchozí vypnuto.
-    pack_name = (run.record().get("pack") or "").split("@")[0]
-    found = next((f for f in run.findings() if f.get("id") == args.finding), {})
-    recall.after_decision(project, run, project.pack_config(pack_name) or {}, found, ev)
 
     def human():
         print(f"  {args.finding} → {ev['state']}"

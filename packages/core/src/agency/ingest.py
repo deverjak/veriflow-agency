@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from . import dedup, knowledge, proc, recall
+from . import dedup, knowledge, proc
 from .config import Project
 from .runs import Run, load_runs, now
 from .util import bundled, read_json, write_json
@@ -190,9 +190,6 @@ def ingest(project: Project, run: Run, min_score: int | None = None) -> dict:
         # záznamu: kdyby zápis bundlu spadl, výsledek brány je už bezpečně na
         # disku a `agency knowledge --rebuild` bundle dožene.
         "bundle": _bundle(project),
-        # Volitelný adaptér za flagem, výchozí vypnuto. Stejné pořadí a stejný
-        # důvod jako u bundlu: pravda je na disku dřív, než se o ní řekne ven.
-        "recall": recall.after_ingest(project, run, cfg),
     }
 
 

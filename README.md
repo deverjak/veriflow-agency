@@ -426,44 +426,38 @@ v0.2, ale je to **konvence, ne závislost**: povinné je jediné pole `type`
 a čtečka je v `packages/core/src/agency/okf.py` na padesát řádků. Co nepřečte,
 ohlásí s číslem řádku — tiše špatně vyložené pravidlo by bylo horší než žádné.
 
-### Sémantický recall — experiment, výchozí vypnuto
+### Co z paměti běh dostane — a proč zrovna to
 
-Bundle umí být přečtený. Neumí „najdi mi, co je z těch tří set konceptů zrovna
-teď relevantní" — a to se nestaví, adaptuje se. Volitelný adaptér mluví
-s [Hindsight](https://github.com/vectorize-io/hindsight) démonem na tomhle
-stroji, do banky `coding-agent::<jméno repozitáře>` — do **téže**, kterou plní
-harness hooky Claude Code a Codexu, takže interaktivní session a běh Agency mají
-společnou paměť.
+Do běhu se paměť nevejde celá; `known-findings.json` má strop tři sta nálezů.
+Dlouho to znamenalo „posledních tři sta", protože běhy se čtou od nejnovějšího.
+Nález z jara tím vypadl, aby se vešlo tři sta čerstvých malicherností — a to je
+zapomínání, které si nikdo neobjednal.
 
-```
-uv pip install hindsight-client              # 18 balíčků, proto volitelné
-agency config legal --set recall.enabled=true
-agency doctor                                # `recall legal  … at http://127.0.0.1:9077`
-```
-
-Recall běží při přípravě a jeho výsledek skončí v `evidence/recall.json` —
-zaznamenaný vstup, ne volná magie. Ukládá se dvojí: shrnutí běhu po bráně
-a **rozhodnutí** o nálezu při triage. Kandidáti ne: nález, o kterém nikdo
-nerozhodl, je tvrzení, a banka plná neověřených tvrzení by recall utopila.
-
-Tři věci, které stojí za to vědět předem:
-
-- **Adaptér nikdy neshodí běh.** Démon neběží nebo klient chybí → řádek ve
-  výstupu, `recallError` v záznamu a jede se dál.
-- **Jen localhost.** `~/.hindsight/coding-agent.json` má výchozí režim `cloud`.
-  Adresu mimo tenhle stroj adaptér **odmítne**, i když ji tam ta konfigurace má.
-- **Démon extrahuje fakta vlastním LLM.** Co se uloží, může jít do modelu, na
-  který je démon nastavený. Proto je to vypnuté, dokud si to někdo nezapne.
-
-Vyhodnocuje se číslem, ne dojmem. `agency metrics` počítá zásahy, které
-**nezapsala Agency** — když jich je po deseti bězích nula, dostával běh zpátky
-jen to, co má v bundlu, a adaptér se zhasne:
+Dneska strop vybírá podle toho, co má běh dělat. Zadání (`--prompt`), titulek
+cíle a jméno packu složí dotaz a nálezy se seřadí podle BM25 —
+`packages/core/src/agency/rank.py`, sto řádků nad `math` a `re`. Žádný model,
+žádné API, žádná síť, žádný proces navíc.
 
 ```
-  Recall          14 memories over 10 runs, 0 not written here
-                  Ten runs, nothing the bundle did not already hold —
-                  the adapter can be switched off.
+agency run qa --prompt "reconsent banner po expiraci"
+#   evidence/ filled  {'knownFindings': 812, 'knownFindingsQuery': 'reconsent banner …'}
 ```
+
+Dvě vlastnosti stojí za vyslovení, protože jsou to rozhodnutí, ne detaily:
+
+- **Bez zadání se nic nepřeskládá.** Běh bez `--prompt` a bez cíle nemá dotaz
+  a dostane pořadí podle stáří, jako dřív. Vymýšlet dotaz z ničeho by znamenalo
+  řadit podle šumu, což je horší než řadit podle času.
+- **Synonyma to neumí.** „payment flow" nenajde nález, který mluví jen
+  o „checkout process". Za tohle se platí embeddings, embeddings znamenají model
+  a model znamená klíč nebo GPU — tedy přesně tu závislost, kterou tenhle
+  nástroj nemá. Dotaz i nálezy naštěstí mluví slovníkem téhož repa.
+
+Sémantický recall přes [Hindsight](https://github.com/vectorize-io/hindsight)
+tu byl postavený a zamítnutý: ten démon si extrahuje fakta vlastním LLM, takže
+lokální adresa nezaručuje, že obsah nikam nejde — a to byla jediná věc, kterou
+si za démona, 18 balíčků a port navíc člověk kupoval. Rozbor je
+v [`docs/plans/shared-memory.md`](docs/plans/shared-memory.md) Kroku 5.
 
 ## Jak je to poskládané
 
