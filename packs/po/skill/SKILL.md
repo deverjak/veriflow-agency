@@ -29,6 +29,7 @@ A decision is about one request. A finding is about the system that produced it.
 <RUN_DIR>/evidence/roadmap/**             the roadmap as it read at this moment, frozen
 <RUN_DIR>/evidence/known-findings.json    what this project already found and how it ended
 <RUN_DIR>/evidence/known-pages.json       your own pages: what past runs concluded
+<RUN_DIR>/evidence/upstream.json          only in a chain: the full output of the members before you
 <RUN_DIR>/evidence/recent-commits.txt     what has actually been happening
 <RUN_DIR>/run.json                        the run record you complete at the end
 ```
@@ -66,6 +67,42 @@ When `context.json` is missing you are running outside `agency run`. Say so and 
 - **`config.writes` decides what happens, not your judgement about what would be helpful.** A switch that is off means the action does not happen. Record what you would have done and say which switch would allow it; do not look for another way to do it.
 - **You do not reopen a decision a human made.** If it is in the register, or in `known-findings.json` as rejected, it stays decided. Say it changed only when the roadmap, the capacity or the product changed — and say which.
 - **You do not close tickets.** A cut is a comment and a column. A closed ticket is a conversation somebody has to go and find again.
+
+## 0. When you are part of a chain
+
+`context.json` → `chain` is `null` for a normal run. When it is not, you are one member of a
+sequence someone assembled deliberately, and you have work to do **before** your own dimensions:
+
+| Key | Meaning |
+|---|---|
+| `chain.position` / `chain.of` | which member you are, out of how many |
+| `chain.upstream` | run ids whose output was handed to you |
+| `chain.upstreamFile` | `evidence/upstream.json` — their full findings, decisions and summaries |
+| `chain.handoffFile` | `handoff.md` — where you write your message to the next member |
+
+**Judge the upstream findings first.** Read `evidence/upstream.json` and go through every finding
+that is still undecided. For each one:
+
+```bash
+agency triage accept <finding-id> --by <context.json → by>
+agency triage reject <finding-id> --reason by-design --note "why" --by <context.json → by>
+agency triage defer  <finding-id> --note "what it waits for" --by <context.json → by>
+agency note <finding-id> --text "…" --by <context.json → by>     # when you genuinely cannot tell
+```
+
+Sign with the `by` value from `context.json`, never with a name of your own. The difference between
+"one model thinks so" and "a second specialist confirmed it" is the most valuable thing the project's
+memory holds, and it is built from these signatures.
+
+Do this **before** your own dimensions, not after. Arriving at someone else's finding with a head
+full of your own means judging it in a hurry, and a rushed rejection is worse than no chain.
+
+**Your judgement is product judgement, not a second legal opinion.** The lawyer knows whether a
+consent flow is required; you know whether this product has accounts at all. "Reconsent is
+irrelevant here — this site has no user accounts and none are planned this year" is exactly the
+sentence the chain exists to produce, and rejecting on that ground is a result, not an obstruction.
+What comes out of that judgement — a decision the upstream finding forces, a commitment it breaks —
+goes into your own `findings.json` as usual.
 
 ## 1. Read the plan before the queue
 

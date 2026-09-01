@@ -79,7 +79,7 @@ Plná specifikace v [`shared-memory.md`](shared-memory.md), Krok 1 — je to tý
 - **Ctrl-C konečně něco znamená.** U `--launch` přerušení nikdo nezaznamená. Tady rodičovský proces žije dál, takže běh zavře jako `abandoned` a uklidí worktree, na který by uživatel jinak musel přijít sám.
 - **Worktree se po doběhnutí nemaže.** Brána je automatická, úklid ne: běh sice skončil, ale worktree je jediné místo, kde se dá dohledat, nad čím agent pracoval. `agency cleanup` zůstává rozhodnutím člověka — u chainu (Krok 3) to bude vlastní rozhodnutí, protože tam se worktree hromadí po krocích.
 
-### Krok 3 — `agency chain` (~1–1,5 dne)
+### Krok 3 — `agency chain` (~1–1,5 dne) — **hotovo 1. 9. 2026**
 
 ```
 agency chain legal po --prompt "VOP pro nový web"
@@ -106,10 +106,20 @@ agency chain legal@claude po@claude --pr 12
 - Odmítnutí nebo nenulový exit kroku chain zastaví; vytiskne se, které běhy doběhly a čím to stojí. Přerušený chain se neresuscituje (`--resume` až to bude potřeba doopravdy) — běhy jsou zapsané, dokončit je jde ručně.
 - `agency status` ukáže chain id u běhů, které v nějakém jely — skupinové zobrazení stačí textově.
 
-### Krok 4 — metoda: handoff a soud nad upstreamem (~3 h)
+### Krok 4 — metoda: handoff a soud nad upstreamem (~3 h) — **hotovo 1. 9. 2026**
 
 - [`packs/po/skill/SKILL.md`](../../packs/po/skill/SKILL.md): nová sekce — když má `context.json` blok `chain` s `upstream`, projdi upstream nálezy **před** vlastními dimenzemi. Každý rozhodni `agency triage accept|reject|defer … --by hire:<id>` (id je v `context.json.hire`), nebo aspoň okomentuj `agency note`. Nálezy, které z toho vzniknou („právník navrhuje reconsent; roadmapa říká, že účty letos nebudou“), jdou normálně do `findings.json`.
 - Všechny packy, které můžou stát v chainu jinde než na konci (v1: `legal`), dostanou do SKILL.md odstavec o handoffu: běžíš-li v chainu, zapiš `RUN_DIR/handoff.md` — pár odstavců **pro dalšího člena**, ne rekapitulaci. Co jsem nedořešil, kde jsem si nejistý, co z nálezů stojí na domněnce o produktu, kterou má potvrdit on.
+
+### Co plán nepředpokládal (Kroky 3, 4, 6)
+
+- **`run.v1` má zavřený seznam klíčů i nahoře.** Potřetí táž past (po `run.graph` ve Fázi 0 a `evidence` u rankeru): `additionalProperties: false` znamená, že blok `chain` bez zápisu do schématu udělá z každého týmového běhu neplatný záznam. Kdo bude přidávat další blok, narazí taky.
+- **Členy je nutné jmenovat hire id, ne packem, když se má poznat provider.** `hires.add` napřed **zhmotní stávajícího pracovníka**, takže po `agency hire po --provider codex` existuje `po@claude` i `po@codex` — a holé `po` sáhne po tom prvním. Validace „jeden provider" je tím pádem pravdivá, ale uživatel si ji snadno obejde, aniž by chtěl. Ukázalo se to až testem, který kvůli tomu spustil skutečnou binárku.
+- **Test málem pustil skutečného agenta.** `cmd_chain` končí u `proc.attend`, tedy u `claude` na stroji, který testy pouští. `test_chain.py` má proto autouse pojistku: výchozí `proc.attend` padá s vysvětlením a podstrčit agenta se musí vědomě. Bez ní je každý zapomenutý monkeypatch spuštěná binárka.
+- **Pořadí členů se v UI nedá vybrat najednou.** VS Code QuickPick s `canPickMany` **nezaručuje pořadí** výběru, a pořadí je u řetězu celý smysl. Výběr je proto po jednom, s „Run the team" od druhého člena dál — o dvě kliknutí otravnější, zato je vidět, kdo soudí koho.
+- **Extension nemůže použít `--json` kontrakt.** `chain` si běhy pouští sám přes `--wait`, a ten se s `--json` vylučuje (agent píše do téhož stdout). Klient tedy neposílá do terminálu hotové `launch` argv od jádra, ale rovnou `agency chain …`. Hranice „jádro rozhoduje, klient zobrazuje" se nemění — jen se posouvá o úroveň výš, na celý řetěz.
+- **`handoff.md` se zaznamenává i u samostatného běhu.** Pack neví, jestli za ním někdo stojí. Zapsat ho zbytečně je levnější než ho nemít, až bude potřeba, takže `outputs.handoff` vzniká vždycky.
+- **Neúplný řetěz musí být poznat na první pohled.** Proto je v záznamu `of`, ne jen `position`: bez něj by zastavený tým vypadal v přehledu jako dokončený, jen kratší. UI ho kreslí oranžově a tooltip řekne, kolik kroků chybí.
 
 ### Krok 5 — druhé kolo se steeringem (v2, ~1 den, **odložit**)
 
@@ -120,7 +130,7 @@ Dělá se, až pipeline doběhne aspoň na dvou reálných případech. Tvar:
 - Marker idempotence dostane číslo kola, jinak by druhé kolo skončilo na `already-reviewed` vlastního prvního kola.
 - Strop `--rounds` je 2. Víc kol znamená, že zadání bylo špatně, ne že je potřeba víc konverzace.
 
-### Krok 6 — extension (~půl dne, po CLI)
+### Krok 6 — extension (~půl dne, po CLI) — **hotovo 1. 9. 2026**
 
 - Přehled: běhy jednoho chainu jako skupina; tlačítko „Run team“ až když si tvar CLI sedne.
 - Orchestruje pořád CLI — extension pošle do terminálu `agency chain …` stejně, jako dnes posílá launch jednoho běhu ([`review.js:321`](../../packages/extension/src/review.js)). Žádná orchestrace v JS; hranice „jádro rozhoduje, klient zobrazuje“ se nemění.
@@ -144,9 +154,9 @@ Dělá se, až pipeline doběhne aspoň na dvou reálných případech. Tvar:
 |---|---|---|
 | 1 — společný základ (identita, summary, `knowledge.py`) | ~1 den | první; společný se [`shared-memory.md`](shared-memory.md) |
 | 2 — `agency run --wait` + auto-ingest | ~půl dne | **hotovo 1. 9. 2026** |
-| 3 — `agency chain` + handoff + skládání promptu + `run.v1` | ~1–1,5 dne | po 2 |
-| 4 — SKILL.md: soud nad upstreamem + `handoff.md` | ~3 h | po 3 |
+| 3 — `agency chain` + handoff + skládání promptu + `run.v1` | ~1–1,5 dne | **hotovo 1. 9. 2026** |
+| 4 — SKILL.md: soud nad upstreamem + `handoff.md` | ~3 h | **hotovo 1. 9. 2026** |
 | 5 — steering a druhé kolo | ~1 den | **v2 — až pipeline doběhne na reálných případech** |
-| 6 — extension skupina + „Run team“ | ~půl dne | po 3, nezávisle na 5 |
+| 6 — extension skupina + „Run team“ | ~půl dne | **hotovo 1. 9. 2026** |
 
-Kroky 1–4 jsou **~2,5 dne** a dají použitelnou pipeline `legal → po`: právníkova fronta přichází k člověku už rozhodnutá product ownerem.
+Kroky 1–4 a 6 jsou hotové a dávají použitelnou pipeline `legal → po`: právníkova fronta přichází k člověku už rozhodnutá product ownerem. Otevřený zůstává jen Krok 5 (steering), a ten čeká na spouštěč, ne na kapacitu — dělá se, až pipeline doběhne aspoň na dvou reálných případech.

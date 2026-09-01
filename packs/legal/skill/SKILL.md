@@ -19,6 +19,7 @@ Most legal answers a general model gives are defensible and wrong in the same wa
 <RUN_DIR>/context.json                 the brief, the project configuration, the state of the working copy
 <RUN_DIR>/evidence/known-findings.json what this project already found and how it ended
 <RUN_DIR>/evidence/known-pages.json    your own pages: what past runs concluded
+<RUN_DIR>/evidence/upstream.json       only in a chain: what the members before you found
 <RUN_DIR>/evidence/recent-commits.txt  what has been happening in the project
 <RUN_DIR>/evidence/changes.txt         the diff against the base branch, when there is one
 <RUN_DIR>/run.json                     the run record you complete at the end
@@ -271,6 +272,23 @@ verified:
 **Conclusions, not a log.** When something stops holding, rewrite it — or give it `status: deprecated` and leave the reason next to it. Deleting a conclusion throws away the reason nobody should arrive at it again; a page that only grows stops being read within three months. The chronology of runs is `.agency/knowledge/log.md`, built from `summary.md` — do not keep a second copy of it here.
 
 Both belong to the **project**, not to the pack. Write them and leave them there; no git ceremony around them.
+
+### When someone runs after you
+
+`context.json` → `chain` is `null` for a normal run. When it is not and you are not the last member
+(`chain.position < chain.of`), also write **`<RUN_DIR>/handoff.md`** — a few paragraphs addressed to
+the next specialist, not a recap for the record.
+
+`summary.md` is "what I did", written for a person and for the project's memory. `handoff.md` is
+"what you need", written for one named colleague who is about to judge your findings. Put in it:
+
+- what you could not settle, and what it would take to settle it,
+- which findings rest on an assumption about the **product** rather than about the law — those are
+  exactly the ones the next member can confirm or kill,
+- where you are unsure, and what you would not trust without a second pair of eyes.
+
+Keep it short: the first 40 lines go into the next member's prompt verbatim, the rest stays in the
+file. Do not repeat the findings — they arrive as data. Write what the data does not carry.
 
 ## 9. What you do not touch
 

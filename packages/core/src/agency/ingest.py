@@ -173,7 +173,11 @@ def ingest(project: Project, run: Run, min_score: int | None = None) -> dict:
     # Shrnutí běhu je kontrakt packu (`RUN_DIR/summary.md`). Brána ho nečte ani
     # nedopisuje — jen zaznamená, že existuje. Konzument je člověk, chronologie
     # paměti a další specialista v řetězu.
-    rec["outputs"] = {"summary": (run.dir / "summary.md").is_file()}
+    # `handoff.md` je totéž o krok adresněji — zpráva dalšímu členovi řetězu.
+    # Zaznamenává se i u samostatného běhu: pack neví, jestli za ním někdo
+    # stojí, a napsat ho zbytečně je levnější než ho nemít, až bude potřeba.
+    rec["outputs"] = {"summary": (run.dir / "summary.md").is_file(),
+                      "handoff": (run.dir / "handoff.md").is_file()}
     rec["status"] = "ok" if kept else ("no-findings" if raw_count == 0 else "gated-out")
     rec.setdefault("finishedAt", now())
     run.save_record(rec)

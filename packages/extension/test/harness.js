@@ -586,6 +586,62 @@ check('dva běhy nad týmž PR jde od sebe rozeznat', () => {
   assert.ok(rows[0].item.tooltip.value.includes('review-graph@claude'));
 });
 
+check('běhy jednoho týmu drží pohromadě', () => {
+  // Bez seskupení vypadá tým jako dva nesouvisející běhy a to, že druhý soudil
+  // prvního, není odkud vyčíst.
+  const chain = { id: '01M1TEAM0000000000000000AA', of: 2 };
+  Object.assign(state.snapshot, {
+    probe: { ok: true }, findings: [],
+    runs: [
+      { id: '01M1CGN9HAMBKK63SASPP2EYWB', pack: 'po@0.1.0', status: 'ok',
+        targetLabel: 'main', kind: 'workspace', hire: 'po@claude',
+        chain: { ...chain, position: 2, upstream: ['01M1CGN9HAMBKK63SASPP2EYWA'] },
+        findings: 2, undecided: 1, startedAt: new Date().toISOString() },
+      { id: '01M1CGN9HAMBKK63SASPP2EYWA', pack: 'legal@0.1.0', status: 'ok',
+        targetLabel: 'main', kind: 'workspace', hire: 'legal@claude',
+        chain: { ...chain, position: 1, upstream: [] },
+        findings: 3, undecided: 0, startedAt: new Date().toISOString() },
+    ],
+  });
+  const rows = new views.RunsTree().roots();
+
+  assert.strictEqual(rows.length, 1, 'dva běhy jednoho řetězu jsou jeden uzel');
+  assert.strictEqual(rows[0].item.label, 'legal → po', 'pořadí je podle pozice, ne podle času');
+  assert.ok(String(rows[0].item.description).includes('2/2 steps'));
+  assert.ok(String(rows[0].item.description).includes('5 findings'), 'počty se sčítají');
+  assert.strictEqual(rows[0].children.length, 2);
+  assert.ok(String(rows[0].children[0].item.description).startsWith('step 1/2'));
+});
+
+check('nedoběhnutý tým se netváří jako hotový', () => {
+  Object.assign(state.snapshot, {
+    probe: { ok: true }, findings: [],
+    runs: [
+      { id: '01M1CGN9HAMBKK63SASPP2EYWA', pack: 'legal@0.1.0', status: 'failed',
+        targetLabel: 'main', kind: 'workspace', hire: 'legal@claude',
+        chain: { id: '01M1TEAM0000000000000000BB', position: 1, of: 3, upstream: [] },
+        findings: 0, undecided: 0, startedAt: new Date().toISOString() },
+    ],
+  });
+  const rows = new views.RunsTree().roots();
+  assert.ok(String(rows[0].item.description).includes('1/3 steps'));
+  assert.ok(rows[0].item.tooltip.value.includes('stopped after 1 of 3'));
+});
+
+check('samostatný běh se do týmu nezabalí', () => {
+  Object.assign(state.snapshot, {
+    probe: { ok: true }, findings: [],
+    runs: [
+      { id: '01M1CGN9HAMBKK63SASPP2EYWA', pack: 'qa@0.1.0', status: 'ok',
+        targetLabel: 'main', kind: 'workspace', hire: 'qa@claude', chain: null,
+        findings: 1, undecided: 1, startedAt: new Date().toISOString() },
+    ],
+  });
+  const rows = new views.RunsTree().roots();
+  assert.strictEqual(rows[0].item.label, 'main');
+  assert.ok(!String(rows[0].item.id).startsWith('chain:'));
+});
+
 check('výběr pracovníka jde podle politiky metody, ne podle jména', () => {
   const review = require(path.join(SRC, 'review.js'));
   Object.assign(state.snapshot, {

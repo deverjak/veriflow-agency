@@ -253,6 +253,22 @@ function activate(context) {
     if (d) setTimeout(() => refresh(), 2000);
   });
 
+  // Tým: specialisté za sebou, každý soudí, co našel předchozí. Orchestruje
+  // pořád CLI — `agency chain` si běhy pouští sám, takže tady se jen skládá
+  // příkaz do terminálu. Orchestrace v JS by byla druhé místo, kde vzniká běh.
+  reg('agency.chain.run', async () => {
+    if (!state.snapshot.cwd) {
+      vscode.window.showWarningMessage('Agency: open a project folder first.');
+      return;
+    }
+    if (!state.snapshot.probe.ok) return showNotReady();
+
+    const team = await review.pickAndChain(state.snapshot.cwd, log);
+    // Delší prodleva než u jednoho běhu: chain nevrátí nic, dokud nedoběhne
+    // první člen, a než se objeví, nemá se co obnovovat.
+    if (team) setTimeout(() => refresh(), 5000);
+  });
+
   // QA a další packy, které pracují nad projektem, ne nad pull requestem.
   // Příkaz je jeden a obecný — co se pouští, rozhoduje běhová politika packu.
   reg('agency.qa.run', async () => {

@@ -780,7 +780,7 @@ def write_context(run: Run, cfg: dict, target: dict, wt: Path,
                   files: list[str], skipped: int,
                   brief: dict | None = None, worktree_owned: bool = True,
                   hire=None, pack_name: str | None = None,
-                  provider: str | None = None) -> None:
+                  provider: str | None = None, chain: dict | None = None) -> None:
     from . import knowledge  # kruhový import: `knowledge` stojí na `runs`
 
     review = dict(cfg.get("review") or {})
@@ -831,6 +831,11 @@ def write_context(run: Run, cfg: dict, target: dict, wt: Path,
         "prCommentMarker": (review_marker(pack_name, target["headRefOid"],
                                           hire.id if hire else None)
                             if pack_name and target.get("pr") else None),
+        # Členství v řetězu, nebo `null` u samostatného běhu. Pack se podle
+        # toho pozná, že má napřed soudit cizí nálezy z `evidence/upstream.json`
+        # a po sobě nechat `handoff.md` — obojí je kontrakt v jeho SKILL.md.
+        "chain": ({**chain, "upstreamFile": "evidence/upstream.json",
+                   "handoffFile": "handoff.md"} if chain else None),
         "review": review,
         "sinks": cfg.get("sinks") or {},
         "config": pack_config,

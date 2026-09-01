@@ -2,7 +2,7 @@
   "name": "veriflow-agency",
   "displayName": "Agency",
   "description": "Specialists you hire into your repository. Pull request reviews with evidence-backed findings, triage right next to the code, and measurable precision.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "veriflow",
   "license": "UNLICENSED",
   "private": true,
@@ -165,6 +165,12 @@
         "title": "Start a QA session…",
         "category": "Agency",
         "icon": "$(beaker)"
+      },
+      {
+        "command": "agency.chain.run",
+        "title": "Run a team…",
+        "category": "Agency",
+        "icon": "$(organization)"
       },
       {
         "command": "agency.ingest",
@@ -427,8 +433,13 @@
           "when": "view == agency.overview || view == agency.runs"
         },
         {
+          "command": "agency.chain.run",
+          "group": "navigation@3",
+          "when": "view == agency.overview || view == agency.runs"
+        },
+        {
           "command": "agency.ingest",
-          "group": "navigation@2",
+          "group": "navigation@4",
           "when": "view == agency.runs"
         },
         {

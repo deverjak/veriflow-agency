@@ -197,7 +197,7 @@ Hindsight adaptér byl 1. 9. 2026 postavený (`edbf924`, 19 souborů, 846 řádk
 | co | odkud | spouštěč |
 |---|---|---|
 | `graph/drivers/`, workspace strategie | [`graph-abstraction.md`](graph-abstraction.md) Krok 3 | až fyzicky přibývá druhý grafový nástroj |
-| `agency chain`, handoff, steering, extension | [`teams.md`](teams.md) Kroky 3–6 | vlastní plán; z tohoto pořadí se z něj bral jen Krok 2 — a ten je hotový |
+| steering a druhé kolo (`--rounds 2`) | [`teams.md`](teams.md) Krok 5 | až pipeline `legal → po` doběhne na dvou reálných případech. Kroky 3, 4 a 6 (`agency chain`, handoff, extension) jsou hotové 1. 9. 2026. |
 
 ---
 

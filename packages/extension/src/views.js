@@ -424,7 +424,66 @@ class RunsTree extends Tree {
   roots() {
     const s = state.snapshot;
     if (!s.probe.ok) return [];
-    return (s.runs || []).map((r) => {
+    return groupChains((s.runs || []).map((r) => runNode(r, s)), s.runs || []);
+  }
+}
+
+/** Běhy jednoho řetězu pod jeden uzel — jinak vypadá tým jako několik
+ *  nesouvisejících běhů a to, že druhý soudil prvního, není odkud vyčíst.
+ *  Pořadí uvnitř je podle pozice, ne podle času: řetěz je sekvence. */
+function groupChains(nodes, runs) {
+  const out = [];
+  const placed = new Set();
+  runs.forEach((r, i) => {
+    if (placed.has(i)) return;
+    const c = r.chain;
+    if (!c) { out.push(nodes[i]); return; }
+
+    const members = runs
+      .map((other, j) => ({ other, j }))
+      .filter(({ other }) => other.chain && other.chain.id === c.id)
+      .sort((a, b) => a.other.chain.position - b.other.chain.position);
+    members.forEach(({ j }) => placed.add(j));
+
+    const findings = members.reduce((n, { other }) => n + (other.findings || 0), 0);
+    const undecided = members.reduce((n, { other }) => n + (other.undecided || 0), 0);
+    const who = members.map(({ other }) => String(other.hire || other.pack || '?').split('@')[0]);
+    // Neúplný řetěz se nemá tvářit jako hotový — `of` je v záznamu právě proto.
+    const short = members.length < c.of;
+
+    out.push(node(who.join(' → '), {
+      id: `chain:${c.id}`,
+      description: `${members.length}/${c.of} steps · ${findings} findings · ${undecided} undecided`,
+      iconId: short ? 'debug-disconnect' : 'organization',
+      color: short ? 'charts.orange' : undefined,
+      collapsed: true,
+      contextValue: 'agencyChain',
+      children: members.map(({ j, other }) => {
+        // Pozice patří na řádek, ne jen do tooltipu: uvnitř týmu je „kolikátý"
+        // to jediné, co dva jinak stejné řádky odlišuje.
+        const n = nodes[j];
+        n.item.description = `step ${other.chain.position}/${other.chain.of} · ${n.item.description}`;
+        return n;
+      }),
+      tooltip: [
+        `Team run \`${c.id}\``,
+        '',
+        ...members.map(({ other }) =>
+          `- ${other.chain.position}/${other.chain.of} \`${other.hire || other.pack}\``
+          + ` — ${other.findings} findings, ${other.status}`),
+        '',
+        short
+          ? `The chain stopped after ${members.length} of ${c.of} steps. `
+            + 'What did run is recorded; the rest can be finished by hand.'
+          : 'Each member judged what the previous one found before running its own dimensions.',
+      ].join('\n'),
+    }));
+  });
+  return out;
+}
+
+function runNode(r, s) {
+  return (() => {
       const mine = s.findings.filter((f) => f.runId === r.id);
       const st = {
         ok: ['pass', 'charts.green'],
@@ -465,8 +524,7 @@ class RunsTree extends Tree {
             + 'open until you close it — **Close run** on this row.'
             : ''),
       });
-    });
-  }
+  })();
 }
 
 // ------------------------------------------------------------------- Nálezy

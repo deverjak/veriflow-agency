@@ -12,8 +12,9 @@ import os
 import sys
 from pathlib import Path
 
-from . import (anchor, backlog, config, dedup, export, graph, hires, ingest,
-               knowledge, metrics, packs, proc, providers, registry, runs)
+from . import (anchor, backlog, chain as chains, config, dedup, export, graph,
+               hires, ingest, knowledge, metrics, packs, proc, providers,
+               registry, runs)
 from .util import bundled, out, posix, read_json, strip_comments, ulid, write_json
 
 # ---------------------------------------------------------------- pomůcky
@@ -676,7 +677,7 @@ def _one_line(text: str, limit: int = 400) -> str:
     return flat if len(flat) <= limit else flat[:limit].rstrip() + "…"
 
 
-def cmd_run(args) -> int:
+def cmd_run(args, chain: dict | None = None) -> int:
     if getattr(args, "wait", False) and getattr(args, "json", False):
         # Agent píše do téhož stdout jako tenhle proces. Slíbit u toho, že na
         # výstupu bude jeden JSON dokument, nejde — a kontrakt, který se dá
@@ -822,10 +823,23 @@ def cmd_run(args) -> int:
                          f"{queue.get('draftItems', 0)} drafts · "
                          f"{queue.get('roadmapFiles', 0)} roadmap files")
 
+        # Řetěz: blok do záznamu a plný upstream do evidence. Pořadí je dané —
+        # `write_context` na oba odkazuje, takže musí existovat dřív než ono.
+        upstream_payload = None
+        if chain:
+            rec = run.record()
+            rec["chain"] = chain
+            run.save_record(rec)
+            if chain["upstream"]:
+                upstream_payload = chains.write_upstream(project, run, chain["upstream"])
+                out.done(f"upstream: {upstream_payload['counts']['findings']} findings "
+                         f"from {len(chain['upstream'])} run(s), "
+                         f"{upstream_payload['counts']['undecided']} undecided")
+
         runs.write_context(run, cfg, target, wt, files, skipped,
                            brief=brief, worktree_owned=wt_owned, hire=hire,
                            pack_name=pack.name,
-                           provider=getattr(args, "provider", None))
+                           provider=getattr(args, "provider", None), chain=chain)
 
         rec = run.record()
         # Paměť není grafový signál. `graph` v run.v1 má zavřený seznam klíčů a
@@ -858,6 +872,16 @@ def cmd_run(args) -> int:
         f"RUN_DIR={posix(run.dir)} — start from its context.json. "
         f"The required output is RUN_DIR/findings.json following finding.v1."
     )
+    if chain:
+        # Vykopnutí člena řetězu vlastní jádro — šablona je testovatelná a celá
+        # skončí v `prompt.txt`, takže se dá číst, proč člen svou roli pochopil
+        # nebo nepochopil. Obsahové věty v ní ale psal upstream agent.
+        member = chains.Member(pack.name, pack.name, hire)
+        prompt = chains.step_prompt(
+            prompt, member, chain["position"], chain["of"],
+            (upstream_payload or {}).get("runs") or [],
+            (upstream_payload or {}).get("counts") or {"findings": 0, "undecided": 0},
+            chain.get("handoff"))
     if brief["focus"]:
         # Zadání jde i do spouštěcího příkazu, ne jen do context.json: uživatel
         # má na obrazovce vidět, s čím agenta pouští.
@@ -925,6 +949,88 @@ def cmd_run(args) -> int:
         print(f"  {out.dim('Cleanup:')}           agency cleanup --run {run.id[:8]}")
     print()
     return 0
+
+
+def cmd_chain(args) -> int:
+    """`agency chain legal po` — specialisté za sebou, s předáním mezi nimi.
+
+    Orchestrace je smyčka nad `cmd_run`, ne druhá cesta ke spuštění běhu. Je to
+    záměr: kdyby chain běh připravoval sám, měl by projekt dvě místa, kde vzniká
+    worktree, evidence a run record — a to druhé by tiše zastarávalo. Chain umí
+    jen tři věci navíc, které samostatný běh nemá: složit členy, předat výstup
+    dál a zastavit se, když někdo neuspěje.
+    """
+    project = _project(args)
+    members = chains.resolve(project, args.members)
+
+    if len(members) < 2:
+        raise SystemExit("A chain needs at least two members — for one, `agency run` is the command.")
+
+    if mixed := chains.one_provider(members):
+        raise SystemExit(mixed)
+
+    for m in members:
+        # Radši teď než po prvním doběhnutém běhu: uživatel, kterému chain spadne
+        # na překlepu ve třetím jméně, už zaplatil dva běhy.
+        packs.load(m.pack)
+
+    chain_id = ulid()
+    out.say(f"\n  {out.bold('chain')}  "
+            f"{out.dim(' → '.join(m.label for m in members))}  ·  {chain_id[:10]}\n")
+
+    done: list[str] = []
+    for position, member in enumerate(members, start=1):
+        # Přepínače chainu platí pro každý krok stejně; `members` a `fn` jsou
+        # věci orchestrátoru a členu by nedávaly smysl. `--json` je vypnuté
+        # natvrdo: `--wait` píše do téhož stdout jako agent.
+        carried = {k: v for k, v in vars(args).items() if k not in ("members", "fn")}
+        step = argparse.Namespace(**{**carried, "pack": member.ref,
+                                     "wait": True, "launch": False, "json": False})
+        block = chains.block(chain_id, position, len(members), list(done))
+
+        if done:
+            # Vzkaz předchůdce jde do promptu jako jeho slova, ne jako převyprávění.
+            previous = chains.find_member(project, chain_id, position - 1)
+            text, source = chains.handoff_text(previous) if previous else (None, None)
+            block["handoff"] = text
+            if source:
+                out.say(f"  {out.dim('handing over ' + source + ' from ' + members[position - 2].label)}")
+
+        out.say(f"\n  {out.bold(f'step {position}/{len(members)}')}  {member.label}")
+        code = cmd_run(step, chain=block)
+
+        run = chains.find_member(project, chain_id, position)
+        if run:
+            done.append(run.id)
+
+        if code != 0:
+            # Pokračovat potichu by znamenalo, že další člen soudí nálezy, které
+            # nevznikly. Co doběhlo, je zapsané a dokončit to jde ručně.
+            out.say()
+            out.fail(f"the chain stops at step {position}/{len(members)} ({member.label})")
+            _chain_report(chain_id, members, done, position)
+            return code
+
+    out.say()
+    out.done(f"chain finished — {len(done)} runs  {out.dim(chain_id[:10])}")
+    _chain_report(chain_id, members, done, len(members))
+    return 0
+
+
+def _chain_report(chain_id: str, members, done: list[str], reached: int) -> None:
+    """Co doběhlo a čím to stojí. Tiskne se po dokončení i po zastavení —
+    přerušený řetěz je pořád výsledek, jen kratší."""
+    out.say()
+    for i, member in enumerate(members, start=1):
+        run_id = done[i - 1] if i <= len(done) else None
+        mark = "·" if run_id else " "
+        state = out.dim(run_id[:10]) if run_id else out.dim("not started")
+        if i == reached and run_id and reached < len(members):
+            state += out.dim("  (stopped here)")
+        out.say(f"  {mark} {i}/{len(members)}  {member.label:<24} {state}")
+    out.say()
+    if done:
+        out.say(f"  {out.dim('Triage queue:')}  agency triage --list")
 
 
 def _duration(seconds: float) -> str:
@@ -1697,6 +1803,9 @@ def cmd_status(args) -> int:
             "targetLabel": _target_label(rec.get("target") or {}),
             "brief": (rec.get("brief") or {}).get("focus")
                      or (rec.get("brief") or {}).get("standing"),
+            # Členství v řetězu. Klient tím seskupuje běhy, které patřily
+            # k sobě — bez toho vypadá tým jako několik nesouvisejících běhů.
+            "chain": rec.get("chain"),
             "findings": len(fs), "undecided": sum(1 for f in fs if f.get("id") not in dec),
         })
 
@@ -1714,8 +1823,11 @@ def cmd_status(args) -> int:
                     "abandoned": out.dim("×"), "failed": out.err("✗")}.get(
                         d["status"], out.dim("·"))
             pr = d["targetLabel"] or "—"
+            c = d.get("chain") or {}
+            tag = (out.dim(f"chain {c['id'][:6]} {c['position']}/{c['of']}") if c else "")
             print(f"  {icon} {d['id'][:10]} {pr[:18]:18} {d['findings']:3} findings "
-                  f"{out.dim(f'{d['undecided']} undecided'):24} {out.dim(d['startedAt'] or '')}")
+                  f"{out.dim(f'{d['undecided']} undecided'):24} {out.dim(d['startedAt'] or '')}"
+                  f"{'  ' + tag if tag else ''}")
         open_runs = [d for d in data if d["status"] == "running"]
         if open_runs:
             print(f"\n  {out.warn('still open:')} "
@@ -2064,6 +2176,22 @@ def build_parser() -> argparse.ArgumentParser:
                    help="run this one on a different runner — `agency providers` lists them")
     s.add_argument("--force", action="store_true", help="a draft or an already reviewed commit too")
     s.set_defaults(fn=cmd_run)
+
+    s = sub.add_parser("chain", parents=[common],
+                       help="run specialists one after another, each judging what the previous one found")
+    s.add_argument("members", metavar="who", nargs="+",
+                   help="two or more hire ids or pack names, in the order they should run")
+    s.add_argument("--pr", type=int, help="PR number (default: the PR of the current branch)")
+    s.add_argument("--latest-merged", action="store_true",
+                   help="the last merged PR — retrospective audit")
+    s.add_argument("--prompt", "-p",
+                   help="what the chain should focus on — every member gets it")
+    s.add_argument("--scenario", help="a named brief from the pack configuration (brief.scenarios)")
+    s.add_argument("--since", help="base ref for a run over the project (default: the default branch)")
+    s.add_argument("--model", help="model for every step (overrides the hire and the configuration)")
+    s.add_argument("--provider", help="runner for every step — a chain runs on one provider")
+    s.add_argument("--force", action="store_true", help="a draft or an already reviewed commit too")
+    s.set_defaults(fn=cmd_chain)
 
     s = sub.add_parser("validate", parents=[common], help="check findings.json against the contract and the anchors against the code")
     s.add_argument("--run", help="run id (default: the latest)")

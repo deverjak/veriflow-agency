@@ -160,6 +160,10 @@
         "summary": {
           "type": "boolean",
           "description": "RUN_DIR/summary.md — krátké shrnutí vlastními slovy specialisty: co zkoumal, co našel, co rozhodl, co doporučuje dál."
+        },
+        "handoff": {
+          "type": "boolean",
+          "description": "RUN_DIR/handoff.md — adresná zpráva dalšímu členovi řetězu: co jsem nedořešil, čemu nevěřit, co stojí na domněnce, kterou má potvrdit on. Na rozdíl od summary.md, které je „co jsem udělal“ pro člověka a paměť, je tohle „co potřebuješ ty“. Když chybí, předá se summary.md."
         }
       }
     },
@@ -455,6 +459,42 @@
         "null"
       ],
       "description": "POSIX path of the throwaway worktree the run holds while it is running. It is recorded so a parallel run by another specialist can tell an occupied directory from an abandoned one instead of force-deleting a review in progress."
+    },
+    "chain": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "description": "Členství běhu v řetězu specialistů (`agency chain`). Chybí u samostatného běhu. Bez tohoto bloku by se z běhů nedalo zpětně poznat, které rozhodnutí padlo nad cizím nálezem v rámci předání a které samostatně — a to je celý rozdíl mezi týmem a několika běhy za sebou.",
+      "required": [
+        "id",
+        "position",
+        "of"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "ULID řetězu. Společný všem jeho běhům."
+        },
+        "position": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Pořadí člena v řetězu, od jedničky."
+        },
+        "of": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Kolik členů řetěz má. Zapisuje se, aby šlo poznat přerušený řetěz od dokončeného bez čtení ostatních běhů."
+        },
+        "upstream": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Id běhů, jejichž výstup dostal tenhle člen na vstupu — v pořadí, v jakém běžely. Prázdné u prvního člena."
+        }
+      }
     }
   }
 }

@@ -333,12 +333,103 @@ function launch(data, log) {
   return data;
 }
 
+// ---------------------------------------------------------------- tým
+
+/**
+ * Řetěz specialistů. Na rozdíl od jednoho běhu tady extension nedostane hotové
+ * `launch` argv: `agency chain` si běhy pouští sám (`--wait`), a proto se
+ * s `--json` vylučuje — agent píše do téhož stdout. Do terminálu tedy jde
+ * `agency chain …` a orchestruje pořád CLI. Hranice „jádro rozhoduje, klient
+ * zobrazuje" se tím nemění, jen se posouvá o úroveň výš.
+ */
+async function pickAndChain(cwd, log) {
+  const candidates = (state.snapshot.hires || []).filter((h) => {
+    const p = packInfo(h.pack);
+    return p && p.installed;
+  });
+  if (candidates.length < 2) {
+    vscode.window.showWarningMessage(
+      'Agency: a team needs at least two specialists. Hire another one first.');
+    return null;
+  }
+
+  // Pořadí je celý smysl řetězu, a QuickPick ho nezaručuje — vybírá se proto
+  // po jednom. Otravnější o dvě kliknutí, zato je vidět, kdo soudí koho.
+  const order = [];
+  while (true) {
+    const left = candidates.filter((h) => !order.includes(h));
+    if (!left.length) break;
+    const step = order.length + 1;
+    const picked = await vscode.window.showQuickPick(
+      [
+        ...left.map((h) => ({
+          label: `${h.available ? '$(person)' : '$(warning)'} ${h.display}`,
+          description: h.available ? h.id : `${h.id} — \`${h.bin}\` is not on PATH`,
+          detail: [h.provider, h.model].filter(Boolean).join(' · '),
+          hire: h,
+        })),
+        ...(order.length >= 2
+          ? [{ label: '', kind: vscode.QuickPickItemKind.Separator },
+             { label: '$(check) Run the team', done: true }]
+          : []),
+      ],
+      {
+        title: `Team — step ${step}`,
+        placeHolder: order.length
+          ? `After ${order.map((h) => h.display).join(' → ')}. Each member judges what the previous one found.`
+          : 'Who goes first? Whatever they find is handed to the next one.',
+        matchOnDescription: true,
+      });
+    if (!picked) return null;                     // Esc = odchod
+    if (picked.done) break;
+    order.push(picked.hire);
+  }
+
+  if (order.length < 2) return null;
+
+  const providers = new Set(order.map((h) => h.provider));
+  if (providers.size > 1) {
+    // Táž validace jako v jádře. Zopakovaná tady jen proto, aby se uživatel
+    // dozvěděl teď a ne až z terminálu — jádro zůstává tím, kdo rozhoduje.
+    vscode.window.showErrorMessage(
+      `Agency: a chain runs on one provider at a time, and this team mixes `
+      + `${[...providers].join(' and ')}.`);
+    return null;
+  }
+
+  const blocked = order.filter((h) => !h.available);
+  if (blocked.length) {
+    vscode.window.showErrorMessage(
+      `Agency: ${blocked.map((h) => h.bin).join(', ')} is not on PATH — `
+      + `${blocked.map((h) => h.id).join(', ')} cannot run.`);
+    return null;
+  }
+
+  const brief = await askBrief(order[0].pack);
+  if (brief === null) return null;
+
+  const args = ['chain', ...order.map((h) => h.id)];
+  if (brief.scenario) args.push('--scenario', brief.scenario);
+  else if (brief.prompt) args.push('--prompt', brief.prompt);
+
+  const name = `Agency · team · ${order.map((h) => h.label || h.id).join(' → ')}`;
+  const term = vscode.window.createTerminal({ name, cwd });
+  term.show(true);
+  term.sendText([cli.bin(), ...args].map(quote).join(' '));
+
+  if (log) log.appendLine(`[chain] ${args.join(' ')}`);
+  vscode.window.showInformationMessage(
+    `Agency: the team is running in the terminal — ${order.length} specialists, one after another. `
+    + 'Each one waits for the previous to finish.');
+  return order;
+}
+
 function quote(arg) {
   const s = String(arg);
   return /[\s"']/.test(s) ? JSON.stringify(s) : s;
 }
 
 module.exports = {
-  pickAndRun, runOverWorkspace, askBrief, runEach, pickHires,
+  pickAndRun, pickAndChain, runOverWorkspace, askBrief, runEach, pickHires,
   workspacePacks, workspaceHires, reviewHires, items,
 };

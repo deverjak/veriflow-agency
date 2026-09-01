@@ -294,6 +294,61 @@ If this call is wrong, say so here — @kuba has the last word.
 `policy.escalate` je součást podpisu schválně: agent, který řekne ne a nenapíše,
 kdo ho může přebít, není specialista, ale překážka.
 
+## Tým — specialisté za sebou
+
+Právník najde, že chybí reconsent flow. Je to nález, nebo ne? Odpověď nezná
+právník — zná ji product owner, protože ví, že tenhle web nemá účty a letos
+mít nebude. Dokud běhy stojí vedle sebe, přijde ta otázka na člověka. V řetězu
+přijde na product ownera.
+
+```powershell
+agency chain legal po --prompt "VOP pro nový web"
+agency chain legal@claude po@claude --pr 12
+```
+
+Každý člen dostane výstup předchozích v `evidence/upstream.json` — **plné
+nálezy s rozhodnutími, bez stropu**. Strop tři sta patří pozadí; zadání se
+ořezávat nesmí, jinak řetěz tiše vyrábí nálezy, o kterých nikdo nerozhodl.
+
+Prompt kroku skládá jádro z deterministické šablony a celý skončí v `prompt.txt`,
+takže je vidět, čím byl který člen vykopnutý:
+
+```
+… You are step 2/2 of a chain (po@claude).
+Upstream: legal@claude — 7 findings (5 undecided), full data in evidence/upstream.json.
+First judge those findings — `agency triage accept|reject|defer <id> --by …` —
+and only then run your own dimensions.
+Handoff from legal@claude: <prvních 40 řádků handoff.md předchůdce>
+```
+
+Věty v šabloně vlastní jádro, obsah v nich napsal upstream agent do
+`handoff.md`. **Žádný LLM mezi běhy** — chain je deterministický seznam,
+pořadí volí člověk a úsudek patří dovnitř běhů, kde je zaznamenaný a zaplacený
+jednou.
+
+`summary.md` je „co jsem udělal" pro člověka a pro paměť projektu. `handoff.md`
+je „co potřebuješ ty" pro jednoho jmenovaného kolegu: co jsem nedořešil, co
+stojí na domněnce o produktu, čemu bych sám nevěřil.
+
+Čtyři vlastnosti, které z toho dělají tým a ne skript:
+
+- **Řetěz je v datech.** Každý `run.json` nese `chain: {id, position, of, upstream}`.
+  Bez toho nejde zpětně poznat, které rozhodnutí padlo nad cizím nálezem
+  v rámci předání a které samostatně.
+- **Jeden tým = jeden provider** (v1). Jeden binár, jeden credential, jedna sada
+  quirků na terminálu. Handoff je souborový, takže mix providerů není
+  architektonická překážka — je to změna jedné validace, až se pipeline osvědčí.
+- **Odmítnutý nebo spadlý krok řetěz zastaví.** Pokračovat potichu by znamenalo,
+  že product owner soudí nálezy, které nevznikly. Co doběhlo, je zapsané
+  a vytiskne se, kde se dá navázat ručně.
+- **Neúplný řetěz je poznat.** `of` je v záznamu právě proto: zastavený tým se
+  v přehledu nesmí tvářit jako dokončený, jen kratší.
+
+V VS Code je to **Run a team…** — výběr po jednom, protože pořadí je celý smysl
+věci a QuickPick ho neumí zaručit. Běhy jednoho týmu drží v přehledu pohromadě
+pod jedním uzlem. Orchestruje pořád CLI: extension pošle do terminálu
+`agency chain …` a dál se dívá.
+
 ## Paměť projektu jako markdown
 
 `.agency/knowledge/` je commitovaná paměť projektu. Čte ji každý provider,
