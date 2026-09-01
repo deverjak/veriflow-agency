@@ -12,8 +12,8 @@ import os
 import sys
 from pathlib import Path
 
-from . import (anchor, config, dedup, export, hires, ingest, metrics, packs, proc,
-               providers, registry, runs)
+from . import (anchor, backlog, config, dedup, export, hires, ingest, metrics, packs,
+               proc, providers, registry, runs)
 from .util import bundled, out, posix, read_json, strip_comments, ulid, write_json
 
 # ---------------------------------------------------------------- pomůcky
@@ -127,6 +127,20 @@ def cmd_packs(args) -> int:
                     "configFile": pw.get("configFile"),
                     "specTarget": pw.get("specTarget"),
                     "scaffold": pw.get("scaffold"),
+                }
+            board = cfg.get("board")
+            if isinstance(board, dict):
+                # The panel needs it for the same reason it needs `playwright`:
+                # a specialist that writes outside the repository has to say so
+                # on its own row, not in a configuration file nobody opens.
+                w = cfg.get("writes") or {}
+                entry["backlog"] = {
+                    "repo": (cfg.get("repo") or {}).get("slug"),
+                    "projectNumber": board.get("projectNumber"),
+                    "roadmap": (cfg.get("roadmap") or {}).get("file"),
+                    "cycle": (cfg.get("roadmap") or {}).get("cycle"),
+                    "writes": [k for k, v in w.items() if v is True and k != "dryRun"],
+                    "dryRun": bool(w.get("dryRun")),
                 }
             b = cfg.get("brief") or {}
             entry["brief"] = {
@@ -433,6 +447,40 @@ def cmd_doctor(args) -> int:
             for name, ok, detail, is_fatal in _playwright_checks(project, cfg["playwright"]):
                 check(f"pack {p.name} {name}", ok, detail, fatal=is_fatal)
 
+        # Cesty, na které konfigurace ukazuje. Vyžadované pole může být
+        # vyplněné a přesto ukazovat na soubor, který v projektu není — a to
+        # se pozná až uprostřed běhu, kdy už agent přemýšlí nad prázdnem.
+        for dotted in ((p.manifest.get("config") or {}).get("files") or []):
+            rel = _dig(cfg, dotted)
+            if not rel:
+                continue  # už to hlásí kontrola „missing required"
+            here = (project.root / str(rel)).is_file()
+            check(f"pack {p.name} {dotted}", here,
+                  str(rel) if here else
+                  f"{rel} is not in the project — point `{dotted}` at a file that is")
+
+        # Pack, který píše na cizí plochu, potřebuje na to oprávnění. Chybějící
+        # scope se projeví až prvním zápisem — tedy potom, co agent hodinu
+        # přemýšlel, co napsat.
+        if (cfg.get("board") or {}).get("projectNumber"):
+            scopes = proc.gh_scopes()
+            can = "project" in scopes
+            detail = (f"board #{cfg['board']['projectNumber']} · scopes: "
+                      + (", ".join(scopes) or "unknown")) if can else (
+                "the gh token has no `project` scope — `gh auth refresh -s project`")
+            check(f"pack {p.name} board", can, detail)
+
+        # Co ten pack smí udělat ven. Není to porucha, je to věc, kterou má
+        # člověk vidět dřív, než ho překvapí ticket v cizí schránce.
+        writes = cfg.get("writes")
+        if isinstance(writes, dict):
+            on = [k for k, v in writes.items() if v is True and k != "dryRun"]
+            check(f"pack {p.name} writes",
+                  True,
+                  ("rehearsal only — writes.dryRun is on" if writes.get("dryRun")
+                   else ("may " + ", ".join(on) if on else "reads only")),
+                  fatal=False)
+
         # Zadání je u packu, který ho vyžaduje, taky předpoklad — jen se nedá
         # nainstalovat, musí ho napsat člověk.
         if p.run_policy["prompt"]["required"]:
@@ -694,6 +742,20 @@ def cmd_run(args) -> int:
             out.step("collecting signal from the project")
             stats = runs.collect_workspace_evidence(project, run, target, files)
             out.done(f"evidence/ filled  {out.dim(str(stats))}")
+
+        if policy.get("backlog"):
+            # Deterministic, so it belongs here and not to the session: the
+            # queue and the roadmap wording get frozen at the moment of the
+            # decision, which is the only way a cut stays reviewable later.
+            out.step("reading the product queue and the roadmap")
+            queue = runs.collect_backlog_evidence(project, run, cfg)
+            stats.update(queue)
+            if queue.get("backlogError"):
+                out.fail(f"the queue could not be read — {queue['backlogError']}")
+            else:
+                out.done(f"{queue.get('openIssues', 0)} open issues · "
+                         f"{queue.get('draftItems', 0)} drafts · "
+                         f"{queue.get('roadmapFiles', 0)} roadmap files")
 
         runs.write_context(run, cfg, target, wt, files, skipped,
                            brief=brief, worktree_owned=wt_owned, hire=hire,
@@ -1424,6 +1486,241 @@ def cmd_status(args) -> int:
     return _emit(args, data, human)
 
 
+# ---------------------------------------------------------------- backlog
+
+def _backlog_ctx(args) -> tuple[config.Project, dict, "backlog.Board", runs.Run | None, dict | None]:
+    """Everything a backlog command needs, resolved once.
+
+    The run is optional on purpose. `agency backlog list` has to work before
+    anything has been run, and a write made outside a run is still a legitimate
+    write — it just signs without a run id and leaves no ledger entry.
+    """
+    project = _project(args)
+    pack_name = getattr(args, "pack", None) or "po"
+    cfg = _pack_cfg(project, pack_name)
+
+    run = None
+    if getattr(args, "run", None):
+        run = runs.find_run(project, args.run)
+        if run is None:
+            raise SystemExit(f"Run “{args.run}” is not in this project.")
+    else:
+        # The run still in flight wins over the last finished one: a write made
+        # while a session is open belongs to that session, and its ledger is
+        # what the session will report on at the end.
+        mine = [r for r in runs.load_runs(project)
+                if str(r.record().get("pack", "")).split("@")[0] == pack_name]
+        run = next((r for r in mine if r.record().get("status") == "running"),
+                   mine[0] if mine else None)
+
+    hire = (run.record().get("agent") if run else None) or None
+    try:
+        board = backlog.Board.of(project, cfg)
+    except backlog.BacklogError as e:
+        raise SystemExit(str(e))
+    return project, cfg, board, run, hire
+
+
+def _body_of(args, text_attr: str, file_attr: str, what: str) -> str:
+    """Body from a flag or from a file.
+
+    The file is not a convenience. A ticket body is markdown with newlines and
+    quotes, and passing it through a Windows command line is how it arrives
+    mangled — the agent writes it into the run directory and points at it.
+    """
+    path = getattr(args, file_attr, None)
+    if path:
+        p = Path(path)
+        if not p.is_file():
+            raise SystemExit(f"{what} file “{path}” does not exist.")
+        return p.read_text(encoding="utf-8")
+    text = getattr(args, text_attr, None)
+    if not text:
+        raise SystemExit(f"{what} is missing — pass --{text_attr.replace('_', '-')} "
+                         f"or --{file_attr.replace('_', '-')}.")
+    return text
+
+
+def _backlog_emit(args, data: dict, headline: str) -> int:
+    def human():
+        icon = {"created": out.ok("+"), "promoted": out.ok("↑"),
+                "commented": out.ok("»"), "exists": out.dim("="),
+                "moved": out.ok("→"), "labelled": out.ok("#")}
+        print(f"\n  {icon.get(data.get('action'), out.dim('·'))} {headline}")
+        for key in ("url", "item", "number", "why", "boardError"):
+            if data.get(key):
+                print(f"    {out.dim(f'{key}: {data[key]}')}")
+        for extra in ("status", "labels"):
+            sub = data.get(extra)
+            if isinstance(sub, dict) and sub.get("action") not in (None, "skipped"):
+                what = sub.get("to") or ", ".join(sub.get("labels") or []) or ""
+                print(f"    {out.dim(extra + ': ' + str(sub.get('action')) + ' ' + what)}")
+        if data.get("dryRun"):
+            print(f"    {out.warn('rehearsal — nothing was posted')}")
+        print()
+
+    return _emit(args, data, human)
+
+
+def cmd_backlog(args) -> int:
+    """The product queue: read it, write to it, and record what was written.
+
+    An agent calls this the same way a human does — `agency triage` set that
+    precedent and the reason is the same one. If posting a ticket were
+    something the pack did by shelling out to `gh` itself, the signature, the
+    idempotence marker and the write gate would live in a prompt, which is the
+    one place none of them can be enforced.
+    """
+    needs_ref = {"promote", "comment", "decide"}
+    if args.action in needs_ref and not args.ref:
+        raise SystemExit(f"`agency backlog {args.action}` needs a ticket — an issue "
+                         "number or a board item id.")
+    if args.action in {"issue", "draft"} and not args.title:
+        raise SystemExit(f"`agency backlog {args.action}` needs --title.")
+    if args.action == "decide":
+        if not args.decision:
+            raise SystemExit("Decide what? `agency backlog decide <ref> "
+                             + "|".join(backlog.DECISIONS) + ' --because "…"')
+        if not (args.because or "").strip():
+            # A decision with no reason is the thing this pack exists to stop
+            # producing. It costs one sentence and it is the whole value.
+            raise SystemExit("A decision needs --because. It is posted on the ticket, "
+                             "and a cut nobody can read is how a backlog loses trust.")
+
+    project, cfg, board, run, hire = _backlog_ctx(args)
+    dry = bool(getattr(args, "dry_run", False)) or backlog.is_rehearsal(cfg)
+
+    def refuse(message: str) -> int:
+        if getattr(args, "json", False):
+            print(json.dumps({"ok": False, "reason": "write-gate", "message": message},
+                             ensure_ascii=False, indent=2))
+        else:
+            print(f"\n  {out.warn('!')} {message}\n")
+        return 1
+
+    def gate(action: str) -> str | None:
+        ok, why = backlog.allowed(cfg, action)
+        return None if ok else why
+
+    try:
+        # ------------------------------------------------------------ list
+        if args.action == "list":
+            snap = backlog.snapshot(board, cfg, state=args.state)
+            rows = snap["items"]
+            if args.mine:
+                rows = [r for r in rows if r.get("agencyKey")]
+
+            def human():
+                counts = f"{snap['issues']} issues · {snap['drafts']} drafts"
+                print(f"\n  {out.bold(board.slug)}"
+                      + (f"  {out.dim('board #' + str(board.project_number))}"
+                         if board.has_project else "")
+                      + f"  {out.dim(counts)}\n")
+                if not rows:
+                    print(f"  {out.dim('Nothing on the queue.')}\n")
+                    return
+                for r in rows:
+                    tag = out.dim("draft") if r["kind"] == "draft" else out.ok(
+                        f"#{r.get('number')}")
+                    mine = out.dim(" · agency") if r.get("agencyKey") else ""
+                    print(f"  {tag:16} {(r.get('title') or '')[:60]:62}"
+                          f"{out.dim(','.join(r.get('labels') or []))}{mine}")
+                print()
+
+            return _emit(args, {"board": snap["board"], "items": rows,
+                                "issues": snap["issues"], "drafts": snap["drafts"]}, human)
+
+        # ---------------------------------------------------------- issue
+        if args.action == "issue":
+            if (why := gate("issue")):
+                return refuse(why)
+            body = _body_of(args, "body", "body_file", "The issue body")
+            key = args.key or backlog.key_for(args.title)
+            res = backlog.create_issue(board, cfg, args.title, body, key,
+                                       labels=args.label, run=run, hire=hire,
+                                       dry_run=dry)
+            res["dryRun"] = dry
+            backlog.append(run, {"kind": "issue", **res})
+            return _backlog_emit(args, res, f"{res['action']}  {args.title}")
+
+        # ---------------------------------------------------------- draft
+        if args.action == "draft":
+            if (why := gate("draft")):
+                return refuse(why)
+            body = _body_of(args, "body", "body_file", "The draft body")
+            key = args.key or backlog.key_for(args.title)
+            res = backlog.create_draft(board, cfg, args.title, body, key,
+                                       run=run, hire=hire, dry_run=dry)
+            res["dryRun"] = dry
+            backlog.append(run, {"kind": "draft", **res})
+            return _backlog_emit(args, res, f"{res['action']}  {args.title}")
+
+        # -------------------------------------------------------- promote
+        if args.action == "promote":
+            if (why := gate("promote")):
+                return refuse(why)
+            ref = backlog.resolve_ref(board, args.ref)
+            res = backlog.promote(board, cfg, ref, labels=args.label, dry_run=dry)
+            res["dryRun"] = dry
+            backlog.append(run, {"kind": "promote", **res})
+            return _backlog_emit(args, res,
+                                 f"{res['action']}  {ref.get('title') or args.ref}")
+
+        # -------------------------------------------------------- comment
+        if args.action == "comment":
+            if (why := gate("comment")):
+                return refuse(why)
+            text = _body_of(args, "text", "text_file", "The comment")
+            ref = backlog.resolve_ref(board, args.ref)
+            key = args.key or backlog.key_for_text(text)
+            res = backlog.comment(board, cfg, ref, text, key, run=run, hire=hire,
+                                  dry_run=dry)
+            res["dryRun"] = dry
+            backlog.append(run, {"kind": "comment", "ref": args.ref, **res})
+            return _backlog_emit(args, res,
+                                 f"{res['action']}  {ref.get('title') or args.ref}")
+
+        # --------------------------------------------------------- decide
+        if args.action == "decide":
+            ref = backlog.resolve_ref(board, args.ref)
+            body = backlog.decision_body(cfg, args.decision, args.because,
+                                         commitment=args.commitment, revisit=args.revisit)
+            key = f"decision-{args.decision}-{backlog.key_for(ref.get('title') or args.ref)}"
+
+            res: dict = {"action": "decided", "decision": args.decision,
+                         "ref": args.ref, "number": ref.get("number"),
+                         "item": ref.get("item"), "title": ref.get("title"),
+                         "dryRun": dry}
+
+            # The comment first: a decision that is not written down did not
+            # happen, and a column moved without a reason is the thing that
+            # makes people stop trusting a board.
+            if (cfg.get("policy") or {}).get("cutIsAComment", True):
+                if (why := gate("comment")):
+                    return refuse(why)
+                res["comment"] = backlog.comment(board, cfg, ref, body, key,
+                                                 run=run, hire=hire, dry_run=dry)
+                res["action"] = res["comment"].get("action", "decided")
+
+            if not backlog.allowed(cfg, "status")[0]:
+                res["status"] = {"action": "skipped", "why": "`writes.labels` is off"}
+                res["labels"] = res["status"]
+            else:
+                res["status"] = backlog.set_status(board, cfg, ref, args.decision, dry_run=dry)
+                res["labels"] = backlog.set_labels(board, cfg, ref, args.decision, dry_run=dry)
+
+            backlog.append(run, {"kind": "decide", "key": key,
+                                 "because": args.because,
+                                 "commitment": args.commitment, **res})
+            return _backlog_emit(args, res,
+                                 f"{args.decision}  {ref.get('title') or args.ref}")
+
+    except backlog.BacklogError as e:
+        raise SystemExit(str(e))
+
+    raise SystemExit(f"Unknown backlog action “{args.action}”.")
+
+
 # ---------------------------------------------------------------- parser
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1549,6 +1846,41 @@ def build_parser() -> argparse.ArgumentParser:
                    help="undecided findings too")
     s.add_argument("--dry-run", action="store_true", help="only show what would be sent")
     s.set_defaults(fn=cmd_export)
+
+    # The product queue. Every write is signed, marked and gated by `writes.*`
+    # in the pack configuration — which is why the pack calls this instead of
+    # calling `gh` itself. An agent is a first-class client here, exactly as it
+    # is for `agency triage`.
+    s = sub.add_parser("backlog", parents=[common],
+                       help="the product queue — issues and board drafts, written signed "
+                            "and only once")
+    s.add_argument("action", choices=["list", "issue", "draft", "promote", "comment", "decide"])
+    s.add_argument("ref", nargs="?",
+                   help="issue number, issue URL or a board item id (PVTI_…) — for "
+                        "promote, comment and decide")
+    s.add_argument("decision", nargs="?", choices=list(backlog.DECISIONS),
+                   help="for `decide`: now, next or not-now")
+    s.add_argument("--pack", default="po", help="whose configuration decides (default: po)")
+    s.add_argument("--run", help="run the write belongs to (default: the latest run of that pack)")
+    s.add_argument("--title", help="title of the issue or draft")
+    s.add_argument("--body", help="body — markdown")
+    s.add_argument("--body-file", help="file holding the body; use this for anything "
+                                       "with newlines")
+    s.add_argument("--text", help="comment text")
+    s.add_argument("--text-file", help="file holding the comment text")
+    s.add_argument("--because", help="for `decide`: why. It is posted on the ticket.")
+    s.add_argument("--commitment",
+                   help="for `decide`: the roadmap line this was measured against")
+    s.add_argument("--revisit", help="for `decide`: when it will be looked at again")
+    s.add_argument("--label", action="append", help="issue label (repeatable)")
+    s.add_argument("--key", help="idempotence key (default: derived from the title) — "
+                                "the same key is never written twice")
+    s.add_argument("--mine", action="store_true",
+                   help="for `list`: only what this pack has written")
+    s.add_argument("--state", choices=["open", "closed", "all"], default="open")
+    s.add_argument("--dry-run", action="store_true",
+                   help="rehearse it: show exactly what would be posted, post nothing")
+    s.set_defaults(fn=cmd_backlog)
 
     s = sub.add_parser("projects", parents=[common], help="projects where Agency is doing something")
     s.set_defaults(fn=cmd_projects)

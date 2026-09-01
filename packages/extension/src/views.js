@@ -264,6 +264,45 @@ function packChildren(p, { shared = false } = {}) {
     }));
   }
 
+  if (p.installed && p.backlog) {
+    // A specialist that writes OUTSIDE the repository has to say so on its own
+    // row. Which switches are open is the difference between a note on a board
+    // and a ticket in somebody's inbox, and nobody goes looking for that in a
+    // JSON file.
+    const bl = p.backlog;
+    const writes = bl.writes || [];
+    const may = bl.dryRun ? 'rehearsal only'
+      : (writes.length ? `may ${writes.join(', ')}` : 'reads only');
+    const where = `${bl.repo || 'no repo'}`
+      + (bl.projectNumber ? ` · board #${bl.projectNumber}` : '');
+    children.push(node('Backlog', {
+      description: `${where} · ${may}`,
+      iconId: bl.dryRun ? 'beaker' : 'checklist',
+      color: writes.length && !bl.dryRun ? 'charts.green' : undefined,
+      command: 'agency.pack.openConfig',
+      args: [p.name],
+      tooltip: 'Where this specialist writes, and what it may write there. Everything it '
+        + 'posts is signed as an agent and carries a marker, so a second run finds what '
+        + 'the first one wrote instead of writing it again.\n\n'
+        + (bl.dryRun
+          ? '**Rehearsal** — every write is composed and shown, and nothing reaches GitHub. '
+          + 'That is how a fresh installation should run for the first few days.'
+          : `Open: ${writes.length ? writes.join(', ') : 'nothing'}. Everything else is `
+          + 'off — an issue lands in someone’s inbox, so it is opened one switch at a time.')
+        + '\n\nClick to open the configuration.',
+    }));
+    if (bl.roadmap) {
+      children.push(node('Roadmap', {
+        description: bl.roadmap + (bl.cycle ? ` · ${bl.cycle}` : ''),
+        iconId: 'milestone',
+        tooltip: 'What every request is measured against. It is copied into the run '
+          + 'directory when a run starts, so a decision stays reviewable against the '
+          + 'wording it was actually made from.'
+          + (bl.cycle ? '' : '\n\nNo cycle is set — without one, “now” is an opinion.'),
+      }));
+    }
+  }
+
   if (p.installed && p.playwright) {
     const pw = p.playwright;
     children.push(node('Browser', {

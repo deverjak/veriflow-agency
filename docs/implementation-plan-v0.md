@@ -344,6 +344,7 @@ veriflow-agency/
     review-graph/
     qa/
     legal/
+    po/
   schemas/            run.v1.json
                       finding.v1.json
   docs/
@@ -636,6 +637,22 @@ Dvě věci, které z tohohle packu vypadly a jinde nejsou:
 - **Kalibrační brána.** `posture.requireCitation` zahazuje tvrzení bez konkrétního ustanovení dřív, než se boduje, a dimenze `over-compliance` hlásí opačný směr chyby — re-consent okno u změny, kterou kryje sjednaný mechanismus, souhlas u zpracování běžícího na smlouvě, archiv VOP kvůli pravidlu, které neexistuje. Obecné modely v tomhle oboru nechybují náhodně, chybují **systematicky nahoru**; pack bez téhle brány by tu chybu jen zopakoval s razítkem nástroje.
 
 **Co to vynutilo v jádře:** jednu řádku. `agency doctor` měl nápovědu „Ready. agency run review-graph --pr <n> · agency run qa --prompt …“ napevno; třetí specialista by po ní zůstal neviditelný přesně ve chvíli, kdy ho uživatel hledá. Teď se skládá z běhové politiky nainstalovaných packů (`_run_hint`). Nic jiného se sáhnout nemuselo — `finding.v1` unesl nález, jehož evidencí je citace paragrafu a jehož kotva vede do markdownu, a to je po QA druhé nezávislé potvrzení, že kontrakt není přišitý na kód.
+
+---
+
+### Product owner jako pack #4 *(1. 9.)*
+
+Čtvrtý tvar, a první, který **píše ven**. Recenzent, QA i právník čtou; nejhorší, co z nich vypadne, je nález, který nesedí. Product owner zakládá tickety, komentuje cizí vlákna a hýbe kartami na cizí nástěnce — tím se posouvá, co znamená chyba. Duplicitní ticket už není šum v run recordu, je to práce navíc pro člověka, který o něj nežádal.
+
+Tři věci, které z toho vypadly:
+
+- **Roadmapa je brána, ne příloha.** `roadmap.file` je povinná konfigurace a `agency doctor` vymáhá i to, že na tu cestu ukazuje existující soubor. Je to tentýž tvar jako aplikační brána u právníka a ze stejného důvodu: bez závazků nemá pack čím říct ne, a product owner, který neumí říct ne, je generátor ticketů. Roadmapa se navíc při každém běhu zamrazí do `evidence/roadmap/` — rozhodnutí je přezkoumatelné jen proti znění, ze kterého vzniklo.
+- **`agency backlog` místo `gh` v promptu.** Pack nesahá na GitHub sám, volá CLI — stejně jako agent volá `agency triage`, a ze stejného důvodu. Kdyby si volal `gh`, skončily by v promptu čtyři věci, které tam nejdou vymáhat: podpis (jeden tvar, z jednoho místa), marker `<!-- agency:po:<key> -->` (druhý běh pozná, co napsal první), brána `writes.*` a ledger v `.agency/runs/<id>/backlog.jsonl`. Pravda o rozhodnutí tak zůstává v repu; GitHub je sink, ne vlastník — táž věta jako u exportu.
+- **Zapisovací práva jsou vypnutá, dokud se nezapnou.** `comments` a `draftIssues` ano (vratné, nikoho neupozorní), `issues`, `promote`, `labels` a `close` ne. `writes.dryRun` složí každý zápis včetně podpisu, vypíše ho a nepošle nic — což je způsob, jak tenhle pack pustit poprvé.
+
+**Co to vynutilo v jádře:** jedno pole běhové politiky (`run.backlog`) a jednu kontrolu v doktoru. `backlog: true` znamená, že příprava načte frontu a zamrazí roadmapu — deterministický krok, takže patří jádru, ne prvním minutám session. Doktor umí navíc obecně ověřit cesty z `config.files` v manifestu (vyplněné pole může ukazovat na soubor, který tam není) a `project` scope u `gh` tokenu, protože chybějící scope se jinak projeví až prvním zápisem. `finding.v1` znovu nesáhnutý — nález kotvený na řádek roadmapy prošel toutéž bránou jako nález z grafu, což je po QA a právníkovi třetí nezávislé potvrzení, že kontrakt není přišitý na kód.
+
+**Co je vědomě coupled:** `board.*` je GitHub. Draft issue je pojem GitHub Projectu a `convertProjectV2DraftIssueItemToIssue` je mutace GitHub API. Jeden backend, který funguje, je lepší než driver navržený proti jedné implementaci — a hranice je vedená tak, že všechno nad ní (roadmapa, rozhodnutí, důvod) backend nezná. Druhý backend vymění `backlog.py` a nic jiného.
 
 ---
 

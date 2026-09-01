@@ -593,6 +593,69 @@ def collect_workspace_evidence(project: Project, run: Run, target: dict,
     return stats
 
 
+def collect_backlog_evidence(project: Project, run: Run, cfg: dict) -> dict:
+    """The product queue and the commitments it is measured against.
+
+    Two halves, and both have to be frozen at the moment of the decision. The
+    queue because a session that lists tickets itself burns its first minutes
+    on something deterministic. The roadmap because a decision is only
+    reviewable against the wording it was made from — a cut defended by "the
+    roadmap said so" is worth nothing once the roadmap has been edited twice.
+    """
+    from . import backlog  # local: backlog needs Run, and the cycle is real
+
+    ev = run.dir / "evidence"
+    ev.mkdir(parents=True, exist_ok=True)
+    stats: dict = {}
+
+    road = cfg.get("roadmap") or {}
+    wanted: list[str] = [road["file"]] if road.get("file") else []
+    wanted += [str(x) for x in (road.get("extra") or [])]
+    copied: list[str] = []
+    missing: list[str] = []
+    for rel in wanted:
+        for src in sorted(project.root.glob(rel)) or [project.root / rel]:
+            if not src.is_file():
+                missing.append(rel)
+                continue
+            dst = ev / "roadmap" / src.relative_to(project.root)
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+            copied.append(posix(src.relative_to(project.root)))
+    stats["roadmapFiles"] = len(copied)
+    if missing:
+        # Not fatal: the gate that a run needs a roadmap belongs to `doctor`,
+        # and a run that gets this far should say what it lacked rather than
+        # die on it.
+        stats["roadmapMissing"] = sorted(set(missing))
+
+    try:
+        board = backlog.Board.of(project, cfg)
+        snap = backlog.snapshot(board, cfg)
+    except backlog.BacklogError as e:
+        write_json(ev / "backlog.json", {"error": str(e), "items": []})
+        stats["backlogError"] = str(e)[:200]
+        return stats
+
+    write_json(ev / "backlog.json", snap)
+    stats["openIssues"] = snap.get("issues", 0)
+    stats["draftItems"] = snap.get("drafts", 0)
+
+    # What this pack has already written to the board, across every past run.
+    # Without it the second session re-proposes what the first one filed an
+    # hour ago, and the board grows twice as fast as the product.
+    written: list[dict] = []
+    for other in load_runs(project):
+        if other.id == run.id:
+            continue
+        for ev_row in backlog.ledger(other):
+            written.append({**ev_row, "runId": other.id})
+    if written:
+        write_json(ev / "backlog-written.json", written[-300:])
+        stats["alreadyWritten"] = len(written)
+    return stats
+
+
 def method_hint(pack, project: Project, carried: list[str], in_worktree: bool) -> str:
     """Jak se agent dostane k metodě packu.
 

@@ -33,6 +33,10 @@ RUN_DEFAULTS: dict = {
     "worktree": True,
     # Kroky code-review-graph (kopie indexu do worktree, update, detect-changes).
     "graph": True,
+    # Does the run need the product queue on input? A pack that decides what to
+    # build starts from the open tickets, and fetching them is deterministic —
+    # so it belongs to the preparation, not to the first minutes of a session.
+    "backlog": False,
     "prompt": {
         # Bere pack zadání textem? Když ne, `--prompt` se u něj odmítne.
         "accepts": False,

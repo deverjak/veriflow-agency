@@ -64,7 +64,10 @@ def project_meta(number: int, owner: str) -> dict:
             "number": number, "owner": owner, "fields": by_name}
 
 
-def _option(field: dict | None, name: str) -> str | None:
+def option_id(field: dict | None, name: str) -> str | None:
+    """Id of a single-select option, found by NAME. Public because the
+    backlog needs the same lookup — and for the same reason: an id copied
+    from one project is wrong in the next one."""
     for o in (field or {}).get("options") or []:
         if o.get("name", "").lower() == str(name).lower():
             return o.get("id")
@@ -75,7 +78,7 @@ def _pick_status(field: dict | None, state: str) -> str | None:
     if not field:
         return None
     for name in STATUS_CANDIDATES.get(state, []):
-        if _option(field, name):
+        if option_id(field, name):
             return name
     return None
 
@@ -191,7 +194,7 @@ def push(rows: list[dict], number: int, owner: str, dry_run: bool = False) -> di
                                  (reason_field, row["reason"])):
                 if not (field and value and item_id):
                     continue
-                opt = _option(field, value)
+                opt = option_id(field, value)
                 if not opt:
                     skipped.append({"id": fid, "field": field["name"],
                                     "why": f"the field has no option {value}"})

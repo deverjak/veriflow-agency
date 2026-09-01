@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -194,6 +195,20 @@ def pr_list(cwd: str | Path, state: str = "open", limit: int = 20) -> list[dict]
 def gh_login() -> str | None:
     r = gh("api", "user", "-q", ".login")
     return r.stdout.strip() if r.ok else None
+
+
+def gh_scopes() -> list[str]:
+    """What the signed-in token is allowed to do.
+
+    Asked before a run, not during one: a token without `project` reads issues
+    fine and then fails on the first board write, half an hour in and after the
+    agent has already decided what to post.
+    """
+    r = gh("auth", "status")
+    m = re.search(r"[Tt]oken scopes:\s*(.+)", (r.stdout or "") + (r.stderr or ""))
+    if not m:
+        return []
+    return [s.strip().strip("'\"") for s in m.group(1).split(",") if s.strip()]
 
 
 # ---------------------------------------------- code-review-graph

@@ -378,6 +378,77 @@ check('specialista s prohlížečem má v pohledu uzel Browser', () => {
   assert.ok(String(browser.item.description).includes('Playwright'));
 });
 
+// Product owner je první specialista, který píše VEN. Co smí, se musí dát
+// přečíst z jeho řádku — ne až z .agency/po.json, do kterého se nikdo nedívá.
+const PO_PACK = {
+  name: 'po',
+  title: 'Product owner',
+  version: '0.1.0',
+  description: 'Holds the roadmap against what is actually being built.',
+  installed: 'po@0.1.0',
+  run: {
+    target: 'workspace',
+    worktree: false,
+    graph: false,
+    backlog: true,
+    prompt: { accepts: true, required: false, label: '', placeholder: '' },
+  },
+  agent: { provider: 'claude', model: 'sonnet' },
+  brief: { standing: null, scenarios: [] },
+  dimensions: [{ id: 'scope', title: 'Work in flight that no commitment covers' }],
+};
+
+const PO_HIRE = [{ id: 'po@claude', pack: 'po', provider: 'claude', model: 'sonnet',
+  label: 'sonnet', display: 'Product owner · sonnet', bin: 'claude', available: true }];
+
+check('specialista, který píše ven, má na řádku napsáno co smí', () => {
+  Object.assign(state.snapshot, {
+    probe: { ok: true },
+    packs: [{
+      ...PO_PACK,
+      backlog: {
+        repo: 'chytre/veriflow', projectNumber: 7, roadmap: 'docs/roadmap.md',
+        cycle: '2026-Q3', writes: ['comments', 'draftIssues'], dryRun: false,
+      },
+    }],
+    hires: PO_HIRE,
+  });
+  const pack = new views.ToolsTree().roots()[0];
+  const backlog = pack.children.find((c) => c.item.label === 'Backlog');
+  assert.ok(backlog, 'chybí uzel Backlog');
+  const popis = String(backlog.item.description);
+  assert.ok(popis.includes('board #7'));
+  assert.ok(popis.includes('may comments, draftIssues'));
+  // Roadmapa je to, proti čemu se rozhoduje — patří vedle, ne dovnitř.
+  const roadmap = pack.children.find((c) => c.item.label === 'Roadmap');
+  assert.ok(String(roadmap.item.description).includes('2026-Q3'));
+});
+
+check('nanečisto se pozná na první pohled, ne až z konfigurace', () => {
+  Object.assign(state.snapshot, {
+    probe: { ok: true },
+    packs: [{ ...PO_PACK, backlog: { repo: 'chytre/veriflow', projectNumber: null,
+      roadmap: null, cycle: null, writes: ['comments'], dryRun: true } }],
+    hires: PO_HIRE,
+  });
+  const pack = new views.ToolsTree().roots()[0];
+  const backlog = pack.children.find((c) => c.item.label === 'Backlog');
+  assert.ok(String(backlog.item.description).includes('rehearsal only'));
+  // Bez roadmapy se řádek neukazuje prázdný — prostě tam není.
+  assert.ok(!pack.children.some((c) => c.item.label === 'Roadmap'));
+});
+
+check('specialista, který ven nepíše, uzel Backlog nemá', () => {
+  Object.assign(state.snapshot, {
+    probe: { ok: true },
+    packs: [QA_PACK],
+    hires: [{ id: 'qa@claude', pack: 'qa', provider: 'claude', model: 'sonnet',
+      label: 'sonnet', display: 'QA engineer · sonnet', bin: 'claude', available: true }],
+  });
+  const pack = new views.ToolsTree().roots()[0];
+  assert.ok(!pack.children.some((c) => c.item.label === 'Backlog'));
+});
+
 // ------------------------------------------------------------------- roster
 //
 // A method can be hired once per runner. Everything below guards the one rule

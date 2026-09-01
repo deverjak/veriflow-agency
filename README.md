@@ -20,6 +20,14 @@ chybují hlavně směrem nahoru, hlásí i **povinnosti, které si produkt vymys
 re-consent okno u změny, kterou už kryje sjednaný mechanismus, souhlas u zpracování
 běžícího na smlouvě, archiv VOP zřízený kvůli pravidlu, které neexistuje.
 
+**Product owner** drží roadmapu proti tomu, co se opravdu staví. Nahraješ mu
+závazky, on projde otevřené issues i drafty na nástěnce a rozhodne, co se staví
+teď: na to zakládá tickety a draft issues, a co teď na řadě není, **škrtne
+a napíše proč** — na ticket, veřejně, i se závazkem, proti kterému to měřil.
+Výchozí odpověď je ne a každé ano se platí ze závazku, který v roadmapě opravdu
+je. Všechno, co pošle ven, je **podepsané jako od agenta** a nese marker, takže
+druhý běh najde, co napsal první, místo aby to napsal podruhé.
+
 Každý nález má evidenci, kotvu, která přežije pozdější změny kódu, a rozhodnutí,
 ze kterého se dá spočítat, kolik z toho byla pravda. Všichni specialisté píšou do
 téhož kontraktu, takže se v panelu, ve frontě i v metrikách chovají stejně.
@@ -197,6 +205,88 @@ Právník **nic nemění** — ani VOP, ani kód. Když si vyžádáš návrh, j
 `.agency/runs/<id>/drafts/`. A nenahrazuje advokáta: připravuje mu otázky
 a evidenci, aby jeho hodina padla na to těžké.
 
+## Product owner
+
+```
+agency hire po
+agency config po --set roadmap.file=docs/roadmap.md --set roadmap.cycle=2026-Q3
+agency config po --set board.projectNumber=7 --set policy.escalate=@kuba
+agency doctor
+
+agency run po
+agency run po --prompt "má se referral program stavět tenhle cyklus?"
+```
+
+`roadmap.file` je povinná konfigurace a `agency doctor` ji vymáhá — a to včetně
+toho, že na tu cestu opravdu nějaký soubor ukazuje. Je to táž brána jako
+`business.model` u právníka: **bez závazků nemá pack čím říct ne**, a product
+owner, který neumí říct ne, je generátor ticketů. `roadmap.cycle` a `capacity`
+jsou ze stejného důvodu: „teď“ bez horizontu je názor a škrt bez kapacity se
+nedá obhájit.
+
+Roadmapa se při každém běhu **zamrazí** do `evidence/roadmap/`. Rozhodnutí je
+přezkoumatelné jen proti znění, ze kterého vzniklo — škrt hájený větou
+„roadmapa to neměla“ nemá po dvou editacích roadmapy žádnou cenu.
+
+### Co smí napsat ven
+
+Tohle je první specialista, který **nepíše jen do repozitáře**. Zakládá tickety
+v cizí schránce a komentuje cizí vlákna, takže se zapisovací práva zapínají po
+jednom:
+
+| `writes.*` | Výchozí | Proč |
+|---|---|---|
+| `comments` | zapnuto | komentář je vratný a je to způsob, jak se rozhodnutí dá přečíst |
+| `draftIssues` | zapnuto | draft leží na nástěnce, nikoho neupozorní a nic nestojí smazat |
+| `issues` | **vypnuto** | issue spadne lidem do schránky |
+| `promote` | **vypnuto** | povýšení draftu je okamžik, kdy se z poznámky stává závazek |
+| `labels` | **vypnuto** | štítky a sloupce jsou cizí struktura |
+| `close` | **vypnuto** | škrt patří do komentáře a sloupce, ne do zavřeného ticketu |
+
+```
+agency config po --set writes.dryRun=true    # všechno nanečisto, ven nejde nic
+agency config po --set writes.issues=true    # až budeš chtít
+```
+
+`writes.dryRun` je způsob, jak tenhle pack pustit poprvé: každý zápis se složí
+i s podpisem, vypíše se a nikam neodejde. Co by odešlo, leží v `backlog.jsonl`
+u běhu.
+
+### Zápis jde přes jádro, ne přes `gh`
+
+Pack nevolá `gh` sám. Volá `agency backlog`, stejně jako agent volá
+`agency triage` — a ze stejného důvodu:
+
+```
+agency backlog list                                  # issues i drafty
+agency backlog draft   --title "…" --body-file …     # poznámka na nástěnku
+agency backlog issue   --title "…" --body-file …     # ticket
+agency backlog promote PVTI_xxx                      # draft → issue, v místě
+agency backlog comment 41 --text-file …              # podepsaný komentář
+agency backlog decide  41 not-now --because "…" --commitment "docs/roadmap.md#L18"
+```
+
+Kdyby si pack sáhl po `gh` sám, čtyři věci by skončily v promptu, kde je nikdo
+nevymáhá: **podpis** (jeden tvar, z jednoho místa), **marker** (druhý běh pozná,
+co napsal první), **brána `writes.*`** a **ledger** v `.agency/runs/<id>/backlog.jsonl`.
+Pravda o tom, co se rozhodlo, tak zůstává v repu — GitHub je sink, ne vlastník.
+
+Idempotence stojí na klíči odvozeném z titulku. Zápis pod klíčem, který už
+existuje, vrátí `{"action": "exists"}` a nepošle nic; to je úspěch, ne chyba.
+`promote` převádí draft **v místě** (GitHub to umí sám), takže si položka nechá
+své id, sloupec i hodnoty polí.
+
+### Podpis
+
+```
+---
+**Product owner** — written by an agent, not a person. `agency po@0.1.0` · run `01M1…` · `sonnet`
+If this call is wrong, say so here — @kuba has the last word.
+```
+
+`policy.escalate` je součást podpisu schválně: agent, který řekne ne a nenapíše,
+kdo ho může přebít, není specialista, ale překážka.
+
 ## Jak je to poskládané
 
 ```
@@ -229,7 +319,7 @@ by triage neuměl.
 |---|---|
 | `packages/core/` | jádro a CLI (Python, `uv`) |
 | `packages/extension/` | VS Code extension (plain JS, bez build stepu) |
-| `packs/` | metody práce, ne obsah (`review-graph`, `qa`, `legal`) — kdo je jimi najatý, je v projektu |
+| `packs/` | metody práce, ne obsah (`review-graph`, `qa`, `legal`, `po`) — kdo je jimi najatý, je v projektu |
 | `schemas/` | `run.v1`, `finding.v1` — kontrakt obou stran hranice |
 | `docs/` | rozhodnutí a plán, včetně toho, co se v nich změnilo a proč |
 
