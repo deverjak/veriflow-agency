@@ -62,17 +62,25 @@ Tři vazby, zbytek je volný:
 
 ---
 
-## Fáze 2 — grafový šev (~1,5 dne)
+## Fáze 2 — grafový šev (~1,5 dne) — **hotovo 1. 9. 2026**
 
 > [`graph-abstraction.md`](graph-abstraction.md) → **Krok 1** a **Krok 2**.
 
-- [ ] `packages/core/src/agency/graph.py`: verby `state` / `refresh` / `changes` / `impact` / `locate` / `neighbors` + extended `unreferenced` / `tests_for`; typované dicty, parsing uvnitř, `capabilities()` se ptá předem
-- [ ] přepojit `runs.py:451,545,560,566`, `anchor.py:95`, `cli.py:396-400`
-- [ ] `config.py:83` — `hasGraph` přes `graph.state()` místo natvrdo `.code-review-graph/graph.db` (jediná věc z Kroku 3 vzatá hned)
-- [ ] `agency graph <verb>` s `--json` jako výchozím výstupem
-- [ ] `packs.py:35` — `graph` politika z booleanu na `{required, optional}`; doctor umí říct „pack chce `tests-for`, driver ho neumí“
+- [x] `packages/core/src/agency/graph.py`: verby `state` / `refresh` / `changes` / `impact` / `locate` / `neighbors` + extended `unreferenced` / `tests-for`; typované dicty, parsing uvnitř, `capabilities()` se ptá předem
+- [x] přepojit `prepare_graph` a `collect_evidence` (`runs.py`), `anchor.py`, doctor (`cli.py`)
+- [x] `config.py` — `hasGraph` přes `graph.state()` místo natvrdo `.code-review-graph/graph.db` (jediná věc z Kroku 3 vzatá hned)
+- [x] `agency graph <verb>` — JSON na výstupu vždycky
+- [x] `packs.py` — `graph` politika z booleanu na `{required, optional}`; doctor umí říct „pack chce `tests-for`, driver ho neumí“
 
-**Hotovo, když:** chybějící schopnost je vidět v doctoru předem, ne až tichým selháním uprostřed běhu.
+**Hotovo, když:** chybějící schopnost je vidět v doctoru předem, ne až tichým selháním uprostřed běhu. — ✅ `tests/test_graph.py` (13 testů), ověřeno i proti reálnému CRG 2.3.7.
+
+### Co plán nepředpokládal
+
+- **`search` a `query` vracejí JSON taky.** `anchor.py` nad nimi tedy jel regexem stejně jako `detect-changes` ve Fázi 0 — jen se to v Kroku 0 nevidělo, protože ta plocha se počítala jako „graf". `locate()` teď vrací cesty relativní k repu, což je přesně tvar, na kterém kotva stojí.
+- **`Answer` nese `data` i `raw`.** `data` je kontrakt (přežije výměnu driveru), `raw` je evidence (po výměně se změní a přesně proto se ukládá). Kdyby existovalo jen jedno, buď nejde vyměnit, nebo nejde doložit.
+- **Doctor hlásí i nečerstvý index** — `built_at_commit` vs. `current_sha`. Z lidského panelu se to dalo jen přečíst očima; index z jiné hlavičky přitom umí nález opřít o kód, který na téhle větvi neexistuje.
+- **Politika „bez grafu" je `None`, ne `False`.** Pack, který se grafu nedotkne, po driveru nechce nic — a to je jiné tvrzení než „chce, aby graf nebyl".
+- **`proc.crg_status` zmizel.** Na stav grafu se ptá `graph.state()`; `proc.py` je obálka nad procesem, ne místo, kde se rozhoduje, co je čerstvý index.
 
 ---
 

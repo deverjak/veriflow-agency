@@ -31,8 +31,10 @@ RUN_DEFAULTS: dict = {
     # Jednorázový worktree na hlavičce PR. QA ho mít nesmí: zkouší běžící
     # aplikaci, a ta běží nad pracovní kopií s nainstalovanými závislostmi.
     "worktree": True,
-    # Kroky code-review-graph (kopie indexu do worktree, update, detect-changes).
-    "graph": True,
+    # Co pack chce od grafu. `false` = běh se grafu nedotkne; objekt vyjmenuje
+    # otázky (verby `graph.py`), na kterých pack stojí. Boolean `true` ze
+    # starších manifestů znamená „graf ano, verby neurčené".
+    "graph": {"required": ["changes", "impact"], "optional": []},
     # Does the run need the product queue on input? A pack that decides what to
     # build starts from the open tickets, and fetching them is deterministic —
     # so it belongs to the preparation, not to the first minutes of a session.
@@ -46,6 +48,23 @@ RUN_DEFAULTS: dict = {
         "placeholder": "",
     },
 }
+
+
+def graph_policy(value) -> dict | None:
+    """Co pack chce od grafu — `None`, když nic.
+
+    Boolean stačil, dokud byl jeden nástroj. Ve chvíli, kdy je driver
+    vyměnitelný, je rozdíl mezi „potřebuju blast radius" a „hodil by se mi
+    mrtvý kód" ten, který rozhoduje, jestli zhasne jedna dimenze, nebo jestli
+    nemá smysl běh vůbec pouštět. Chybějící schopnost je legitimní degradace —
+    ale musí být vidět dopředu, ne až tichým selháním uprostřed běhu.
+    """
+    if not value:
+        return None
+    if value is True:
+        return {"required": [], "optional": []}
+    return {"required": list(value.get("required") or []),
+            "optional": list(value.get("optional") or [])}
 
 
 @dataclass
@@ -67,6 +86,7 @@ class Pack:
         prompt = dict(RUN_DEFAULTS["prompt"])
         prompt.update(policy.get("prompt") or {})
         policy["prompt"] = prompt
+        policy["graph"] = graph_policy(policy.get("graph"))
         return policy
 
     @property

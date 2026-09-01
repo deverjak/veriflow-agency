@@ -12,8 +12,8 @@ import os
 import sys
 from pathlib import Path
 
-from . import (anchor, backlog, config, dedup, export, hires, ingest, metrics, packs,
-               proc, providers, registry, runs)
+from . import (anchor, backlog, config, dedup, export, graph, hires, ingest, metrics,
+               packs, proc, providers, registry, runs)
 from .util import bundled, out, posix, read_json, strip_comments, ulid, write_json
 
 # ---------------------------------------------------------------- pomůcky
@@ -416,13 +416,16 @@ def cmd_doctor(args) -> int:
           fatal=slug_needed)
 
     if needed("code-review-graph"):
-        graph = proc.crg_status(project.root)
-        gstats = graph.get("stats") or {}
-        check("code graph", graph["exists"],
-              f"{graph.get('sizeBytes', 0) // 1_000_000} MB"
-              + (f" · {gstats['nodes']} nodes, {gstats['files']} files"
-                 if gstats.get("nodes") is not None else "")
-              if graph["exists"]
+        g = graph.state(project.root).data
+        check("code graph", g["exists"],
+              f"{g.get('sizeBytes', 0) // 1_000_000} MB"
+              + (f" · {g['nodes']} nodes, {g['files']} files"
+                 if g.get("nodes") is not None else "")
+              # Index z jiné hlavičky umí nález opřít o kód, který na téhle
+              # větvi neexistuje — a pozná se to jen porovnáním commitů.
+              + ("  built on another commit — `code-review-graph update`"
+                 if g.get("stale") else "")
+              if g["exists"]
               else "missing — build it with `code-review-graph build`", fatal=False)
 
     for p in packs.available():
@@ -438,6 +441,24 @@ def cmd_doctor(args) -> int:
         if ref != p.ref:
             check(f"pack {p.name} version", False,
                   f"installed {ref}, available {p.ref} — `agency add {p.name}`", fatal=False)
+
+        # Co pack od grafu chce vs. co driver umí. Ptá se to dopředu, protože
+        # chybějící schopnost není chyba — je to dimenze, která poběží bez
+        # grafového signálu. Tiché selhání uprostřed běhu je horší než tahle
+        # věta na začátku.
+        gp = p.run_policy["graph"]
+        if gp:
+            caps = set(graph.capabilities())
+            lacks_required = [v for v in gp["required"] if v not in caps]
+            lacks_optional = [v for v in gp["optional"] if v not in caps]
+            if lacks_required:
+                check(f"pack {p.name} graph", False,
+                      f"the driver ({graph.DRIVER}) cannot answer "
+                      f"{', '.join(lacks_required)} — this pack stands on it", fatal=False)
+            elif lacks_optional:
+                check(f"pack {p.name} graph", True,
+                      f"{graph.DRIVER}, without {', '.join(lacks_optional)} — "
+                      f"those dimensions run without the graph signal", fatal=False)
 
         # Pack, který zkouší běžící aplikaci, se má ptát dřív, než začne běh.
         # Nedostupná aplikace je nejlevnější způsob, jak přijít o celé sezení.
@@ -1002,6 +1023,49 @@ def cmd_validate(args) -> int:
 
     _emit(args, data, human)
     return 1 if errors or record_errors else 0
+
+
+# ---------------------------------------------------------------- graph
+
+def cmd_graph(args) -> int:
+    """Jedny dveře ke grafu — pro jádro i pro agenta.
+
+    Půlka použití grafu žije v promptu (`SKILL.md`) a Python fasáda ji nepokryje.
+    Vedlejší efekt je ten důležitý: šev se testuje každým během, ne až teoreticky
+    v den výměny driveru.
+
+    Výstup je vždycky JSON. Konzument je agent nebo skript; člověk, který se ptá
+    na stav grafu, má `agency doctor`.
+    """
+    project = _project(args)
+    root = project.root
+
+    if args.verb == "capabilities":
+        return _emit_json({
+            "driver": graph.DRIVER, "tool": graph.version(),
+            "capabilities": graph.capabilities(),
+            "workspaceStrategy": graph.WORKSPACE_STRATEGY,
+        })
+
+    verbs = {
+        "state": lambda: graph.state(root),
+        "refresh": lambda: graph.refresh(root),
+        "changes": lambda: graph.changes(root, args.base),
+        "impact": lambda: graph.impact(root, args.files or [], depth=args.depth),
+        "locate": lambda: graph.locate(root, args.symbol, kind=args.kind),
+        "neighbors": lambda: graph.neighbors(root, args.symbol, direction=args.direction),
+        "unreferenced": lambda: graph.unreferenced(root, args.path),
+        "tests-for": lambda: graph.tests_for(root, args.symbol),
+    }
+    answer = verbs[args.verb]()
+    _emit_json({"ok": answer.ok, "verb": args.verb,
+                "data": answer.data, "error": answer.error})
+    return 0 if answer.ok else 1
+
+
+def _emit_json(data: dict) -> int:
+    print(json.dumps(data, ensure_ascii=False, indent=2))
+    return 0
 
 
 # ---------------------------------------------------------------- ingest
@@ -1850,6 +1914,31 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("validate", parents=[common], help="check findings.json against the contract and the anchors against the code")
     s.add_argument("--run", help="run id (default: the latest)")
     s.set_defaults(fn=cmd_validate)
+
+    # Jedny dveře ke grafu. `--repo` míří na worktree běhu, když se agent ptá
+    # odtamtud — index je tam zkopírovaný a doindexovaný přípravou.
+    s = sub.add_parser("graph", parents=[common],
+                       help="ask the code graph — one door for the core and the agent, JSON out")
+    gsub = s.add_subparsers(dest="verb", required=True)
+    gsub.add_parser("state", parents=[common], help="is there an index, how fresh is it")
+    gsub.add_parser("refresh", parents=[common], help="bring the index up to date for this run")
+    gsub.add_parser("capabilities", parents=[common], help="which verbs this driver answers")
+    g = gsub.add_parser("changes", parents=[common], help="what changed against a base")
+    g.add_argument("--base", required=True)
+    g = gsub.add_parser("impact", parents=[common], help="blast radius of these files")
+    g.add_argument("--files", nargs="+", required=True)
+    g.add_argument("--depth", type=int, default=2)
+    g = gsub.add_parser("locate", parents=[common], help="symbol → file:line")
+    g.add_argument("symbol")
+    g.add_argument("--kind", choices=["File", "Class", "Function", "Type", "Test"])
+    g = gsub.add_parser("neighbors", parents=[common], help="who calls it (in), what it calls (out)")
+    g.add_argument("symbol")
+    g.add_argument("--direction", choices=["in", "out"], default="in")
+    g = gsub.add_parser("unreferenced", parents=[common], help="code nothing points at — the `reuse` dimension")
+    g.add_argument("--path", help="path substring to narrow it down")
+    g = gsub.add_parser("tests-for", parents=[common], help="tests that touch this symbol — the `tests` dimension")
+    g.add_argument("symbol")
+    s.set_defaults(fn=cmd_graph)
 
     s = sub.add_parser("ingest", parents=[common],
                        help="the gate: contract, existence, threshold, dedup — BEFORE a finding becomes a finding")

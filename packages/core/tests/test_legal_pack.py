@@ -31,7 +31,9 @@ def test_politika_behu_je_v_manifestu_ne_v_kodu():
 
     assert legal.run_policy["target"] == "workspace"
     assert legal.run_policy["worktree"] is False
-    assert legal.run_policy["graph"] is False
+    # Žádná grafová politika, ne „politika, která říká ne“ — pack, který
+    # se grafu nedotkne, po driveru nechce nic.
+    assert legal.run_policy["graph"] is None
     # Zadání bere, ale nevyžaduje: běh bez otázky je plnohodnotná revize
     # dokumentů, na rozdíl od QA, které bez zadání neví, co zkoušet.
     assert legal.run_policy["prompt"]["accepts"] is True

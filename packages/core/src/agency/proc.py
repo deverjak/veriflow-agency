@@ -225,16 +225,5 @@ def crg_version() -> str | None:
     return r.stdout.strip() if r.ok else None
 
 
-def crg_status(repo: str | Path) -> dict:
-    """Stav grafu. Vrací i to, jestli vůbec existuje — na tom závisí build/update."""
-    db = Path(repo) / ".code-review-graph" / "graph.db"
-    info: dict[str, Any] = {"exists": db.is_file(), "path": str(db)}
-    if not info["exists"]:
-        return info
-    info["sizeBytes"] = db.stat().st_size
-    r = crg("status", "--repo", str(repo), "--json")
-    # `nodes`, `edges`, `files`, `languages`, `built_at_commit`, `current_sha`…
-    # Čerstvost indexu se pozná porovnáním posledních dvou — z lidského panelu
-    # se to dalo jen přečíst očima.
-    info["stats"] = r.json()
-    return info
+# Na stav grafu se ptá `graph.state()` — tenhle soubor je obálka nad procesem,
+# ne místo, kde se rozhoduje, co je čerstvý index.

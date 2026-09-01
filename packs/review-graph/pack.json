@@ -12,7 +12,10 @@
   "run": {
     "target": "pull-request",
     "worktree": true,
-    "graph": true,
+    "graph": {
+      "required": ["changes", "impact"],
+      "optional": ["unreferenced", "tests-for"]
+    },
     "prompt": {
       "accepts": true,
       "required": false,

@@ -11,7 +11,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import proc
+from . import graph, proc
 from .util import read_json, strip_comments, write_json
 
 AGENCY_DIR = ".agency"
@@ -80,7 +80,8 @@ def detect(project: Project) -> dict:
     facts: dict = {
         "slug": project.slug,
         "defaultBranch": project.default_branch,
-        "hasGraph": (root / ".code-review-graph" / "graph.db").is_file(),
+        # Ptá se driveru, ne cesty: jiný nástroj drží index jinde a jinak.
+        "hasGraph": bool(graph.state(root).data.get("exists")),
     }
 
     # CI příkaz — hledá se v package.json, ne hádá

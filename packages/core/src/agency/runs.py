@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import hires, proc, providers
+from . import graph, hires, proc, providers
 from .config import AGENCY_DIR, Project
 from .util import out, posix, read_json, ulid, write_json
 
@@ -454,32 +454,9 @@ def remove_worktree(project: Project, wt: Path) -> None:
 
 
 def prepare_graph(project: Project, wt: Path, cfg: dict) -> dict:
-    """Zkopíruje graf do worktree a přírůstkově doindexuje.
-
-    `build` se ve worktree nespouští nikdy — přestavěl by celé repo kvůli stavu,
-    který se za chvíli zahodí. `update` je jediný krok, který sem patří.
-    """
-    src = project.root / ((cfg.get("graph") or {}).get("db") or ".code-review-graph/graph.db")
-    info: dict = {"tool": proc.crg_version()}
-
-    if not src.is_file():
-        info["action"] = "missing"
-        return info
-
-    dst = wt / ".code-review-graph" / "graph.db"
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(src, dst)
-
-    mode = (cfg.get("graph") or {}).get("onStale", "update")
-    if mode == "ignore":
-        info["action"] = "reused"
-        return info
-
-    r = proc.crg("update", "--repo", str(wt))
-    info["action"] = "update" if r.ok else "reused"
-    if not r.ok:
-        info["updateError"] = r.stderr.strip()[:400]
-    return info
+    """Index pro tenhle běh. Jak se tam dostane, je věc driveru (`graph.py`)."""
+    src = project.root / ((cfg.get("graph") or {}).get("db") or graph.DB_PATH)
+    return graph.prepare(src, wt, (cfg.get("graph") or {}).get("onStale", "update"))
 
 
 #: Co z připravených statistik je paměť, ne grafový signál. Sbírá se při téže
@@ -495,20 +472,17 @@ def known_memory(project: Project, run: Run) -> dict:
     return knowledge.for_run(project, run)
 
 
-def _graph_json(ev: Path, name: str, r: proc.Result):
-    """Strojový výstup grafu do evidence — a když nepřišel, ať je to vidět.
+def _graph_evidence(ev: Path, name: str, answer: graph.Answer) -> None:
+    """To, co driver skutečně řekl, do evidence — a když neřekl nic, ať je to vidět.
 
     Běh bez grafového signálu je legitimní výsledek, takže se nepadá. Ale zapsat
     chybovou hlášku do `.json` znamená, že se nad ní dimenze bude dohadovat jako
     nad daty; proto jde chyba vedle, do `.error.txt`.
     """
-    data = r.json()
-    if data is None:
-        (ev / f"{name}.error.txt").write_text(
-            (r.stderr or r.stdout).strip()[:2000] or "no output", encoding="utf-8")
-        return None
-    write_json(ev / f"{name}.json", data)
-    return data
+    if not answer.ok:
+        (ev / f"{name}.error.txt").write_text(answer.error or "no output", encoding="utf-8")
+    elif answer.raw is not None:
+        write_json(ev / f"{name}.json", answer.raw)
 
 
 def collect_evidence(project: Project, wt: Path, run: Run, target: dict,
@@ -523,29 +497,24 @@ def collect_evidence(project: Project, wt: Path, run: Run, target: dict,
 
     base = target.get("baseRefOid")
     if base:
-        changes = _graph_json(ev, "detect-changes", proc.crg(
-            "detect-changes", "--repo", str(wt), "--base", base))
-        if changes:
-            stats["changedFunctions"] = len(changes.get("changed_functions") or [])
-            stats["affectedFlows"] = len(changes.get("affected_flows") or [])
-            stats["untestedFunctions"] = len(changes.get("test_gaps") or [])
-            if changes.get("risk_score") is not None:
-                stats["riskScore"] = changes["risk_score"]
-            if changes.get("functions_truncated"):
-                # CRG řeže na `CRG_MAX_CHANGED_FUNCS` (500) a ten strop hlásí ve
-                # shrnutí jako výsledek. Bez příznaku by se do záznamu zapsalo
-                # „500 změněných funkcí" jako fakt, ne jako dolní odhad.
+        answer = graph.changes(wt, base)
+        _graph_evidence(ev, "detect-changes", answer)
+        if answer.ok:
+            d = answer.data
+            stats["changedFunctions"] = d["functions"]
+            stats["affectedFlows"] = d["flows"]
+            stats["untestedFunctions"] = d["testGaps"]
+            if d["riskScore"] is not None:
+                stats["riskScore"] = d["riskScore"]
+            if d["functionsTruncated"]:
                 stats["changedFunctionsTruncated"] = True
 
     if files:
-        _graph_json(ev, "impact", proc.crg(
-            "impact", "--repo", str(wt), "--files", *files[:40],
-            "--depth", "2", "--max-results", "30"))
+        _graph_evidence(ev, "impact", graph.impact(wt, files))
 
         dirs = sorted({posix(Path(f).parent) for f in files if Path(f).parent != Path(".")})
         if dirs:
-            _graph_json(ev, "dead-code", proc.crg(
-                "dead-code", "--repo", str(wt), "--file-pattern", dirs[0], "--json"))
+            _graph_evidence(ev, "dead-code", graph.unreferenced(wt, dirs[0]))
 
     return stats
 

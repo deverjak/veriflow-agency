@@ -29,7 +29,9 @@ def test_politika_behu_je_v_manifestu_ne_v_kodu():
     qa = packs.load("qa")
     assert qa.run_policy["target"] == "workspace"
     assert qa.run_policy["worktree"] is False
-    assert qa.run_policy["graph"] is False
+    # Žádná grafová politika, ne „politika, která říká ne“ — pack, který
+    # se grafu nedotkne, po driveru nechce nic.
+    assert qa.run_policy["graph"] is None
     assert qa.run_policy["prompt"]["accepts"] is True
     assert qa.run_policy["prompt"]["required"] is True
     assert qa.skill_name == "agency-qa"
@@ -37,7 +39,10 @@ def test_politika_behu_je_v_manifestu_ne_v_kodu():
     rg = packs.load("review-graph")
     assert rg.run_policy["target"] == "pull-request"
     assert rg.run_policy["worktree"] is True
-    assert rg.run_policy["graph"] is True
+    # Recenzent vyjmenuje, co po grafu chce: bez `changes` a `impact` nemá běh
+    # smysl, bez `unreferenced` a `tests-for` zhasnou dvě dimenze z pěti.
+    assert rg.run_policy["graph"]["required"] == ["changes", "impact"]
+    assert rg.run_policy["graph"]["optional"] == ["unreferenced", "tests-for"]
 
 
 def test_pack_bez_bloku_run_zustava_recenzentem():

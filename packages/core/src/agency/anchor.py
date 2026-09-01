@@ -19,7 +19,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import proc
+from . import graph, proc
 
 _WORDY = re.compile(r"[A-Za-z0-9_]{4}")
 
@@ -92,11 +92,12 @@ def resolve(repo: str | Path, anchor: dict) -> Resolution:
     # 3. symbol z grafu — přežije refaktor tam, kde text řádku ne
     sym = anchor.get("symbol") or {}
     if sym.get("name"):
-        r = proc.crg("search", sym["name"], "--repo", str(repo))
-        if r.ok:
-            for m in re.finditer(rf"{re.escape(rel)}[:\s]+(\d+)", r.stdout):
-                return Resolution(int(m.group(1)), "symbol",
-                                  f"via {sym['name']} from the graph")
+        found = graph.locate(repo, sym["name"])
+        if found.ok:
+            for node in found.data:
+                if node["file"] == rel and node["line"]:
+                    return Resolution(node["line"], "symbol",
+                                      f"via {sym['name']} from the graph")
 
     # 4. selhání — degraduj, neztrať
     if line > count:

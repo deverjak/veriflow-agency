@@ -69,7 +69,9 @@ def test_politika_behu_je_v_manifestu_ne_v_kodu():
 
     assert po.run_policy["target"] == "workspace"
     assert po.run_policy["worktree"] is False
-    assert po.run_policy["graph"] is False
+    # Žádná grafová politika, ne „politika, která říká ne“ — pack, který
+    # se grafu nedotkne, po driveru nechce nic.
+    assert po.run_policy["graph"] is None
     # Nový krok přípravy. Fronta se čte deterministicky, aby session nezačínala
     # tím, co jde otestovat bez modelu.
     assert po.run_policy["backlog"] is True
