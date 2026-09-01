@@ -1,0 +1,173 @@
+{
+  "$comment": "Configuration template for the legal pack. `agency add legal` copies it to <project>/.agency/legal.json and fills in what it can detect. This file is owned by the PROJECT — a pack upgrade never overwrites it.",
+
+  "pack": "legal@0.1.0",
+
+  "repo": {
+    "slug": null,
+    "$comment_slug": "owner/repo. Filled in from the git remote."
+  },
+
+  "brief": {
+    "$comment": "WHAT TO LOOK AT. The method is the same everywhere, the assignment is not.",
+
+    "default": null,
+    "$comment_default": "The standing brief: what holds for this project in every run — what the product does, which relationships it creates, what has already been decided with a lawyer. `agency brief legal --set \"…\"` writes it here.",
+
+    "scenarios": {},
+    "$comment_scenarios": "Named briefs for repeated sessions, e.g. {\"dac7\": \"January reporting readiness, seller side only\"}. Run one with `agency run legal --scenario dac7`."
+  },
+
+  "business": {
+    "$comment": "WHO YOU ARE. This block is the applicability gate — it decides which regimes are even in scope. Guessing it wrong is how a review produces obligations that do not apply to this company, which is the single most expensive failure mode of this pack. `business.model` and `business.size` are required; `agency doctor` reports them as missing.",
+
+    "model": null,
+    "$comment_model": "marketplace | eshop | saas | app | content. marketplace = you intermediate contracts between third parties (this turns on P2B, DSA and DAC7 questions). eshop = you sell your own goods. saas/app = you provide your own digital service. Pick the one that describes who the contract is actually between.",
+
+    "size": null,
+    "$comment_size": "micro | small | medium | large, per Recommendation 2003/361/EC (micro: <10 staff and ≤ EUR 2M; small: <50 staff and ≤ EUR 10M). Not vanity — DSA Articles 19 and 29 and the accessibility act hang off it. If you do not know, put the headcount and turnover in `sizeBasis` and let the review derive it.",
+    "sizeBasis": null,
+    "$comment_sizeBasis": "e.g. \"6 staff, ~18M CZK turnover 2025\". Free text; the review shows its derivation in the finding.",
+
+    "jurisdiction": "cz",
+    "markets": ["cz"],
+    "$comment_markets": "ISO country codes you actually sell into. Adding a market adds its consumer law — do not list markets you only dream about.",
+
+    "counterparties": {
+      "consumers": true,
+      "businessUsers": false,
+      "$comment_businessUsers": "true when third-party professionals offer their goods or services to consumers through you (sellers, instructors, hosts, drivers). This is what turns on the `partners` and `tax-reporting` dimensions, not the word 'marketplace' in the pitch deck."
+    },
+
+    "contracts": {
+      "recurring": false,
+      "$comment_recurring": "true when you have long-term obligations to repeated performance of the same type — subscriptions, memberships, standing seller accounts. § 1752 of the Civil Code only ever applies to these.",
+      "digitalService": false,
+      "$comment_digitalService": "true when the consumer gets access to digital content or a digital service over time (§§ 2389f and following). This is what makes the § 2389q change rules apply — a one-off purchase of a physical thing is not it.",
+      "facilitatesPayments": false,
+      "$comment_facilitatesPayments": "true when money for the underlying transaction flows through you. Relevant to DAC7 reporting fields and to payment-service questions."
+    },
+
+    "counsel": null,
+    "$comment_counsel": "Who signs off. A named lawyer or firm, or null. The review never replaces them — it prepares the questions and the evidence so their hour is spent on the hard part."
+  },
+
+  "documents": {
+    "$comment": "WHERE THE LEGAL SURFACE LIVES IN THIS REPOSITORY. Findings are anchored to files; a document the pack cannot find is a document it cannot review. Paths are POSIX, relative to the project root. Globs are allowed.",
+
+    "terms": {},
+    "$comment_terms": "Audience → path, e.g. {\"consumer\": \"content/legal/vop.md\", \"instructor\": \"content/legal/vop-lektor.md\"}. Two audiences in one document is itself worth a finding when the duties differ.",
+
+    "privacyPolicy": null,
+    "cookiePolicy": null,
+    "$comment_cookiePolicy": "Only if it is a separate document. null when it lives inside the privacy policy.",
+
+    "versionsDir": null,
+    "$comment_versionsDir": "Where past wordings are kept, e.g. \"content/legal/terms/\". This is an internal evidence store, not a public archive — see the skill. null means the project keeps no versions, which is a finding in its own right when contracts are concluded electronically.",
+
+    "acceptanceRecord": null,
+    "$comment_acceptanceRecord": "Where the project records WHICH wording a given user got — a table, a migration, a model, e.g. \"db/schema.sql#user_terms_acceptance\". This is the thing that answers 'what applied to this contract' and it is worth more than any archive page.",
+
+    "other": {},
+    "$comment_other": "Anything else with legal content: {\"ADR notice\": \"app/footer.tsx\", \"instructor payout terms\": \"docs/payouts.md\"}."
+  },
+
+  "product": {
+    "$comment": "WHERE THE CODE IMPLEMENTS THE DOCUMENTS. A promise in the terms that no code keeps is the most common finding this pack produces, and it can only be made if both halves are pointed at.",
+
+    "consentCode": [],
+    "$comment_consentCode": "Paths that record or enforce agreement, e.g. [\"app/signup/**\", \"lib/consent/**\"].",
+
+    "cookieBanner": null,
+    "$comment_cookieBanner": "The banner component and, if separate, the place that actually gates the scripts. A banner that asks and then loads regardless is a finding, not a detail.",
+
+    "notifications": [],
+    "$comment_notifications": "How the product reaches users on a durable medium — mail templates, notification service. A change mechanism that has no delivery route is not a mechanism.",
+
+    "sellerData": [],
+    "$comment_sellerData": "Where seller identity, tax numbers and payouts are collected and stored. Only meaningful when counterparties.businessUsers is true.",
+
+    "dataStores": [],
+    "$comment_dataStores": "Schemas or models holding personal data, e.g. [\"prisma/schema.prisma\"]. Used to check what the privacy policy claims against what the product actually keeps."
+  },
+
+  "posture": {
+    "$comment": "HOW STRICT THE OUTPUT IS. The reason this pack exists: general models default to the most defensive reading of every rule and produce obligations nobody has. This block is the dial.",
+
+    "level": "proportionate",
+    "$comment_level": "proportionate = report only what a named provision requires, plus what the product's own promises require of it. conservative = additionally report defensible best practice, each item labelled as such and never scored as a legal requirement.",
+
+    "requireCitation": true,
+    "$comment_requireCitation": "true = a finding without a citation to a specific provision, guidance document or the project's own document is dropped before scoring. This is a gate, not a style rule — it is what keeps invented duties out.",
+
+    "flagOverCompliance": true,
+    "$comment_flagOverCompliance": "true = report where the product does more than the law asks (re-consent walls, blocking modals, collecting data no rule needs). Over-compliance costs conversion, and data collected 'to be safe' is data you now have to protect.",
+
+    "assumeWorstCase": false,
+    "$comment_assumeWorstCase": "false = when a regime's applicability is genuinely unclear, say so and write down what would settle it, instead of applying it. true = apply it anyway. Leave it false unless a lawyer asked for the defensive sweep."
+  },
+
+  "lawSources": {
+    "$comment": "WHERE THE LAW IS LOOKED UP. Primary sources only — both of these are free, need no key, and return the text the courts read. Details and working recipes are in the skill's references/sources.md.",
+
+    "esbirkaOpenData": "https://opendata.eselpoint.gov.cz/esel-esb/eli",
+    "$comment_esbirkaOpenData": "Czech Collection of Laws as linked data, addressed by ELI: /cz/sb/<year>/<number>/<version-date>. The state-guaranteed consolidated wording.",
+
+    "esbirkaPortal": "https://www.e-sbirka.cz/eli",
+    "$comment_esbirkaPortal": "The human-readable portal for the same ELI. This is what a finding links to — a reader must be able to open the provision.",
+
+    "cellar": "http://publications.europa.eu/resource/celex",
+    "$comment_cellar": "EU law by CELEX number through the Publications Office. Content negotiation gives the Czech wording; eur-lex.europa.eu itself does not answer scripted clients.",
+
+    "allowedDomains": [
+      "e-sbirka.cz", "e-sbirka.gov.cz", "opendata.eselpoint.gov.cz",
+      "eur-lex.europa.eu", "publications.europa.eu",
+      "uoou.gov.cz", "coi.gov.cz", "ctu.gov.cz", "mpo.gov.cz",
+      "financnisprava.gov.cz", "edpb.europa.eu", "commission.europa.eu",
+      "nsoud.cz", "usoud.cz", "nssoud.cz", "curia.europa.eu"
+    ],
+    "$comment_allowedDomains": "Legislators, regulators and courts. A law firm's blog may point you at a provision; it is never the citation.",
+
+    "offline": false,
+    "$comment_offline": "true = do not go online; work from references/cz-eu-baseline.md and say in every finding that the wording was not re-verified. An offline run is a legitimate outcome, a silently stale one is not."
+  },
+
+  "memory": {
+    "$comment": "The project's memory, not the pack's. Which regimes apply here and what has already been decided belongs to the project — that is what stops the next run from re-litigating the same question.",
+    "dir": ".agency/legal",
+    "register": "applicability.md",
+    "$comment_register": "The applicability register: regime → applies here? → why → who decided → when. The most valuable file this pack produces.",
+    "decisions": "accepted-risks.md",
+    "$comment_decisions": "What the company decided to live with, and on whose authority. A risk that was accepted once must not come back as a finding every month."
+  },
+
+  "review": {
+    "$comment": "The shared output policy — every pack has this block: which dimensions run, what threshold a finding must clear, what language it is written in.",
+
+    "dimensions": ["terms", "consumer", "privacy", "over-compliance"],
+    "$comment_dimensions": "Add \"partners\" and \"tax-reporting\" yourself once the project has business users — `agency config legal --set review.dimensions='[\"terms\",\"consumer\",\"privacy\",\"over-compliance\",\"partners\",\"tax-reporting\"]'`. They are deliberately not switched on by the installation: running a marketplace regime against an e-shop is how a review produces duties nobody has. Fewer dimensions is a legitimate outcome, not a failure.",
+
+    "minScore": 85,
+    "$comment_minScore": "Higher than the reviewer's 80 on purpose. A wrong legal finding is not a wasted five minutes — it gets a product changed, a checkbox added and a conversion rate dropped for a rule that was never there.",
+
+    "language": "cs",
+
+    "rules": null,
+    "docMap": null,
+    "verifyCommand": null,
+
+    "skipPatterns": [
+      ".claude/skills/agency-*/**",
+      "**/package-lock.json", "**/pnpm-lock.yaml", "**/yarn.lock", "**/*.lock",
+      "**/node_modules/**", "**/dist/**", "**/build/**",
+      "**/*.generated.*", "**/messages/*.json"
+    ]
+  },
+
+  "sinks": {
+    "runRecord": true,
+    "$comment_runRecord": "Always true. The run record is the truth, everything else is a derived sink — if a sink fails, the finding is not lost.",
+    "prComment": false,
+    "githubProject": null
+  }
+}

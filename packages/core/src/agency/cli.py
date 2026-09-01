@@ -333,6 +333,14 @@ def cmd_providers(args) -> int:
 
 # ---------------------------------------------------------------- doctor
 
+def _run_hint(pack) -> str:
+    """How this pack is launched. Read from the manifest, never from its name."""
+    policy = pack.run_policy
+    if policy["target"] == "pull-request":
+        return " --pr <n>"
+    return ' --prompt "…"' if policy["prompt"].get("required") else ""
+
+
 def cmd_doctor(args) -> int:
     project = _project(args)
     checks = []
@@ -444,8 +452,12 @@ def cmd_doctor(args) -> int:
         if fatal:
             print(f"  {out.err('A run would fail.')} Fix the items marked ✗.\n")
         else:
-            print(f"  {out.ok('Ready.')}  {out.dim('agency run review-graph --pr <n>')}"
-                  f"  {out.dim('·')}  {out.dim('agency run qa --prompt \"…\"')}\n")
+            # Build the hint from what is actually installed. A hardcoded pair
+            # of packs leaves the third specialist invisible right after
+            # doctor — which is exactly when the user is looking for it.
+            hints = [f"agency run {p.name}{_run_hint(p)}" for p in hired] or ["agency packs"]
+            print(f"  {out.ok('Ready.')}  " +
+                  f"  {out.dim('·')}  ".join(out.dim(h) for h in hints) + "\n")
 
     _emit(args, {"checks": checks, "ok": not fatal}, human)
     return 1 if fatal else 0

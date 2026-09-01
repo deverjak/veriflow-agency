@@ -343,6 +343,7 @@ veriflow-agency/
   packs/
     review-graph/
     qa/
+    legal/
   schemas/            run.v1.json
                       finding.v1.json
   docs/
@@ -622,6 +623,19 @@ Rozdělit metodu od stavu:
 **Hotovo, když:** QA běží přes Agency na `main-panel` **a** existuje druhá konfigurace pro `nalekci-pulse` (i kdyby úzce zaměřená), a jeho nálezy se v extension chovají stejně jako nálezy z review-graph.
 
 **Proč až teď:** pack formát se tímhle krokem **validuje nebo vyvrátí**. Kdyby byl QA pack #1, navrhl bys formát podle jednoho příkladu. Takhle ho ověřuješ druhým, výrazně odlišným tvarem — a to je jediný způsob, jak zjistit, že je špatně. Zároveň se tím ověří, že `finding.v1` není přišitý na jeden pack.
+
+---
+
+### Právník jako pack #3 *(1. 9.)*
+
+Třetí tvar, protože recenzent i QA mají jeden zdroj pravdy — repozitář. Právník má dva: repozitář **a předpis, který v repozitáři není**. To je první pack, který musí sáhnout ven, a odpověď na otázku „kam" je součást metody, ne improvizace agenta: české zákony z e-Sbírky přes ELI (open data, bez klíče), evropské z Publications Office podle CELEX. Adresy bydlí v `lawSources` v konfiguraci projektu, takže změna endpointu není upgrade packu a `offline: true` je zapnutelný stav, ne výpadek.
+
+Dvě věci, které z tohohle packu vypadly a jinde nejsou:
+
+- **Aplikační brána.** `business.model` a `business.size` jsou povinná konfigurace a `agency doctor` je vymáhá. Právní specialista, který neví, kdo je zákazník a jak je firma velká, nevyrobí prázdný výstup — vyrobí povinnost, kterou nikdo nemá. Mikropodnik je mimo oddíly 3 a 4 DSA i mimo zákon o přístupnosti; § 1752 platí jen na dlouhodobé opakované závazky; DAC7 se zapíná podnikatelskými uživateli, ne slovem „marketplace“ v pitch decku. Závěry jdou do `.agency/legal/applicability.md`, aby je druhý běh neodvozoval znovu.
+- **Kalibrační brána.** `posture.requireCitation` zahazuje tvrzení bez konkrétního ustanovení dřív, než se boduje, a dimenze `over-compliance` hlásí opačný směr chyby — re-consent okno u změny, kterou kryje sjednaný mechanismus, souhlas u zpracování běžícího na smlouvě, archiv VOP kvůli pravidlu, které neexistuje. Obecné modely v tomhle oboru nechybují náhodně, chybují **systematicky nahoru**; pack bez téhle brány by tu chybu jen zopakoval s razítkem nástroje.
+
+**Co to vynutilo v jádře:** jednu řádku. `agency doctor` měl nápovědu „Ready. agency run review-graph --pr <n> · agency run qa --prompt …“ napevno; třetí specialista by po ní zůstal neviditelný přesně ve chvíli, kdy ho uživatel hledá. Teď se skládá z běhové politiky nainstalovaných packů (`_run_hint`). Nic jiného se sáhnout nemuselo — `finding.v1` unesl nález, jehož evidencí je citace paragrafu a jehož kotva vede do markdownu, a to je po QA druhé nezávislé potvrzení, že kontrakt není přišitý na kód.
 
 ---
 

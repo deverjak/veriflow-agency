@@ -12,8 +12,16 @@ projekty stejná, zadání ne — a právě zadání dělá ze specialisty tvéh
 Ke každému nálezu napíše **Playwright spec, který na něm spadne**; ten se uloží
 k běhu, takže „je to už opravené?" se za rok zodpoví spuštěním, ne dalším sezením.
 
+**Právník** projde právní povrch produktu — VOP, podmínky pro partnery, změnová
+doložka, souhlasy, cookies, DAC7 — proti tomu, co české a evropské předpisy
+opravdu říkají. Každý nález nese citaci ustanovení přečtenou z primárního zdroje
+(e-Sbírka přes ELI, EU právo přes CELEX). A protože obecné modely v tomhle oboru
+chybují hlavně směrem nahoru, hlásí i **povinnosti, které si produkt vymyslel sám**:
+re-consent okno u změny, kterou už kryje sjednaný mechanismus, souhlas u zpracování
+běžícího na smlouvě, archiv VOP zřízený kvůli pravidlu, které neexistuje.
+
 Každý nález má evidenci, kotvu, která přežije pozdější změny kódu, a rozhodnutí,
-ze kterého se dá spočítat, kolik z toho byla pravda. Oba specialisté píšou do
+ze kterého se dá spočítat, kolik z toho byla pravda. Všichni specialisté píšou do
 téhož kontraktu, takže se v panelu, ve frontě i v metrikách chovají stejně.
 
 Každého z nich si můžeš najmout **jednou na každý AI runner** — recenzenta na
@@ -154,6 +162,41 @@ Reprodukční specy jdou do `.agency/runs/<id>/specs/` a commitují se s během.
 `playwright.specTarget: "suite"` je pošle rovnou do testovací sady projektu — to je
 ale rozhodnutí o repozitáři, takže se o něj musíš říct.
 
+## Právní revize
+
+```
+agency hire legal
+agency config legal --set business.model="marketplace" --set business.size="micro"
+agency doctor
+
+agency run legal
+agency run legal --prompt "musí být změna VOP oznámena předem?"
+```
+
+Než se cokoli kontroluje, rozhodne se **co vůbec platí**. `business.model`
+a `business.size` jsou proto povinná konfigurace a `agency doctor` je vymáhá:
+mikropodnik je mimo oddíly 3 a 4 DSA i mimo zákon o přístupnosti, § 1752 platí jen
+na dlouhodobé opakované závazky a DAC7 se zapíná až `counterparties.businessUsers`.
+Pack, který tohle neví, umí vyrobit povinnost, kterou nikdo nemá — a to je u
+právníka ta nejdražší chyba. Dimenze `partners` a `tax-reporting` se proto samy
+nezapínají; přidáš je do `review.dimensions`, až projekt podnikatelské uživatele
+opravdu má. Závěry si pack zapisuje do `.agency/legal/applicability.md`, takže
+druhý běh gate neodvozuje znovu.
+
+Předpis se **nečte z paměti**. České zákony bere z e-Sbírky přes ELI (open data,
+bez klíče), evropské z Publications Office podle CELEX; znění, o které se nález
+opírá, se ukládá k běhu. `posture.requireCitation: true` znamená, že tvrzení bez
+konkrétního ustanovení se zahodí dřív, než se boduje — to je celá pointa packu.
+
+| `posture.level` | Co se hlásí |
+|---|---|
+| `proportionate` *(výchozí)* | jen to, co vyžaduje jmenované ustanovení nebo vlastní slib produktu |
+| `conservative` | navíc obhajitelná dobrá praxe, vždy označená a nikdy bodovaná jako povinnost |
+
+Právník **nic nemění** — ani VOP, ani kód. Když si vyžádáš návrh, jde do
+`.agency/runs/<id>/drafts/`. A nenahrazuje advokáta: připravuje mu otázky
+a evidenci, aby jeho hodina padla na to těžké.
+
 ## Jak je to poskládané
 
 ```
@@ -186,7 +229,7 @@ by triage neuměl.
 |---|---|
 | `packages/core/` | jádro a CLI (Python, `uv`) |
 | `packages/extension/` | VS Code extension (plain JS, bez build stepu) |
-| `packs/` | metody práce, ne obsah (`review-graph`, `qa`) — kdo je jimi najatý, je v projektu |
+| `packs/` | metody práce, ne obsah (`review-graph`, `qa`, `legal`) — kdo je jimi najatý, je v projektu |
 | `schemas/` | `run.v1`, `finding.v1` — kontrakt obou stran hranice |
 | `docs/` | rozhodnutí a plán, včetně toho, co se v nich změnilo a proč |
 
