@@ -29,6 +29,7 @@ A decision is about one request. A finding is about the system that produced it.
 <RUN_DIR>/evidence/roadmap/**             the roadmap as it read at this moment, frozen
 <RUN_DIR>/evidence/known-findings.json    what this project already found and how it ended
 <RUN_DIR>/evidence/known-pages.json       your own pages: what past runs concluded
+<RUN_DIR>/evidence/recall.json      only when the project switched recall on: semantic hits from this machine's memory. Background, never a source for a finding.
 <RUN_DIR>/evidence/recent-commits.txt     what has actually been happening
 <RUN_DIR>/run.json                        the run record you complete at the end
 ```

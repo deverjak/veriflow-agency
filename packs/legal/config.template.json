@@ -141,6 +141,15 @@
     "$comment_decisions": "What the company decided to live with, and on whose authority. A risk that was accepted once must not come back as a finding every month."
   },
 
+  "recall": {
+    "$comment": "SEMANTIC RECALL — an optional experiment, off by default. The knowledge bundle in `.agency/knowledge/` is the memory that ships with the repository and needs no daemon; this adds semantic search over a Hindsight bank running on this machine. Turn it on with `agency config <pack> --set recall.enabled=true`. Two things to know first: the run gets `evidence/recall.json` next to the bundle, and the daemon extracts facts with an LLM of its own — so what is retained can reach whichever model that daemon is configured with. Only a local address is ever used; a `cloud` server named in ~/.hindsight/coding-agent.json is refused, not followed.",
+
+    "enabled": false,
+
+    "baseUrl": null,
+    "$comment_baseUrl": "Where the daemon listens. null means: read ~/.hindsight/coding-agent.json (the harness plugins own that file), then HINDSIGHT_API_PORT, then http://127.0.0.1:9077. The bank is coding-agent::<name of the repository directory> — the same one the Claude Code and Codex hooks fill, so an interactive session and an agency run share it."
+  },
+
   "review": {
     "$comment": "The shared output policy — every pack has this block: which dimensions run, what threshold a finding must clear, what language it is written in.",
 

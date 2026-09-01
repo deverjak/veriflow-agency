@@ -168,14 +168,29 @@ Tři vazby, zbytek je volný:
 
 ---
 
-## Fáze 7 — Hindsight recall adaptér (experiment, za flagem)
+## Fáze 7 — Hindsight recall adaptér (experiment, za flagem) — **postavené 1. 9. 2026, čeká na vyhodnocení**
 
-> [`shared-memory.md`](shared-memory.md) → **Krok 5**, orchestrátorová část. Blokovala ji [`teams.md`](teams.md) **Krok 2** (`agency run --wait`) — ta překážka padla 1. 9. 2026, recall i retain teď mají kam zavěsit.
+> [`shared-memory.md`](shared-memory.md) → **Krok 5**, orchestrátorová část. Blokovala ji [`teams.md`](teams.md) **Krok 2** (`agency run --wait`) — ta překážka padla 1. 9. 2026, recall i retain mají kam zavěsit.
 
 - [x] `agency run --wait` z [`teams.md`](teams.md) Kroku 2 (subprocess, exit code, auto-ingest) — hotovo 1. 9. 2026, „Co plán nepředpokládal“ je u [Kroku 2](teams.md) v jeho vlastním plánu
-- [ ] `hindsight-client`, výhradně lokální daemon (`--server daemon`), banka `coding-agent::{gitProject}`
-- [ ] **recall** před spuštěním → `evidence/recall.json` · **retain** po `ingest` → `summary.md` + přijaté nálezy
-- [ ] po ~10 bězích vyhodnotit kill criteria; když recall nepřinesl nic nad bundle, adaptér zhasnout
+- [x] `hindsight-client` jako volitelný extra, výhradně lokální démon, banka `coding-agent::<jméno hlavního worktree>`
+- [x] **recall** při přípravě → `evidence/recall.json` · **retain** po `ingest` (shrnutí) a po `triage` (rozhodnutí)
+- [ ] po ~10 bězích vyhodnotit kill criteria — `agency metrics` počítá cizí zásahy; nula znamená zhasnout
+
+**Hotovo, když:** běh se zapnutým flagem dostane `evidence/recall.json`, běh bez démona doběhne beze změny, a `agency metrics` umí říct, kolik zásahů nepřišlo od Agency. — ✅ ověřeno end-to-end proti stub démonu na 9077 i bez něj; `tests/test_recall.py` (19 testů, z toho jeden po drátě se skutečným klientem).
+
+### Co plán nepředpokládal
+
+- **Blokáda byla jen z poloviny skutečná.** `--wait` nebylo potřeba proto, že by adaptér musel vlastnit celý cyklus: recall patří do přípravy (má ho i běh spuštěný ručně) a retain do brány, kterou prochází `agency ingest` i `--wait`. Krok 2 tedy adaptér neodblokoval, spíš mu ukázal, že žádné jediné místo „kolem `--wait`“ neexistuje.
+- **„Retain po ingestu → přijaté nálezy“ nejde.** V okamžiku brány není přijaté nic — brána vyrábí kandidáty, přijímá se až v triage. Ukládá se proto `summary.md` po bráně a **rozhodnutí** při triage. Kandidáty ukládat nelze: nález, o kterém nikdo nerozhodl, je tvrzení, a banka plná neověřených tvrzení by recall utopila. Zamítnutí je přitom cennější než přijetí — „reconsent flow je pro tenhle web irelevantní“ je znalost o produktu.
+- **Port není 8888.** `hindsight-client` má vlastní výchozí `8888` (konvence self-hosted serveru), ale démon, který startují harness pluginy, poslouchá na `127.0.0.1:9077`. Adaptér proto čte `~/.hindsight/coding-agent.json` (a `HINDSIGHT_API_*`) — jinak by uživatel s démonem dostal prázdnou banku a žádné vysvětlení.
+- **Výchozí režim pluginu je `cloud`.** Kdyby adaptér tu konfiguraci poslušně následoval, poslal by nálezy projektu do cizí služby — přesně to, co má §4 plánu zakázané. Adresa mimo tenhle stroj se proto **odmítá**, ne následuje. Je to pravidlo v kódu, ne v dokumentaci.
+- **Banka se jmenuje podle HLAVNÍHO worktree.** Ověřeno v `gitProjectName()` runtimu pluginu: rozhoduje jméno adresáře hlavního worktree, ne toho, ve kterém se běží. Bez toho by měl každý běh recenzenta vlastní banku a sdílení s interaktivní session — jediný důvod, proč adaptér existuje — by nefungovalo. Když se git nezeptá, banka se **nehádá**; plugin dělá totéž.
+- **Kill criteria potřebují mechaniku, ne dobrý úmysl.** „Přinesl recall něco nad bundle“ se dá měřit jen tak, že se pozná, co zapsala Agency sama: každý retain nese značku `agency`, každý běh si zapíše `recalledForeign` a `agency metrics` to sečte. Nula cizích zásahů po deseti bězích = adaptér zhasnout.
+- **Démon extrahuje fakta vlastním LLM.** Lokální adresa tedy neznamená, že obsah nikam nejde — daemon si volá model, na který je nastavený. Patří to do konfigurace jako varování, ne do poznámky pod čarou.
+- **`recalled*` muselo do `MEMORY_STATS`.** Táž past jako u `knownFindings` ve Fázi 0: `run.graph` má v `run.v1` zavřený seznam klíčů a grafový běh se zapnutým recallem by psal neplatný záznam.
+- **Klient se musí zavírat.** Bez `close()` vypíše aiohttp na konci procesu `Unclosed client session` doprostřed výstupu běhu — varování cizí knihovny, které vypadá jako chyba nástroje.
+- **Windows si k příkazu domyslí jen `.exe`** — viz Krok 2; tady se to potvrdilo znovu při ověřování přes `fake-agent.CMD`.
 
 ---
 
@@ -203,3 +218,13 @@ Tři vazby, zbytek je volný:
 | 7 — Hindsight adaptér | shared-memory Krok 5 + teams Krok 2 | ~1,5 dne + vyhodnocení | 5 |
 
 Fáze 0–3 jsou **~2 dny** a uzavírají graf. Fáze 0–6 jsou **~6 dní** a dají paměť, která patří projektu a čte ji každý provider. Fáze 7 je ohraničený experiment, ne závislost.
+
+---
+
+## Co zbývá
+
+Číslované fáze jsou hotové. Otevřené zůstává tohle — nic z toho neblokuje nic dalšího:
+
+- **Fáze 0b — harness hooky** (nezaškrtnuté od začátku, nezávislé na všem). `npx @vectorize-io/hindsight-coding-agents install claude-code` / `codex`. Instaluje se do konfigurace harnessu **uživatele**, ne do projektu — proto to nikdy neudělá nástroj sám. S Fází 7 se to teď potkává: hooky plní tutéž banku, takže jsou to dvě poloviny téhož experimentu.
+- **Vyhodnocení Fáze 7** po ~10 bězích se zapnutým flagem, viz kill criteria výše.
+- **Odložené bloky** [výše](#odloženo--čeká-na-spouštěč) — čekají na spouštěč, ne na kapacitu.

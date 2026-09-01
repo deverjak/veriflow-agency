@@ -88,7 +88,9 @@ To, co Hindsight řeší „knowledge pages“ a co dnes nemá domov (§1 bod 2)
 - SKILL.md dostane pravidlo: na konci běhu aktualizuj svoje stránky — **závěry, ne log**; co přestalo platit, smaž nebo označ `deprecated`. Příprava běhu stránky packu přibalí do kontextu.
 - v1 jen pro packy s `worktree: false` (po, qa, legal — běží v projektu a můžou psát přímo). Reviewer běží ve worktree na jiné hlavičce; jeho zápis stránek musí jít přes RUN_DIR a aplikovat se při `ingest` — až v druhé vlně, ať v1 nestojí na nejsložitějším případu.
 
-### Krok 5 — Hindsight jako recall adaptér (experiment, ~1 den + vyhodnocení; **za flagem**)
+### Krok 5 — Hindsight jako recall adaptér (experiment, ~1 den + vyhodnocení; **za flagem**) — postavené 1. 9. 2026
+
+> Adaptér stojí, vyhodnocení běží. Co se při stavbě ukázalo jinak — port `9077` místo `8888`, `cloud` jako výchozí režim pluginu, „přijaté nálezy“ neexistující v okamžiku brány — je v [`tasks.md`](tasks.md), Fáze 7, „Co plán nepředpokládal“. Harness hooky (třetí odrážka) zůstávají nenainstalované: sahají do konfigurace uživatelova harnessu, ne do projektu.
 
 Bundle dává strukturu a přenositelnost, ale ne sémantické „najdi relevantní“ přes stovky konceptů. To se nestaví — adaptuje se (stejné pravidlo jako u grafu: engine nestavíme, [`implementation-plan-v0.md`](../implementation-plan-v0.md) §3.1).
 

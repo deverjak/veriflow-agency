@@ -25,6 +25,10 @@ packages = ["src/agency"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+# Sémantický recall (`docs/plans/shared-memory.md` Krok 5) je experiment za
+# flagem a jeho klient táhne 18 balíčků včetně aiohttp a pydantic. Do instalace
+# někoho, kdo ho nezapnul, nemá co dělat — `agency` bez něj funguje beze změny.
+recall = ["hindsight-client>=0.9"]
 
 # Testy jádra běží mimo VS Code i mimo skutečné repozitáře uživatele — celý
 # řetěz se staví nad dočasným git repem, takže jdou pustit stokrát za sebou.
