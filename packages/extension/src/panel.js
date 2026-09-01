@@ -283,6 +283,31 @@ function tallyTable(title, rows) {
     '</table>';
 }
 
+/**
+ * How often two specialists land on the same thing.
+ *
+ * Only shown once two of them have actually met over the same code — with one
+ * worker the number is always zero and would read as a failure rather than as
+ * "not applicable".
+ */
+function agreementHtml(a) {
+  if (!a || a.hires <= 1 || !(a.crossHire || a.sameHire)) return '';
+  return `
+    <h2>Agreement</h2>
+    <dl class="grid">
+      <dt>found by another specialist too</dt><dd>${a.crossHire}</dd>
+      <dt>found twice by the same one</dt><dd>${a.sameHire}</dd>
+    </dl>
+    <div class="note"><strong>A repeat is credited to whoever found it, never to the
+      overall number.</strong>
+      <span>The second specialist to arrive is marked as a duplicate and never reaches
+      triage — under “By specialist” it would look like it found nothing, so there it
+      inherits the decision of the finding it repeats. Counting it twice in the overall
+      precision would inflate the one number the whole tool is judged by.
+      A high first row means the second runner is buying confirmation rather than
+      coverage — which is a reason to run them on different pull requests.</span></div>`;
+}
+
 function metricsHtml(m) {
   if (!m) return shell('Metrics', '<p class="empty">Metrics could not be loaded.</p>');
   const t = m.triage, f = m.findings, q = m.queue;
@@ -317,7 +342,9 @@ function metricsHtml(m) {
 
     ${tallyTable('By dimension', m.byDimension)}
     ${tallyTable('By severity', m.bySeverity)}
+    ${tallyTable('By specialist', m.byHire)}
     ${tallyTable('By model', m.byModel)}
+    ${agreementHtml(m.agreement)}
     ${m.rejectReasons ? `<h2>Reasons for rejection</h2><table>` +
       Object.entries(m.rejectReasons).map(([k, v]) =>
         `<tr><td>${esc(k)}</td><td class="num">${v}</td></tr>`).join('') + '</table>' : ''}

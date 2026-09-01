@@ -16,6 +16,11 @@ Každý nález má evidenci, kotvu, která přežije pozdější změny kódu, a
 ze kterého se dá spočítat, kolik z toho byla pravda. Oba specialisté píšou do
 téhož kontraktu, takže se v panelu, ve frontě i v metrikách chovají stejně.
 
+Každého z nich si můžeš najmout **jednou na každý AI runner** — recenzenta na
+Claudovi i recenzenta na Codexu — a pustit je na tentýž pull request vedle sebe.
+Sdílejí jednu konfiguraci, jednu frontu nálezů a jeden dedup, takže co druhý
+zopakuje, se označí jako duplicita místo aby se tě to ptalo dvakrát.
+
 ## Instalace
 
 ```powershell
@@ -34,7 +39,7 @@ jen na to, co najatí specialisté opravdu potřebují.
 
 ```
 cd <projekt>
-agency add review-graph      # nainstaluje specialistu do projektu
+agency hire review-graph     # nainstaluje metodu a postaví na ni prvního pracovníka
 agency doctor                # předpoklady
 agency run review-graph --pr 123
 #   … CLI vypíše hotový příkaz; spusť ho ve worktree
@@ -45,11 +50,60 @@ agency metrics               # precision, dedup, fronta
 ```
 
 Totéž klikáním: ikona **Agency** v activity baru VS Code.
+(`agency add` je totéž pod starším jménem.)
+
+## Víc providerů nad jednou metodou
+
+**Pack je metoda, hire je pracovník**, který se jí drží. Táž metoda jde najmout
+jednou na každý runner:
+
+```
+agency providers                              # co je na tomhle stroji
+agency hire review-graph --provider codex     # druhý recenzent, jiný runner
+agency hire review-graph --model opus         # nebo tentýž runner, silnější model
+agency roster                                 # kdo je tu najatý
+
+agency run review-graph@claude --pr 123
+agency run review-graph@codex  --pr 123       # klidně současně, v druhém terminálu
+```
+
+Ve VS Code je to jeden dialog: **Review a pull request…** se po výběru PR zeptá,
+kdo ho má vzít, a **vybrat jich smíš víc** — každý dostane vlastní terminál.
+
+Co je sdílené a co ne:
+
+| Sdílené (patří metodě) | Vlastní (patří pracovníkovi) |
+|---|---|
+| `.agency/<pack>.json` — zadání, prahy, dimenze, prohlížeč | runner a model |
+| fronta nálezů, rozhodnutí, dedup, kotvy | vlastní worktree u paralelního běhu |
+| paměť projektu — co už se našlo a jak se o tom rozhodlo | vlastní marker na PR |
+
+Poslední dva řádky jsou to, co dělá paralelní běh bezpečným: bez vlastního
+worktree by druhý recenzent prvnímu smazal rozdělanou práci, a bez vlastního
+markeru by ho z toho commitu vyzamkl.
+
+`agency metrics` pak umí to, kvůli čemu se dva providery pouštějí: rozpad
+**by specialist** a `agreement` — kolikrát našli totéž. Vysoká shoda znamená, že
+druhý runner platíš za potvrzení, ne za pokrytí, a je čas pustit ho na jiné PR.
+
+### Nový runner na stroji
+
+Když si nainstaluješ další CLI agent, není potřeba vydávat nástroj:
+
+```
+agency providers --add grok --bin grok --models "fast,heavy"
+agency hire review-graph --provider grok --model heavy
+```
+
+Provider je vlastnost **stroje** (`~/.agency/providers.json`), roster vlastnost
+**projektu** (`.agency/hires.json`, commituje se). Proto `agency doctor` řekne
+„tenhle specialista u tebe běžet nemůže, `grok` není na PATH" místo aby to
+zjistil až běh — kolega, který si repo naklonuje, nemusí mít tvoje nástroje.
 
 ## QA sezení
 
 ```
-agency add qa
+agency hire qa
 #   … do .agency/qa.json doplň app.baseUrl (kde aplikace běží)
 
 agency brief qa --set "Rezervační aplikace pro lekce. Nejdůležitější je rezervace a platba."
@@ -64,6 +118,10 @@ Zadání má dvě vrstvy, protože každá platí jinak dlouho: **trvalé** (`br
 v konfiguraci projektu) platí pro každý běh, **jednorázové** (`--prompt`, `--scenario`)
 jen pro tenhle. Obě jdou do run recordu, takže „které zadání dává lepší nálezy“ je
 otázka, na kterou umí nástroj odpovědět čísly.
+
+QA se pouští po jednom, i když je jich najatých víc: sezení řídí běžící aplikaci,
+a dvě najednou by se praly o tentýž prohlížeč, databázi a fixtures. Paralelně jde
+pouštět recenze, ne sezení.
 
 QA běží **nad pracovní kopií**, ne v jednorázovém worktree — aplikace, kterou zkouší,
 běží nad ní. Zdrojový kód je proto ke čtení; zapisuje se do běhového adresáře.
@@ -128,7 +186,7 @@ by triage neuměl.
 |---|---|
 | `packages/core/` | jádro a CLI (Python, `uv`) |
 | `packages/extension/` | VS Code extension (plain JS, bez build stepu) |
-| `packs/` | specialisté — metoda práce, ne obsah (`review-graph`, `qa`) |
+| `packs/` | metody práce, ne obsah (`review-graph`, `qa`) — kdo je jimi najatý, je v projektu |
 | `schemas/` | `run.v1`, `finding.v1` — kontrakt obou stran hranice |
 | `docs/` | rozhodnutí a plán, včetně toho, co se v nich změnilo a proč |
 

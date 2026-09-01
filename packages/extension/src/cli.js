@@ -78,6 +78,16 @@ async function doctor(cwd) {
   return Array.isArray(d) ? d : (d && d.checks) || [];
 }
 const packs = (cwd) => read(cwd, ['packs'], []);
+
+/**
+ * Who is hired in this project. One row per worker, not per method — the same
+ * pack can be hired once per provider, and the panel lists workers.
+ */
+const roster = (cwd) => read(cwd, ['roster'], []);
+
+/** AI runners on this machine. A property of the machine, so it is asked for
+ *  separately from anything the project knows. */
+const providers = (cwd) => read(cwd, ['providers'], []);
 const status = (cwd) => read(cwd, ['status', '--limit', '25'], []);
 const metrics = (cwd) => read(cwd, ['metrics'], null);
 const projects = (cwd) => read(cwd, ['projects'], []);
@@ -116,9 +126,13 @@ const ingest = (cwd, runId) =>
  * skládala i extension, vznikne druhé místo, kde se dá nastavit model, a
  * run record by lhal.
  */
-async function run(cwd, pack, { pr, latestMerged, force, model, provider,
+async function run(cwd, who, { pr, latestMerged, force, model, provider,
   prompt, scenario, since } = {}) {
-  const args = ['run', pack];
+  // `who` is a hire id when the project has a roster, a pack name otherwise.
+  // Resolving it belongs to the core: the extension would otherwise have to
+  // decide what happens when a pack has three workers, and that decision would
+  // then differ between the panel and the terminal.
+  const args = ['run', who];
   if (pr) args.push('--pr', String(pr));
   if (latestMerged) args.push('--latest-merged');
   if (force) args.push('--force');
@@ -137,7 +151,49 @@ async function run(cwd, pack, { pr, latestMerged, force, model, provider,
   return r;
 }
 
+/**
+ * Close a run whose terminal is gone, or delete it outright.
+ *
+ * Nothing in the extension can tell whether an agent is still alive: the run
+ * happens in a terminal, and closing that terminal leaves no signal behind. So
+ * this is never automatic — it is the user saying the run is over.
+ */
+const cleanup = (cwd, { run, unfinished, discard, force } = {}) => {
+  const args = ['cleanup'];
+  if (run) args.push('--run', run);
+  if (unfinished) args.push('--unfinished');
+  if (discard) args.push('--discard');
+  if (force) args.push('--force');
+  return call(cwd, args, { timeout: 120000 });
+};
+
 const addPack = (cwd, pack) => call(cwd, ['add', pack]);
+
+/**
+ * Hire a specialist. With a provider it adds another worker to a pack that may
+ * already have one — that is how “Reviewer · sonnet” and “Reviewer · codex”
+ * come to exist side by side over one configuration and one finding queue.
+ */
+const hire = (cwd, pack, { provider, model, as, title } = {}) => {
+  const args = ['hire', pack];
+  if (provider) args.push('--provider', provider);
+  if (model) args.push('--model', model);
+  if (as) args.push('--as', as);
+  if (title) args.push('--title', title);
+  return call(cwd, args);
+};
+
+/** Remove a worker. The pack, its configuration and past runs stay. */
+const fire = (cwd, hireId) => call(cwd, ['fire', hireId]);
+
+/** Register a runner this machine has, e.g. a freshly installed `grok`. */
+const addProvider = (cwd, id, { bin, title, models } = {}) => {
+  const args = ['providers', '--add', id];
+  if (bin) args.push('--bin', bin);
+  if (title) args.push('--title', title);
+  if (models) args.push('--models', models);
+  return call(cwd, args);
+};
 
 /**
  * Konfigurace packu i s tím, co si nástroj o projektu domyslel.
@@ -167,6 +223,7 @@ const brief = (cwd, pack, { set, scenario, remove } = {}) => {
 
 module.exports = {
   bin, call, probe,
-  init, doctor, packs, status, metrics, projects, findings, prs,
-  triage, note, ingest, run, addPack, brief, packConfig, setConfig,
+  init, doctor, packs, roster, providers, status, metrics, projects, findings, prs,
+  triage, note, ingest, run, cleanup, addPack, hire, fire, addProvider,
+  brief, packConfig, setConfig,
 };

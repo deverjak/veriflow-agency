@@ -275,24 +275,37 @@ Test dnes **nejde zodpovědět**, protože žádný běh nezaznamenává cost ([
 
 Výchozí model si člověk volí pro to, co dělá nejčastěji — u tebe kódování, tedy ten nejsilnější. Recenze je ale jiná práce: čtení, klasifikace a zápis JSONu, ne psaní kódu. Nutit ji do stejné volby znamená platit psací sazbu za čtecí úkol.
 
-Proto je volba agenta součástí **konfigurace packu v projektu**, ne globálního nastavení editoru:
+Proto volba agenta patří **do projektu**, ne do globálního nastavení editoru — a od 31. 8. večer ne do jednoho pole konfigurace, ale do **rosteru**:
 
 ```jsonc
-// <projekt>/.agency/review-graph.json
-"agent": {
-  "provider": "claude",     // claude | codex
-  "model": "sonnet",        // null = výchozí model providera
-  "extraArgs": []
-}
+// <projekt>/.agency/hires.json — kdo je tu najatý
+{ "hires": [
+  { "id": "review-graph@claude", "pack": "review-graph", "provider": "claude", "model": "sonnet" },
+  { "id": "review-graph@codex",  "pack": "review-graph", "provider": "codex",  "model": null }
+]}
 ```
 
-Jednorázově to přebije `agency run review-graph --pr 466 --model opus`.
+Jednorázově to přebije `agency run review-graph@claude --pr 466 --model opus`.
 
 Tvar spouštěcího příkazu **vlastní CLI**, ne klient. `agency run --json` vrací hotové `launch` argv a extension ho jen pošle do terminálu — kdyby si příkaz skládala i ona, vzniklo by druhé místo, kde se model dá nastavit jinak, a `run.json` by lhal.
 
 A právě proto se `agent.provider` / `agent.model` **zapisuje do run recordu**. Bez toho je otázka *„dává silnější model lepší nálezy, nebo jen dražší?"* nezodpověditelná — a je to přesně ta otázka, kterou má tenhle nástroj umět zodpovědět čísly, ne dojmem. Spolu s cost záznamem ze §3.3 tvoří dvojici, na které stojí test životaschopnosti: precision per model per koruna.
 
-Tabulka providerů je **data, ne větvení** (`runs.PROVIDER_DEFAULTS`) — `bin`, `modelFlag`, `dirFlag`. Ověřený je zatím jen `claude`; přidat další nevyžaduje zásah do kódu, stačí přepsat ty tři klíče v konfiguraci projektu.
+Tabulka providerů je **data, ne větvení** (`providers.py`) — `bin`, `modelFlag`, `dirFlag`, `promptFlag`. Ověřený je zatím jen `claude`; přidat další nevyžaduje zásah do kódu ani vydání nástroje: `agency providers --add grok --bin grok` zapíše řádek do `~/.agency/providers.json` a od té chvíle je grok najmutelný ve všech projektech. Provider je vlastnost **stroje**, hire vlastnost **projektu** — proto bydlí každý jinde a `agency doctor` umí říct „tenhle specialista u tebe běžet nemůže" místo toho, aby to zjistil až běh.
+
+### Roster: jedna metoda, víc pracovníků *(31. 8.)*
+
+Pack je metoda. Hire je pracovník, který se jí drží. Táž metoda jde najmout jednou na každý runner, takže „recenzent · sonnet" a „recenzent · codex" jsou dva řádky nad **jednou** konfigurací, **jednou** frontou nálezů a **jedním** dedupem. Hire nemá vlastní úložiště — sdílená paměť z toho plyne, nemusela se dodělávat.
+
+Důvod není kosmetický. Dva providery nad jedním pull requestem jsou nejlevnější způsob, jak zjistit, který z nich má pravdu; bez rosteru by to šlo udělat jen přepsáním `agent.provider` mezi běhy a run recordy by pak tvrdily, že je to táž práce, jen jinak nastavená.
+
+Tři věci, které to vynutilo, a bez kterých by paralelní běh vypadal, že funguje:
+
+1. **Worktree na pracovníka.** `worktree.path` má `{hire}` a `agency run` odmítne převzít adresář, který drží jiný běžící běh. Bez toho by druhý specialista prvnímu smazal rozdělanou recenzi `--force`em — a poznalo by se to tím, že chybí výsledek.
+2. **Marker na pracovníka.** `<!-- agency:review-graph:<hire>:<sha> -->`. Sdílený marker znamená, že první specialista druhého z toho commitu vyzamkne. Skládá ho jádro a předává hotový v `context.json`, aby pravidlo nebylo na dvou místech.
+3. **Duplicita se připíše svému autorovi.** Druhý provider, který najde totéž, se označí jako duplicita a do triage se nedostane — v rozpadu po specialistech by proto vypadal, že nenašel nic. V `byHire` a `byProvider` proto duplicita dědí rozhodnutí svého originálu; v celkové precision zůstává vyloučená, aby se jeden nález nepočítal dvakrát. Kolik z toho je shoda dvou různých pracovníků, říká `metrics.agreement` — a vysoké číslo je pokyn pustit je na různé PR, ne na tentýž.
+
+Kill criterium „třetí provider adaptér dřív než třetí pack" (§6) tím **nepadá**: třetí provider už není adaptér, ale řádek dat.
 
 ---
 
@@ -662,7 +675,7 @@ Sepsáno předem, dokud k projektu nejsi upsaný. Vyhodnocení proti stavu k 30.
 | Po 4 týdnech běhů je **precision < 25 %** | Přestat stavět runtime a opravit agenta — evidence requirements, prompt, scope. Platforma nad špatným generátorem je zesilovač šumu. | nelze vyhodnotit → řeší krok 0; proxy (shoda severity 6/6, 80 % dedup, sebekorekce) všechny příznivé |
 | **Cena za užitečný nález při plné API ceně > cena stejného nálezu od člověka** | Ekonomika stojí jen na subscription arbitráži. To není základ produktu. | neměřeno → řeší krok 3 |
 | Po 3 měsících jsi **jediný uživatel a nespouštíš to týdně** | Je to koníček. Legitimní — ale okamžitě přestat platit platformní daň (registry, RBAC, sync, packaging) a nechat to jako CLI + extension. | neaplikovatelné, projekt je starý dny |
-| Přistihneš se, že **píšeš třetí provider adaptér dřív, než máš třetí pack** | Stavíš pro imaginární ekosystém. | prošlo — 2 providery, 2 packy |
+| Přistihneš se, že **píšeš třetí provider adaptér dřív, než máš třetí pack** | Stavíš pro imaginární ekosystém. | prošlo — 2 providery, 2 packy; od 31. 8. je třetí provider řádek dat (`agency providers --add`), ne adaptér, takže tenhle příznak už neumí zaznít |
 
 **Poznámka k platformní dani.** Tohle je zatím osobní nástroj, ne produkt. Rozdíl není v ambici, ale v účtu: produkt platí za pack registry, podpisy, RBAC, audit log a víceuživatelský sync — a nic z toho nepotřebuje uživatel č. 1. Není nutné teď rozhodnout, který z těch dvou to je. Je nutné **nepředstírat, že je to rozhodnuté**, a neplatit tu daň, dokud rozhodnuté není.
 

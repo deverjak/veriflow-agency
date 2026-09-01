@@ -21,12 +21,12 @@
   },
 
   "worktree": {
-    "path": "../{repo}-review-pr-{n}",
-    "$comment_path": "A throwaway worktree. Nothing is ever checked out into the user's working copy — their branch and their work in progress stay untouched."
+    "path": "../{repo}-review-pr-{n}-{hire}",
+    "$comment_path": "A throwaway worktree. Nothing is ever checked out into the user's working copy — their branch and their work in progress stay untouched. Placeholders: {repo} {n} {hire} {provider} {model}. Keep {hire} in the path — two specialists reviewing the same pull request in parallel need two directories, and without it the second one would delete the first one's work."
   },
 
   "agent": {
-    "$comment": "Who handles the review and with what. The model is a property of the task, not of the user — you can keep coding on the strongest one and run reviews cheaper. Override it for a single run with `agency run review-graph --model <m>`.",
+    "$comment": "The fallback for a run that has no hire behind it. Who normally does the work is the roster — `agency roster`, `agency hire review-graph --provider codex`. This block still decides the launch shape (binary, extra flags) and it applies to `provider` below and to nobody else.",
     "provider": "claude",
     "model": "sonnet",
     "$comment_model": "null = keep the provider default model. The choice is written into the run record so you can measure which model produces better findings.",

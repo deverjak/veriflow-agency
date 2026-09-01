@@ -21,6 +21,11 @@ const snapshot = {
   probe: { ok: false, reason: 'loading', error: null },
   project: null,     // `agency init` — co nástroj o projektu ví
   packs: [],
+  // The roster — one entry per hired worker. Kept beside `packs` rather than
+  // inside them because the Specialists view lists workers, while “what does
+  // this method look at” still belongs to the pack.
+  hires: [],
+  providers: [],
   runs: [],
   findings: [],
   metrics: null,
@@ -76,10 +81,13 @@ async function refresh({ light = false } = {}) {
   snapshot.runs = runs || [];
 
   if (!light) {
-    const [packs, project, metrics, doctor] = await Promise.all([
-      cli.packs(cwd), cli.init(cwd), cli.metrics(cwd), cli.doctor(cwd),
+    const [packs, hires, providers, project, metrics, doctor] = await Promise.all([
+      cli.packs(cwd), cli.roster(cwd), cli.providers(cwd),
+      cli.init(cwd), cli.metrics(cwd), cli.doctor(cwd),
     ]);
     snapshot.packs = packs || [];
+    snapshot.hires = hires || [];
+    snapshot.providers = providers || [];
     snapshot.project = project || null;
     snapshot.metrics = metrics || null;
     snapshot.doctor = doctor || [];
@@ -91,4 +99,17 @@ async function refresh({ light = false } = {}) {
   return snapshot;
 }
 
-module.exports = { snapshot, onDidChange, refresh, queue, findingById, workspaceRoot, emitter };
+/** Workers of one pack. The Specialists view and every run picker read this. */
+function hiresOf(packName) {
+  return (snapshot.hires || []).filter((h) => h.pack === packName);
+}
+
+/** The pack a hire works by — its brief, its dimensions, its run policy. */
+function packOf(hire) {
+  return (snapshot.packs || []).find((p) => p.name === (hire && hire.pack)) || null;
+}
+
+module.exports = {
+  snapshot, onDidChange, refresh, queue, findingById, workspaceRoot, emitter,
+  hiresOf, packOf,
+};

@@ -134,13 +134,17 @@ Doplň `run.json`: `status`, `finishedAt`, `counts` a `cost` (provider, model, p
 
 Až teď, a jen když je v konfiguraci zapnuto:
 
-**`sinks.prComment`** — jeden souhrnný komentář, prosa v jazyce z `review.language`, bez emoji, plných 40 znaků SHA v každém odkazu. Marker pro idempotenci:
+**`sinks.prComment`** — jeden souhrnný komentář, prosa v jazyce z `review.language`, bez emoji, plných 40 znaků SHA v každém odkazu. Marker pro idempotenci vezmi **hotový z `context.json` (`prCommentMarker`)**, neskládej ho sám:
 
 ```
-<!-- agency:review-graph:<headRefOid> -->
+<!-- agency:review-graph:<hire>:<headRefOid> -->
 ```
 
-Před postnutím zkontroluj, jestli komentář s tímtéž markerem už na PR není — tentýž commit se nerecenzuje dvakrát. Posílej přes soubor (`gh pr comment <n> --body-file <tmp>`), ne inline `-b`, kvůli diakritice.
+Nese jméno specialisty, protože nad jedním PR můžou pracovat dva — recenzent na sonnetu a recenzent na codexu. Sdílený marker by znamenal, že první z nich druhého z toho commitu vyzamkne. Kdyby si marker skládal skill sám, byla by pravidla na dvou místech a `agency run` by přestalo poznat vlastní značku.
+
+Před postnutím zkontroluj, jestli komentář s tímtéž markerem už na PR není — tentýž commit tímtéž specialistou se nerecenzuje dvakrát. Posílej přes soubor (`gh pr comment <n> --body-file <tmp>`), ne inline `-b`, kvůli diakritice.
+
+Když v komentáři píšeš, kdo recenzi dělal, ber to z `context.json` → `hire.label`. Dva komentáře od dvou specialistů nad týmž PR jsou zamýšlený stav; dva nerozlišitelné komentáře nejsou.
 
 U `merged-pull-request` se komentář **defaultně neposílá** — retrospektivní audit starého PR nikdo nečte a jen zašumí historii. Pošli ho jen na výslovné vyžádání.
 

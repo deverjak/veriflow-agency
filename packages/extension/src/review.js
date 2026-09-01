@@ -52,10 +52,66 @@ function packInfo(name) {
   return (state.snapshot.packs || []).find((p) => p.name === name) || null;
 }
 
-/** Packy, které pracují nad projektem, ne nad pull requestem. */
+/** Workers whose method works over the project rather than over a pull request. */
+function workspaceHires() {
+  return (state.snapshot.hires || []).filter((h) => {
+    const p = packInfo(h.pack);
+    return p && p.installed && p.run && p.run.target === 'workspace';
+  });
+}
+
+/** Workers whose method walks a pull request. */
+function reviewHires() {
+  return (state.snapshot.hires || []).filter((h) => {
+    const p = packInfo(h.pack);
+    return p && p.installed && !(p.run && p.run.target === 'workspace');
+  });
+}
+
+/** Kept for callers that still think in packs — the workspace ones. */
 function workspacePacks() {
   return (state.snapshot.packs || []).filter(
     (p) => p.installed && p.run && p.run.target === 'workspace');
+}
+
+/**
+ * Which specialists should take this. Several may.
+ *
+ * Multi-select rather than a single pick, because two providers over the same
+ * code is the whole reason a method can be hired more than once — and asking
+ * twice would make the cheap thing feel expensive. One hired worker skips the
+ * dialog entirely.
+ */
+async function pickHires(candidates, { title, canMultiSelect = true } = {}) {
+  const usable = candidates.filter((h) => h.available);
+  if (!candidates.length) return [];
+  if (usable.length === 1 && candidates.length === 1) return usable;
+
+  const picked = await vscode.window.showQuickPick(
+    candidates.map((h) => ({
+      label: `${h.available ? '$(person)' : '$(warning)'} ${h.display}`,
+      description: h.available ? h.id : `${h.id} — \`${h.bin}\` is not on PATH`,
+      detail: [h.provider, h.model].filter(Boolean).join(' · '),
+      hire: h,
+    })),
+    {
+      title,
+      placeHolder: canMultiSelect
+        ? 'Pick more than one to run them side by side — they share the queue and dedup'
+        : 'One specialist',
+      canPickMany: canMultiSelect,
+      matchOnDescription: true,
+    });
+
+  if (!picked) return null;                       // Esc = odchod
+  const list = (Array.isArray(picked) ? picked : [picked]).map((x) => x.hire);
+  const blocked = list.filter((h) => !h.available);
+  if (blocked.length) {
+    vscode.window.showWarningMessage(
+      `Agency: ${blocked.map((h) => h.bin).join(', ')} is not on PATH — `
+      + `${blocked.map((h) => h.id).join(', ')} was skipped.`);
+  }
+  return list.filter((h) => h.available);
 }
 
 /**
@@ -109,49 +165,100 @@ async function askBrief(pack) {
 }
 
 /**
- * Běh nad projektem, jak je právě teď. Bez pull requestu, bez worktree —
- * QA zkouší běžící aplikaci, a ta běží nad pracovní kopií.
+ * Prepares one run per specialist and starts each in its own terminal.
+ *
+ * Preparation is SEQUENTIAL on purpose even though the runs themselves are
+ * parallel: `agency run` claims a worktree path, and letting two preparations
+ * race would mean the guard in the core sees an empty record and hands both of
+ * them the same directory. The agents then run side by side, which is the part
+ * that actually costs wall-clock time.
  */
-async function runOverWorkspace(cwd, pack, log) {
-  const cfg = vscode.workspace.getConfiguration('agency');
-  const brief = await askBrief(pack);
-  if (!brief) return null;
-
-  const result = await vscode.window.withProgress(
+async function runEach(cwd, hires, opts, log) {
+  const started = [];
+  await vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.Notification,
-      title: `Agency: preparing a ${pack} session`,
+      title: hires.length > 1
+        ? `Agency: preparing ${hires.length} runs`
+        : `Agency: preparing a ${hires[0].display} run`,
       cancellable: false,
     },
     async (progress) => {
-      progress.report({ message: 'workspace, evidence, what the project already knows…' });
-      return cli.run(cwd, pack, {
-        prompt: brief.prompt,
-        scenario: brief.scenario,
-        model: cfg.get('model') || undefined,
-        provider: cfg.get('provider') || undefined,
-      });
+      for (const h of hires) {
+        progress.report({ message: h.display });
+        const result = await cli.run(cwd, h.id, opts);
+        if (!result.ok) {
+          const msg = result.error || 'preparation failed';
+          if (result.reason === 'already-reviewed' && !opts.force) {
+            const again = await vscode.window.showWarningMessage(
+              `${h.display}: ${msg}`, 'Run anyway');
+            if (again) {
+              const forced = await cli.run(cwd, h.id, { ...opts, force: true });
+              if (forced.ok) started.push(launch(forced.data, log));
+              continue;
+            }
+            continue;
+          }
+          vscode.window.showErrorMessage(`Agency · ${h.display}: ${msg}`);
+          if (log) log.appendLine(`[run] ${h.id} failed: ${msg}`);
+          continue;
+        }
+        started.push(launch(result.data, log));
+      }
     });
 
-  if (!result.ok) {
-    const msg = result.error || 'preparation failed';
-    vscode.window.showErrorMessage(`Agency: ${msg}`);
-    if (log) log.appendLine(`[run] failed: ${msg}`);
-    return null;
+  if (started.length > 1) {
+    vscode.window.showInformationMessage(
+      `Agency: ${started.length} specialists are running side by side. They share one `
+      + 'queue of findings, so whatever the second one repeats is marked as a duplicate '
+      + 'rather than asked about twice.');
   }
-  return launch(result.data, log);
+  return started.length ? started[0] : null;
 }
 
 /**
- * Vybere PR, nechá CLI udělat deterministickou přípravu a pustí agenta.
- * Vrací data běhu, nebo null, když uživatel odešel.
+ * Běh nad projektem, jak je právě teď. Bez pull requestu, bez worktree —
+ * QA zkouší běžící aplikaci, a ta běží nad pracovní kopií.
+ */
+async function runOverWorkspace(cwd, who, log) {
+  // `who` is the worker already chosen — the run button on their own row.
+  // Asking again there would be asking a question the click already answered.
+  let chosen = who ? [who] : null;
+
+  if (!chosen) {
+    const candidates = workspaceHires();
+    if (!candidates.length) return null;
+    // A session drives the running application, so two of them at once would
+    // fight over the same browser, the same database and the same fixtures.
+    // One at a time is the honest default here.
+    chosen = await pickHires(candidates, {
+      title: 'Which specialist should run the session?',
+      canMultiSelect: false,
+    });
+    if (!chosen || !chosen.length) return null;
+  }
+
+  const brief = await askBrief(chosen[0].pack);
+  if (!brief) return null;
+
+  return runEach(cwd, chosen.slice(0, 1),
+    { prompt: brief.prompt, scenario: brief.scenario }, log);
+}
+
+/**
+ * Vybere PR, nechá CLI udělat deterministickou přípravu a pustí agenty.
+ * Vrací data prvního běhu, nebo null, když uživatel odešel.
  */
 async function pickAndRun(cwd, log) {
-  const cfg = vscode.workspace.getConfiguration('agency');
-  const pack = cfg.get('pack') || 'review-graph';
-  const info = packInfo(pack);
-  if (info && info.run && info.run.target === 'workspace') {
-    return runOverWorkspace(cwd, pack, log);
+  const candidates = reviewHires();
+  if (!candidates.length) {
+    // No worker over a pull request — fall back to whatever works over the
+    // project, so the button never dead-ends on a project that hired only QA.
+    if (workspaceHires().length) return runOverWorkspace(cwd, null, log);
+    const hire = await vscode.window.showInformationMessage(
+      'Agency: nobody is hired here yet.', 'Hire a specialist');
+    if (hire) await vscode.commands.executeCommand('agency.hire.add');
+    return null;
   }
 
   const picked = await vscode.window.withProgress(
@@ -174,51 +281,32 @@ async function pickAndRun(cwd, log) {
   if (!picked || !picked.pr) return null;
   const pr = picked.pr;
 
+  const chosen = await pickHires(candidates, {
+    title: `PR #${pr.number} — which specialists should review it?`,
+  });
+  if (!chosen || !chosen.length) return null;
+
   // Volitelné zaostření recenze. Prázdné pole je běžný stav — recenzent umí
   // celý PR sám a zadání jen mění pořadí a hloubku, ne pravidla.
   let focus;
+  const info = packInfo(chosen[0].pack);
   if (info && info.run && info.run.prompt && info.run.prompt.accepts) {
     focus = await vscode.window.showInputBox({
       title: `Review of PR #${pr.number} — anything to focus on?`,
       placeHolder: (info.run.prompt.placeholder) || 'Leave empty for a full review',
+      prompt: chosen.length > 1
+        ? `The same brief goes to all ${chosen.length} specialists — same task, different runners.`
+        : undefined,
       ignoreFocusOut: true,
     });
     if (focus === undefined) return null;   // Esc = odchod, ne prázdné zadání
   }
 
-  const result = await vscode.window.withProgress(
-    {
-      location: vscode.ProgressLocation.Notification,
-      title: `Agency: preparing the review of PR #${pr.number}`,
-      cancellable: false,
-    },
-    async (progress) => {
-      progress.report({ message: 'worktree, graph, evidence…' });
-      return cli.run(cwd, pack, {
-        pr: pr.number,
-        force: pr.reviewed || undefined,
-        prompt: focus || undefined,
-        model: cfg.get('model') || undefined,
-        provider: cfg.get('provider') || undefined,
-      });
-    });
-
-  if (!result.ok) {
-    const msg = result.error || 'preparation failed';
-    if (result.reason === 'already-reviewed') {
-      const again = await vscode.window.showWarningMessage(msg, 'Run anyway');
-      if (again) {
-        const forced = await cli.run(cwd, pack, { pr: pr.number, force: true, prompt: focus || undefined });
-        if (forced.ok) return launch(forced.data, log);
-      }
-      return null;
-    }
-    vscode.window.showErrorMessage(`Agency: ${msg}`);
-    if (log) log.appendLine(`[run] failed: ${msg}`);
-    return null;
-  }
-
-  return launch(result.data, log);
+  return runEach(cwd, chosen, {
+    pr: pr.number,
+    force: pr.reviewed || undefined,
+    prompt: focus || undefined,
+  }, log);
 }
 
 /** Pošle hotový příkaz od CLI do terminálu. Sestavovat ho tady by byla chyba. */
@@ -226,13 +314,17 @@ function launch(data, log) {
   const agent = data.agent || {};
   const target = data.target || {};
   const what = target.pr ? `PR #${target.pr}` : (target.ref || 'session');
-  const name = `Agency · ${what}` + (agent.model ? ` · ${agent.model}` : '');
+  // The terminal is named after the worker, not the model. With two of them on
+  // one pull request, two tabs called "Agency · PR #12" would be unusable.
+  const who = (data.hire && data.hire.label) || agent.model || agent.provider;
+  const name = `Agency · ${what}` + (who ? ` · ${who}` : '');
   const term = vscode.window.createTerminal({ name, cwd: data.worktree });
   term.show(true);
   term.sendText(data.launch.map(quote).join(' '));
 
   if (log) {
-    log.appendLine(`[run] ${data.runId} · worktree ${data.worktree}`);
+    log.appendLine(`[run] ${data.runId} · ${(data.hire && data.hire.id) || agent.provider}`
+      + ` · worktree ${data.worktree}`);
     log.appendLine(`[run] ${data.launch.join(' ')}`);
   }
   vscode.window.showInformationMessage(
@@ -246,4 +338,7 @@ function quote(arg) {
   return /[\s"']/.test(s) ? JSON.stringify(s) : s;
 }
 
-module.exports = { pickAndRun, runOverWorkspace, askBrief, workspacePacks, items };
+module.exports = {
+  pickAndRun, runOverWorkspace, askBrief, runEach, pickHires,
+  workspacePacks, workspaceHires, reviewHires, items,
+};

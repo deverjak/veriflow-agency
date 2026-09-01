@@ -286,9 +286,11 @@
         "no-findings",
         "needs-login",
         "quota",
+        "abandoned",
         "failed",
         "queued"
-      ]
+      ],
+      "description": "abandoned is not failed: preparation succeeded and the agent was launched, then the terminal was closed before it finished. Nothing here can see that terminal, so the run stays open until a person closes it - which makes an abandoned run a fact worth recording rather than an error to hide."
     },
     "exitReason": {
       "type": [
@@ -326,7 +328,7 @@
     },
     "agent": {
       "type": "object",
-      "description": "Čím byl běh odbaven. Model je součást záznamu, protože precision se porovnává mezi modely, ne jen mezi packy.",
+      "description": "What handled the run. The model is part of the record because precision is compared between models, not only between packs. `hire` names the roster entry that took it — with several specialists over one pack, provider and model alone no longer identify who did the work.",
       "additionalProperties": false,
       "properties": {
         "provider": {
@@ -345,6 +347,13 @@
         },
         "bin": {
           "type": "string"
+        },
+        "hire": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Id of the roster entry from .agency/hires.json, e.g. review-graph@codex. null = the run was handed over straight from the pack configuration."
         }
       }
     },
@@ -402,6 +411,13 @@
         "type": "integer",
         "minimum": 0
       }
+    },
+    "worktree": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "POSIX path of the throwaway worktree the run holds while it is running. It is recorded so a parallel run by another specialist can tell an occupied directory from an abandoned one instead of force-deleting a review in progress."
     }
   }
 }

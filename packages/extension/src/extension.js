@@ -262,31 +262,25 @@ function activate(context) {
     }
     if (!state.snapshot.probe.ok) return showNotReady();
 
-    const packs = review.workspacePacks();
-    if (!packs.length) {
+    if (!review.workspaceHires().length) {
       const hire = await vscode.window.showInformationMessage(
         'Agency: no specialist that works over the running project is hired here yet.',
         'Hire the QA engineer');
-      if (hire) await vscode.commands.executeCommand('agency.pack.add');
+      if (hire) await vscode.commands.executeCommand('agency.hire.add');
       return;
     }
-    let pack = packs[0].name;
-    if (packs.length > 1) {
-      const pick = await vscode.window.showQuickPick(
-        packs.map((x) => ({ label: x.title || x.name, detail: x.description, pack: x.name })),
-        { title: 'Which specialist should run?' });
-      if (!pick) return;
-      pack = pick.pack;
-    }
-    const d = await review.runOverWorkspace(state.snapshot.cwd, pack, log);
+    // Which worker takes it is asked inside — a method hired on two providers
+    // gives two candidates, and picking between them is the same question here
+    // as it is for a review.
+    const d = await review.runOverWorkspace(state.snapshot.cwd, null, log);
     if (d) setTimeout(() => refresh(), 2000);
   });
 
   // Nastavení prohlížeče pro QA. Formulář, protože tohle je jediné místo, kde
   // uživatel mění chování běhu a nemá důvod znát jména klíčů v konfiguraci.
-  reg('agency.qa.playwright', async (packName) => {
+  reg('agency.qa.playwright', async (arg) => {
     if (!state.snapshot.probe.ok) return showNotReady();
-    const pack = packName || pickBrowserPack();
+    const pack = packNameOf(arg) || pickBrowserPack();
     if (!pack) {
       vscode.window.showWarningMessage(
         'Agency: no installed specialist drives a browser — hire the QA engineer first.');
@@ -320,10 +314,10 @@ function activate(context) {
 
   // Trvalé zadání packu. Žije v konfiguraci projektu, takže platí i pro běh
   // z terminálu a pro agenta — editor je jen jedno ze tří míst, odkud se mění.
-  reg('agency.pack.brief', async (packName) => {
+  reg('agency.pack.brief', async (arg) => {
     const withBrief = (state.snapshot.packs || []).filter(
       (p) => p.installed && p.run && p.run.prompt && p.run.prompt.accepts);
-    let pack = packName;
+    let pack = packNameOf(arg);
     if (!pack) {
       if (!withBrief.length) {
         vscode.window.showWarningMessage('Agency: no installed specialist takes a brief.');
@@ -377,6 +371,54 @@ function activate(context) {
     await refresh();
   });
 
+  // Closing a run is never automatic. The agent runs in a terminal this
+  // process did not start and cannot watch, so "is it still going?" has no
+  // honest answer here — only the person who closed the terminal knows.
+  reg('agency.run.close', async (arg) => {
+    const id = runIdOf(arg);
+    const res = await cli.cleanup(state.snapshot.cwd, id ? { run: id } : { unfinished: true });
+    if (!res.ok) {
+      vscode.window.showErrorMessage(`Agency: ${res.error}`);
+      return;
+    }
+    const closed = (res.data.closed || []).filter((c) => c.action === 'abandoned');
+    log.appendLine(`[cleanup] closed ${closed.map((c) => c.run).join(', ') || 'nothing'}`);
+    vscode.window.setStatusBarMessage(
+      closed.length ? `Agency: ${closed.length} run(s) closed` : 'Agency: nothing was open', 4000);
+    await refresh();
+  });
+
+  reg('agency.run.discard', async (arg) => {
+    const id = runIdOf(arg);
+    if (!id) return;
+    const r = (state.snapshot.runs || []).find((x) => x.id === id) || {};
+    const decided = Math.max((r.findings || 0) - (r.undecided || 0), 0);
+    if (decided) {
+      // A decision is work somebody did, and the precision numbers are computed
+      // from it. Losing that silently would corrupt the one measurement this
+      // whole tool exists to produce.
+      vscode.window.showWarningMessage(
+        `Agency: ${r.targetLabel || id.slice(0, 10)} carries ${decided} decision(s) — `
+        + 'discarding it would take the numbers with it. Close the run instead.');
+      return;
+    }
+    const yes = await vscode.window.showWarningMessage(
+      `Discard ${r.targetLabel || id.slice(0, 10)}?`,
+      { modal: true,
+        detail: `The run record, its evidence and ${r.findings || 0} finding(s) are `
+          + 'deleted from the project. Closing the run instead keeps the record and '
+          + 'still frees the worktree.' },
+      'Discard');
+    if (yes !== 'Discard') return;
+    const res = await cli.cleanup(state.snapshot.cwd, { run: id, discard: true });
+    if (!res.ok) {
+      vscode.window.showErrorMessage(`Agency: ${res.error}`);
+      return;
+    }
+    log.appendLine(`[cleanup] discarded ${id}`);
+    await refresh();
+  });
+
   reg('agency.doctor', async () => {
     const checks = await cli.doctor(state.snapshot.cwd);
     showPanel('doctor', 'Agency — prerequisites', panel.doctorHtml(checks));
@@ -393,26 +435,184 @@ function activate(context) {
   reg('agency.view.findings.focus', () =>
     vscode.commands.executeCommand('agency.findings.focus'));
 
-  reg('agency.pack.add', async () => {
-    const available = (state.snapshot.packs || []).filter((p) => !p.installed);
-    const list = available.length ? available : state.snapshot.packs || [];
-    const pick = await vscode.window.showQuickPick(
-      list.map((p) => ({ label: p.title || p.name, detail: p.description, pack: p.name })),
-      { title: 'Which specialist should be hired?' });
-    if (!pick) return;
-    const res = await cli.addPack(state.snapshot.cwd, pick.pack);
+  reg('agency.view.tools.focus', () =>
+    vscode.commands.executeCommand('agency.tools.focus'));
+
+  // Hiring is method + runner, asked in that order.
+  //
+  // Two questions rather than one, because they are answered from different
+  // knowledge: which method you want is about the work, which runner you want
+  // is about what is installed on this machine. Hiring the same method a second
+  // time on another provider is the same command with a different second answer.
+  reg('agency.hire.add', async (arg) => {
+    if (!state.snapshot.probe.ok) return showNotReady();
+    const packs = state.snapshot.packs || [];
+    let pack = packNameOf(arg);
+
+    if (!pack) {
+      const pick = await vscode.window.showQuickPick(
+        packs.map((p) => {
+          const mine = state.hiresOf(p.name);
+          return {
+            label: p.title || p.name,
+            description: mine.length
+              ? `already hired: ${mine.map((h) => h.label).join(', ')}` : undefined,
+            detail: p.description,
+            pack: p.name,
+          };
+        }),
+        { title: 'Which method should be hired?', matchOnDetail: true });
+      if (!pick) return;
+      pack = pick.pack;
+    }
+
+    const taken = new Set(state.hiresOf(pack).map((h) => `${h.provider}/${h.model || ''}`));
+    const runners = (state.snapshot.providers || []);
+    const chosen = await vscode.window.showQuickPick(
+      runners.map((p) => ({
+        label: `${p.installed ? '$(rocket)' : '$(warning)'} ${p.title}`,
+        description: p.installed ? p.id : `${p.id} — \`${p.bin}\` is not on PATH`,
+        detail: p.models && p.models.length ? p.models.join(' · ') : undefined,
+        provider: p,
+      })).concat([
+        { label: '', kind: vscode.QuickPickItemKind.Separator },
+        { label: '$(add) Register another runner…', fresh: true },
+      ]),
+      {
+        title: `Hire ${pack} — which runner does the work?`,
+        placeHolder: 'Hiring the same method on a second runner gives you two opinions '
+          + 'on the same code',
+        matchOnDescription: true,
+      });
+    if (!chosen) return;
+    if (chosen.fresh) {
+      await vscode.commands.executeCommand('agency.provider.add');
+      return;
+    }
+
+    // Only offer models the runner declares. An empty list means the runner
+    // never told us any, and guessing a name here would produce a launch flag
+    // that fails on the first run.
+    let model;
+    const models = chosen.provider.models || [];
+    if (models.length) {
+      const pickModel = await vscode.window.showQuickPick(
+        models.map((m) => ({ label: m, model: m, description: taken.has(
+          `${chosen.provider.id}/${m}`) ? 'already hired' : undefined }))
+          .concat([{ label: '$(circle-slash) provider default', model: null }]),
+        { title: `Hire ${pack} on ${chosen.provider.id} — which model?` });
+      if (!pickModel) return;
+      model = pickModel.model || undefined;
+    }
+
+    const res = await cli.hire(state.snapshot.cwd, pack, {
+      provider: chosen.provider.id, model,
+    });
     if (!res.ok) {
       vscode.window.showErrorMessage(`Agency: ${res.error}`);
       return;
     }
-    vscode.window.showInformationMessage(`Agency: ${pick.pack} installed.`);
+    const made = res.data && res.data.hire;
+    log.appendLine(`[hire] ${made ? made.id : pack}`);
+    vscode.window.showInformationMessage(
+      made ? `Agency: hired ${made.id}.` : `Agency: ${pack} installed.`);
     await refresh();
   });
 
-  reg('agency.pack.openConfig', async (packName) => {
-    const p = path.join(state.snapshot.cwd, '.agency', `${packName}.json`);
-    if (!fs.existsSync(p)) {
-      vscode.window.showWarningMessage(`There is no ${packName} configuration yet — install the pack.`);
+  // Kept under the old id so existing keybindings and the welcome screens
+  // still work — hiring is what "add a specialist" always meant.
+  reg('agency.pack.add', (arg) =>
+    vscode.commands.executeCommand('agency.hire.add', packNameOf(arg) || undefined));
+
+  reg('agency.hire.remove', async (arg) => {
+    const id = hireIdOf(arg);
+    if (!id) return;
+    const h = (state.snapshot.hires || []).find((x) => x.id === id);
+    if (h && h.implicit) {
+      vscode.window.showWarningMessage(
+        `Agency: ${id} is the default worker of the ${h.pack} method, taken from its `
+        + 'configuration — there is no roster entry to dismiss.');
+      return;
+    }
+    const yes = await vscode.window.showWarningMessage(
+      `Dismiss ${id}?`,
+      { modal: true, detail: 'The method, its configuration and every past run stay. '
+        + 'Findings this specialist produced keep counting towards the metrics.' },
+      'Dismiss');
+    if (yes !== 'Dismiss') return;
+    const res = await cli.fire(state.snapshot.cwd, id);
+    if (!res.ok) {
+      vscode.window.showErrorMessage(`Agency: ${res.error}`);
+      return;
+    }
+    log.appendLine(`[hire] fired ${id}`);
+    await refresh();
+  });
+
+  reg('agency.hire.run', async (arg) => {
+    if (!state.snapshot.probe.ok) return showNotReady();
+    const id = hireIdOf(arg);
+    const h = (state.snapshot.hires || []).find((x) => x.id === id);
+    if (!h) return;
+    if (!h.available) {
+      vscode.window.showErrorMessage(
+        `Agency: \`${h.bin}\` is not on PATH — ${h.id} cannot run on this machine.`);
+      return;
+    }
+    // The worker is already decided — this command IS their row. Only the
+    // target is still open, so that is the only thing either branch asks about.
+    const pack = state.packOf(h);
+    const d = (pack && pack.run && pack.run.target === 'workspace')
+      ? await review.runOverWorkspace(state.snapshot.cwd, h, log)
+      : await runOneOverPr(h);
+    if (d) setTimeout(() => refresh(), 2000);
+  });
+
+  // A runner is a property of the machine, so registering one is not a project
+  // change: once `grok` is on PATH and registered, it is hireable everywhere.
+  reg('agency.provider.add', async () => {
+    const id = await vscode.window.showInputBox({
+      title: 'Register a runner',
+      prompt: 'Its id, e.g. grok. Anything with a command-line agent fits: the id is '
+        + 'the name, the command is what actually runs.',
+      placeHolder: 'grok',
+      ignoreFocusOut: true,
+    });
+    if (!id || !id.trim()) return;
+    const bin = await vscode.window.showInputBox({
+      title: `Register ${id.trim()} — the command to run`,
+      value: id.trim(),
+      prompt: 'What you would type in a terminal. It has to be on PATH.',
+      ignoreFocusOut: true,
+    });
+    if (bin === undefined) return;
+    const models = await vscode.window.showInputBox({
+      title: `Register ${id.trim()} — models to offer (optional)`,
+      placeHolder: 'fast, heavy',
+      prompt: 'Comma-separated. They only fill the picker; leave it empty to always '
+        + 'use the runner default.',
+      ignoreFocusOut: true,
+    });
+    if (models === undefined) return;
+    const res = await cli.addProvider(state.snapshot.cwd, id.trim(),
+      { bin: bin.trim() || id.trim(), models: models.trim() || undefined });
+    if (!res.ok) {
+      vscode.window.showErrorMessage(`Agency: ${res.error}`);
+      return;
+    }
+    log.appendLine(`[provider] registered ${id.trim()}`);
+    await refresh();
+    const now = await vscode.window.showInformationMessage(
+      `Agency: ${id.trim()} registered.`, 'Hire a specialist on it');
+    if (now) await vscode.commands.executeCommand('agency.hire.add');
+  });
+
+  reg('agency.pack.openConfig', async (arg) => {
+    const packName = packNameOf(arg);
+    const p = packName && path.join(state.snapshot.cwd, '.agency', `${packName}.json`);
+    if (!p || !fs.existsSync(p)) {
+      vscode.window.showWarningMessage(
+        `There is no ${packName || 'pack'} configuration yet — hire a specialist for it first.`);
       return;
     }
     await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(p));
@@ -503,10 +703,76 @@ function activate(context) {
 
 // ---------------------------------------------------------------- pomocníci
 
+// A command reached from a tree row is handed the NODE, not a name.
+//
+// Everything under `view/item/context` in package.json goes through these two.
+// Without them the node object reaches the CLI, `execFile` stringifies it, and
+// the run dies on `Unknown pack "[object Object]"` — an error that says nothing
+// about where it came from.
+
+/** Id of a hire out of a tree item, a plain string, or the run picker. */
+function hireIdOf(arg) {
+  if (typeof arg === 'string') return arg;
+  const id = arg && arg.item && arg.item.id;         // node id: "hire:<id>"
+  if (id && String(id).startsWith('hire:')) return String(id).slice(5);
+  return null;
+}
+
+/**
+ * Name of the pack behind a command argument.
+ *
+ * A hire row resolves to the method it follows: brief, browser and
+ * configuration belong to the method, so acting on them from a worker's row is
+ * the same act as from the method's own.
+ */
+function packNameOf(arg) {
+  if (typeof arg === 'string') return arg;
+  const id = arg && arg.item && arg.item.id;
+  if (!id) return null;
+  if (String(id).startsWith('pack:')) return String(id).slice(5);
+  if (String(id).startsWith('hire:')) {
+    const h = (state.snapshot.hires || []).find((x) => x.id === String(id).slice(5));
+    return h ? h.pack : null;
+  }
+  return null;
+}
+
+/**
+ * One worker over a pull request, started from the Specialists view.
+ *
+ * It goes through the same picker and the same `runEach` as the button does —
+ * a second path that assembled the run itself would be a second place where a
+ * model could be chosen, and the run record would then be lying about one of them.
+ */
+async function runOneOverPr(hire) {
+  const prs = await cli.prs(state.snapshot.cwd, { state: 'all', limit: 30 });
+  if (!prs.length) {
+    vscode.window.showWarningMessage(
+      'Agency: no pull requests. Check `gh auth status` and that this repo has a remote.');
+    return null;
+  }
+  const picked = await vscode.window.showQuickPick(review.items(prs), {
+    title: `${hire.display} — which pull request?`,
+    matchOnDescription: true,
+    matchOnDetail: true,
+  });
+  if (!picked || !picked.pr) return null;
+  return review.runEach(state.snapshot.cwd, [hire],
+    { pr: picked.pr.number, force: picked.pr.reviewed || undefined }, log);
+}
+
 /** Který pack má v konfiguraci prohlížeč. Jméno packu se nikde nehádá. */
 function pickBrowserPack() {
   const withBrowser = (state.snapshot.packs || []).filter((p) => p.installed && p.playwright);
   return withBrowser.length ? withBrowser[0].name : null;
+}
+
+/** Id of a run out of a tree item or a plain string. */
+function runIdOf(arg) {
+  if (typeof arg === 'string') return arg;
+  const id = arg && arg.item && arg.item.id;         // node id: "run:<id>"
+  if (id && String(id).startsWith('run:')) return String(id).slice(4);
+  return null;
 }
 
 function findingIdOf(arg) {

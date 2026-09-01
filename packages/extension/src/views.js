@@ -116,16 +116,26 @@ class OverviewTree extends Tree {
         + 'halfway through it. Click for the full list.',
     }));
 
-    const packs = (s.packs || []).filter((x) => x.installed);
+    const roster = s.hires || [];
+    const offline = roster.filter((h) => !h.available);
     rows.push(node('Specialists', {
-      description: packs.length ? packs.map((x) => x.name).join(', ') : 'none installed',
-      iconId: packs.length ? 'person' : 'person-add',
-      command: packs.length ? undefined : 'agency.pack.add',
-      tooltip: packs.length
-        ? 'A pack is a method of work, not content. An installed pack brought its skill '
-        + 'and its configuration into the project — the content (rules, documentation) '
-        + 'stays with the project.'
-        : 'None yet. Click to install the first one.',
+      description: roster.length
+        ? roster.map((h) => h.label).join(', ')
+          + (offline.length ? ` · ${offline.length} not on PATH` : '')
+        : 'nobody hired',
+      iconId: roster.length ? 'person' : 'person-add',
+      color: offline.length ? 'charts.orange' : undefined,
+      command: roster.length ? 'agency.view.tools.focus' : 'agency.hire.add',
+      tooltip: roster.length
+        ? 'A pack is a method of work; a specialist is one worker following it. The same '
+        + 'method can be hired once per provider — “Reviewer · sonnet” and '
+        + '“Reviewer · codex” share one configuration, one queue of findings and one '
+        + 'dedup, and differ only in who does the work.'
+        + (offline.length
+          ? `\n\n**${offline.map((h) => h.id).join(', ')}** cannot run here — the runner `
+          + 'is not on PATH. The roster travels with the repository, the binaries do not.'
+          : '')
+        : 'Nobody yet. Click to hire the first one.',
     }));
 
     const last = (s.runs || [])[0];
@@ -174,125 +184,198 @@ class OverviewTree extends Tree {
 
 // -------------------------------------------------------------- Specialisté
 
+// The view lists WORKERS, not methods.
+//
+// A pack is a method of work; a hire is one worker following it. The same pack
+// can be hired once per provider, so "Reviewer · sonnet" and "Reviewer · codex"
+// are two rows over one configuration, one finding queue and one dedup — and
+// the difference between them is the only thing worth showing at the top level.
+//
+// A pack that nobody is hired for still shows up, otherwise there would be no
+// way to hire the first worker for it.
+
+/** Everything a worker inherits from its method. Shared on purpose: brief,
+ *  browser and configuration belong to the pack, not to whoever runs it. */
+function packChildren(p, { shared = false } = {}) {
+  const children = [];
+  const note = shared
+    ? '\n\nShared by every specialist hired for this method — one configuration, '
+    + 'one queue of findings, one dedup.'
+    : '';
+
+  children.push(node('What it does', {
+    description: '', tooltip: (p.description || '') + note, iconId: 'info',
+  }));
+
+  const dims = (p.dimensions || []).length ? p.dimensions : null;
+  if (dims) {
+    children.push(node('What it looks at', {
+      description: `${dims.length} dimensions`,
+      iconId: 'checklist',
+      collapsed: true,
+      children: dims.map((d) => node(d.title || d.id, {
+        description: d.projectSpecific ? 'follows project rules' : '',
+        iconId: 'circle-small-filled',
+        tooltip: d.projectSpecific
+          ? 'This dimension needs the project rules (`review.rules` in the '
+          + 'configuration). Without them the pack runs one dimension short — which is '
+          + 'a legitimate outcome, not a failure.'
+          : undefined,
+      })),
+    }));
+  }
+
+  children.push(node('What it works on', {
+    description: p.run && p.run.target === 'workspace'
+      ? 'the project as it is' : 'a pull request',
+    iconId: p.run && p.run.target === 'workspace' ? 'browser' : 'git-pull-request',
+    tooltip: p.run && p.run.target === 'workspace'
+      ? 'It runs over the working copy, including uncommitted work — that is where the '
+      + 'application under test actually runs. No throwaway worktree, so the source is '
+      + '**read only**: everything the run produces goes into the run directory.'
+      : 'It runs over a pull request in a throwaway worktree on its head commit. Your '
+      + 'branch and your work in progress stay untouched. Two specialists on the same '
+      + 'pull request get a worktree each, so they can run at the same time.',
+  }));
+
+  const takesBrief = p.run && p.run.prompt && p.run.prompt.accepts;
+  if (p.installed && takesBrief) {
+    const standing = (p.brief && p.brief.standing) || null;
+    const scenarios = (p.brief && p.brief.scenarios) || [];
+    children.push(node('Brief', {
+      description: standing ? String(standing).slice(0, 40) : 'not set',
+      iconId: 'note',
+      color: standing ? 'charts.green' : undefined,
+      command: 'agency.pack.brief',
+      args: [p.name],
+      collapsed: true,
+      children: scenarios.length
+        ? scenarios.map((sc) => node(sc.name, {
+          description: String(sc.text || '').slice(0, 60),
+          iconId: 'bookmark',
+          tooltip: `\`agency run ${p.name} --scenario ${sc.name}\`\n\n${sc.text || ''}`,
+        }))
+        : undefined,
+      tooltip: 'What this specialist should work on. The **standing** brief applies to '
+        + 'every run and lives in the project configuration; a one-off assignment is '
+        + 'given when the run starts. The choice is written into the run record — '
+        + '“which brief produces better findings” is a question worth answering with '
+        + 'numbers.' + note + '\n\nClick to change it.',
+    }));
+  }
+
+  if (p.installed && p.playwright) {
+    const pw = p.playwright;
+    children.push(node('Browser', {
+      description: pw.enabled
+        ? `Playwright · specs ${pw.specTarget === 'suite' ? 'in the suite' : 'with the run'}`
+        : 'off — HTTP only',
+      iconId: pw.enabled ? 'browser' : 'circle-slash',
+      color: pw.enabled ? 'charts.green' : undefined,
+      command: 'agency.qa.playwright',
+      args: [p.name],
+      tooltip: pw.enabled
+        ? 'The session drives a real browser and writes a **failing spec** for every finding. '
+        + 'The spec travels with the run record, so “is it fixed?” is answered by running it, '
+        + 'not by another session.'
+        + (pw.configFile ? `\n\nUses the project config \`${pw.configFile}\`.`
+          : `\n\nThe project has no Playwright; scaffolding is \`${pw.scaffold}\`.`)
+        : 'Off. The session only reaches what it can over HTTP — enough for API-level checks, '
+        + 'not for anything a user actually clicks.\n\nClick to set it up.',
+    }));
+  }
+
+  if (p.installed) {
+    children.push(node('Configuration', {
+      description: `.agency/${p.name}.json`,
+      iconId: 'settings-gear',
+      command: 'agency.pack.openConfig',
+      args: [p.name],
+      tooltip: 'The configuration is owned by the **project** — a pack upgrade never '
+        + 'overwrites it. Score threshold, skipped files, export target.' + note,
+    }));
+  }
+  return children;
+}
+
 class ToolsTree extends Tree {
   roots() {
     const s = state.snapshot;
     if (!s.probe.ok) return [];
-    return (s.packs || []).map((p) => {
+
+    const rows = [];
+    const byName = Object.fromEntries((s.packs || []).map((p) => [p.name, p]));
+
+    for (const h of s.hires || []) {
+      const p = byName[h.pack] || { name: h.pack, title: h.packTitle };
       const children = [];
 
-      children.push(node('What it does', {
-        description: '', tooltip: p.description, iconId: 'info',
+      // NO command on this row. A TreeItem's command fires on an ordinary
+      // single click, so an informational line that launches an agent means a
+      // terminal opens while you are only reading the panel. Starting a run is
+      // the ▶ on the specialist's own row and nowhere else.
+      children.push(node('Who handles it', {
+        description: [h.provider, h.model].filter(Boolean).join(' · ')
+          || 'provider default model',
+        iconId: h.available ? 'rocket' : 'warning',
+        color: h.available ? undefined : 'charts.orange',
+        tooltip: h.available
+          ? `\`${h.bin}\` · ${h.providerTitle}\n\nThe model is a property of the task, `
+          + 'not of the user. The choice goes into the run record, so “which specialist '
+          + 'produces better findings” is a question for the metrics rather than for '
+          + 'your memory.\n\nStart a run with the ▶ on the row above.'
+          : `\`${h.bin}\` is **not on PATH** — this specialist cannot run on this machine. `
+          + 'The roster travels with the repository, the binaries do not; a colleague may '
+          + 'well have it.',
       }));
-      const dims = (p.dimensions || []).length ? p.dimensions : null;
-      if (dims) {
-        children.push(node('What it looks at', {
-          description: `${dims.length} dimensions`,
-          iconId: 'checklist',
-          collapsed: true,
-          children: dims.map((d) => node(d.title || d.id, {
-            description: d.projectSpecific ? 'follows project rules' : '',
-            iconId: 'circle-small-filled',
-            tooltip: d.projectSpecific
-              ? 'This dimension needs the project rules (`review.rules` in the '
-              + 'configuration). Without them the pack runs one dimension short — which is '
-              + 'a legitimate outcome, not a failure.'
-              : undefined,
-          })),
-        }));
-      }
-      const takesBrief = p.run && p.run.prompt && p.run.prompt.accepts;
-      children.push(node('What it works on', {
-        description: p.run && p.run.target === 'workspace'
-          ? 'the project as it is' : 'a pull request',
-        iconId: p.run && p.run.target === 'workspace' ? 'browser' : 'git-pull-request',
-        tooltip: p.run && p.run.target === 'workspace'
-          ? 'It runs over the working copy, including uncommitted work — that is where the '
-          + 'application under test actually runs. No throwaway worktree, so the source is '
-          + '**read only**: everything the run produces goes into the run directory.'
-          : 'It runs over a pull request in a throwaway worktree on its head commit. Your '
-          + 'branch and your work in progress stay untouched.',
-      }));
-      if (p.installed && takesBrief) {
-        const standing = (p.brief && p.brief.standing) || null;
-        const scenarios = (p.brief && p.brief.scenarios) || [];
-        children.push(node('Brief', {
-          description: standing ? String(standing).slice(0, 40) : 'not set',
-          iconId: 'note',
-          color: standing ? 'charts.green' : undefined,
-          command: 'agency.pack.brief',
-          args: [p.name],
-          collapsed: true,
-          children: scenarios.length
-            ? scenarios.map((sc) => node(sc.name, {
-              description: String(sc.text || '').slice(0, 60),
-              iconId: 'bookmark',
-              tooltip: `\`agency run ${p.name} --scenario ${sc.name}\`\n\n${sc.text || ''}`,
-            }))
-            : undefined,
-          tooltip: 'What this specialist should work on. The **standing** brief applies to '
-            + 'every run and lives in the project configuration; a one-off assignment is '
-            + 'given when the run starts. The choice is written into the run record — '
-            + '“which brief produces better findings” is a question worth answering with '
-            + 'numbers.\n\nClick to change it.',
-        }));
-      }
-      if (p.installed && p.playwright) {
-        const pw = p.playwright;
-        children.push(node('Browser', {
-          description: pw.enabled
-            ? `Playwright · specs ${pw.specTarget === 'suite' ? 'in the suite' : 'with the run'}`
-            : 'off — HTTP only',
-          iconId: pw.enabled ? 'browser' : 'circle-slash',
-          color: pw.enabled ? 'charts.green' : undefined,
-          command: 'agency.qa.playwright',
-          args: [p.name],
-          tooltip: pw.enabled
-            ? 'The session drives a real browser and writes a **failing spec** for every finding. '
-            + 'The spec travels with the run record, so “is it fixed?” is answered by running it, '
-            + 'not by another session.'
-            + (pw.configFile ? `\n\nUses the project config \`${pw.configFile}\`.`
-              : `\n\nThe project has no Playwright; scaffolding is \`${pw.scaffold}\`.`)
-            : 'Off. The session only reaches what it can over HTTP — enough for API-level checks, '
-            + 'not for anything a user actually clicks.\n\nClick to set it up.',
-        }));
-      }
-      if (p.installed && p.agent) {
-        children.push(node('Who handles it', {
-          description: [p.agent.provider, p.agent.model].filter(Boolean).join(' · ')
-            || 'provider default model',
-          iconId: 'rocket',
-          tooltip: 'The model is a property of the task, not of the user. A review is '
-            + 'reading and classification, not writing — it can run cheaper than coding. '
-            + 'The choice is written into the run record so you can measure which model '
-            + 'produces better findings.',
-        }));
-      }
-      if (p.installed) {
-        children.push(node('Configuration', {
-          description: `.agency/${p.name}.json`,
-          iconId: 'settings-gear',
-          command: 'agency.pack.openConfig',
-          args: [p.name],
-          tooltip: 'The configuration is owned by the **project** — a pack upgrade never '
-            + 'overwrites it. Model, score threshold, skipped files, export target.',
-        }));
-      }
 
-      return node(p.title || p.name, {
-        id: `pack:${p.name}`,
-        description: p.installed
-          ? [p.installed.split('@')[1] || p.version, p.agent && p.agent.model]
-            .filter(Boolean).join(' · ')
-          : 'not installed',
-        iconId: p.installed ? 'person' : 'person-add',
-        color: p.installed ? 'charts.green' : undefined,
-        contextValue: p.installed ? 'agencyPack.installed' : 'agencyPack.available',
+      children.push(...packChildren(p, { shared: (s.hires || [])
+        .filter((x) => x.pack === h.pack).length > 1 }));
+
+      // The label already ends in whatever tells this worker apart, so the
+      // description must not repeat it — "QA engineer · sonnet   sonnet" is
+      // noise where the runner behind the model would be information.
+      const extra = h.label === h.provider ? '' : h.provider;
+      rows.push(node(h.display || `${p.title || p.name} · ${h.label}`, {
+        id: `hire:${h.id}`,
+        description: [extra, h.available ? '' : 'not on PATH']
+          .filter(Boolean).join(' · '),
+        iconId: h.available ? 'person' : 'person',
+        color: h.available ? 'charts.green' : 'charts.orange',
+        contextValue: h.implicit ? 'agencyHire.implicit' : 'agencyHire',
         collapsed: true,
         children,
-        tooltip: `**${p.title || p.name}** \`${p.version}\`\n\n${p.description || ''}`,
-      });
-    });
+        tooltip: `**${h.display}**  \`${h.id}\`\n\n${p.description || ''}\n\n---\n\n`
+          + `- runner: \`${h.provider}\`${h.model ? ` · model \`${h.model}\`` : ''}\n`
+          + `- method: \`${h.pack}\` — configuration, brief and findings are shared with `
+          + 'every specialist hired for it\n'
+          + (h.implicit
+            ? '- this one comes from the method configuration, not from the roster — it '
+            + 'is what ran here before specialists could be hired per runner. Hiring a '
+            + 'second one turns it into a roster entry of its own.\n'
+            : '')
+          + `\n\`agency run ${h.id}\``,
+      }));
+    }
+
+    // Methods nobody works by yet. Without this row there would be no way to
+    // hire the first worker for a pack.
+    for (const p of s.packs || []) {
+      if ((s.hires || []).some((h) => h.pack === p.name)) continue;
+      rows.push(node(p.title || p.name, {
+        id: `pack:${p.name}`,
+        description: p.installed ? 'installed, nobody hired' : 'not hired',
+        iconId: 'person-add',
+        contextValue: 'agencyPack.available',
+        collapsed: true,
+        children: packChildren(p),
+        tooltip: `**${p.title || p.name}** \`${p.version}\`\n\n${p.description || ''}\n\n`
+          + 'Nobody works by this method here yet. Hire the first one — and later a '
+          + 'second on another provider, if you want two opinions on the same code.',
+      }));
+    }
+
+    return rows;
   }
 }
 
@@ -309,23 +392,39 @@ class RunsTree extends Tree {
         'no-findings': ['circle-outline', undefined],
         'gated-out': ['filter', 'charts.orange'],
         running: ['loading~spin', undefined],
+        // Not an error: the agent was launched and the terminal was closed
+        // before it finished. Dim, because there is nothing to act on.
+        abandoned: ['circle-slash', undefined],
         failed: ['error', 'charts.red'],
       }[r.status] || ['circle-outline', undefined];
 
+      // With two specialists over one pull request, "PR #12" appears twice in
+      // this list. Which of them produced it is the only thing telling the two
+      // rows apart, so it goes into the row itself, not just the tooltip.
+      const who = r.hire || r.model || r.provider;
       return node(r.targetLabel || r.id.slice(0, 10), {
         id: `run:${r.id}`,
-        description: `${r.findings} findings · ${ago(r.startedAt)}`,
+        description: `${who ? `${String(who).split('@').pop()} · ` : ''}`
+          + `${r.findings} findings · ${ago(r.startedAt)}`,
         iconId: st[0], color: st[1],
         collapsed: true,
-        contextValue: 'agencyRun',
+        // A run still marked running is the only one worth offering to close —
+        // and it stays that way until somebody says so, because nothing here
+        // can see the terminal it was launched in.
+        contextValue: r.status === 'running' ? 'agencyRun.open' : 'agencyRun',
         children: mine.length
           ? mine.map((f) => findingNode(f, { showFile: true }))
           : [node('no findings', { iconId: 'circle-outline' })],
         tooltip: `Run \`${r.id}\`\n\n- status: \`${r.status}\`\n- pack: \`${r.pack}\`\n`
+          + (r.hire ? `- specialist: \`${r.hire}\`${r.model ? ` · \`${r.model}\`` : ''}\n` : '')
           + `- ${{ 'merged-pull-request': 'retrospective audit', workspace: 'over the project as it was' }[r.kind]
             || 'open PR'}\n`
           + (r.brief ? `- brief: _${String(r.brief).slice(0, 120)}_\n` : '')
-          + `- ${r.undecided} undecided`,
+          + `- ${r.undecided} undecided\n`
+          + (r.status === 'running'
+            ? '\nStill open. Nothing here can see the terminal it runs in, so it stays '
+            + 'open until you close it — **Close run** on this row.'
+            : ''),
       });
     });
   }

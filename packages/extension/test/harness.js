@@ -53,6 +53,7 @@ const fake = {
     createTreeView: () => ({ dispose() {} }),
     registerTreeDataProvider: () => ({ dispose() {} }),
     createWebviewPanel: () => ({ webview: {}, onDidDispose() {}, dispose() {} }),
+    createTerminal: () => ({ show() {}, sendText() {}, dispose() {} }),
     showErrorMessage() {}, showWarningMessage() {}, showInformationMessage() {},
     setStatusBarMessage() {}, showTextDocument() {}, showQuickPick() {},
     withProgress: (_o, fn) => fn({ report() {} }),
@@ -118,6 +119,11 @@ function check(name, fn) {
   try { fn(); console.log(`  ok   ${name}`); }
   catch (e) { failed += 1; console.log(`  FAIL ${name}\n       ${e.message}`); }
 }
+
+// Spuštění běhu je řetěz promisů. Asynchronní kontroly se posbírají a doběhnou
+// až na konci, aby souhrn nevypsal „prošlo" dřív, než se to dozví.
+const pending = [];
+function checkAsync(name, fn) { pending.push([name, fn]); }
 
 console.log('\nAgency — smoke test extension\n');
 
@@ -268,7 +274,12 @@ check('spouštěč pozná pack podle politiky, ne podle jména', () => {
 });
 
 check('specialista nad projektem ukáže zadání i scénáře', () => {
-  Object.assign(state.snapshot, { probe: { ok: true }, packs: [QA_PACK] });
+  Object.assign(state.snapshot, {
+    probe: { ok: true },
+    packs: [QA_PACK],
+    hires: [{ id: 'qa@claude', pack: 'qa', provider: 'claude', model: 'sonnet',
+      label: 'sonnet', display: 'QA engineer · sonnet', bin: 'claude', available: true }],
+  });
   const pack = new views.ToolsTree().roots()[0];
   const labels = pack.children.map((c) => c.item.label);
   assert.ok(labels.includes('Brief'), 'chybí uzel se zadáním');
@@ -290,6 +301,9 @@ check('recenzent bez zadání uzel Brief nemá prázdný, ale má ho', () => {
       run: { target: 'pull-request', prompt: { accepts: true, required: false } },
       brief: { standing: null, scenarios: [] },
     }],
+    hires: [{ id: 'review-graph@claude', pack: 'review-graph', provider: 'claude',
+      model: 'sonnet', label: 'sonnet', display: 'Reviewer · sonnet', bin: 'claude',
+      available: true }],
   });
   const pack = new views.ToolsTree().roots()[0];
   const brief = pack.children.find((c) => c.item.label === 'Brief');
@@ -354,6 +368,8 @@ check('specialista s prohlížečem má v pohledu uzel Browser', () => {
       ...QA_PACK,
       playwright: { enabled: true, configFile: 'playwright.config.ts', specTarget: 'run', scaffold: 'run-dir' },
     }],
+    hires: [{ id: 'qa@claude', pack: 'qa', provider: 'claude', model: 'sonnet',
+      label: 'sonnet', display: 'QA engineer · sonnet', bin: 'claude', available: true }],
   });
   const pack = new views.ToolsTree().roots()[0];
   const browser = pack.children.find((c) => c.item.label === 'Browser');
@@ -362,5 +378,332 @@ check('specialista s prohlížečem má v pohledu uzel Browser', () => {
   assert.ok(String(browser.item.description).includes('Playwright'));
 });
 
-console.log(failed ? `\n${failed} selhalo\n` : '\nvšechno prošlo\n');
-process.exit(failed ? 1 : 0);
+// ------------------------------------------------------------------- roster
+//
+// A method can be hired once per runner. Everything below guards the one rule
+// the feature stands on: the view lists WORKERS, while brief, configuration and
+// findings stay with the method they share.
+
+const RG_PACK = {
+  name: 'review-graph',
+  title: 'Reviewer',
+  version: '0.1.0',
+  description: 'Walks a pull request.',
+  installed: 'review-graph@0.1.0',
+  run: { target: 'pull-request', prompt: { accepts: true, required: false } },
+  brief: { standing: null, scenarios: [] },
+  dimensions: [{ id: 'correctness', title: 'Correctness and blast radius' }],
+};
+
+const HIRE = (over) => ({
+  id: 'review-graph@claude',
+  pack: 'review-graph',
+  provider: 'claude',
+  model: 'sonnet',
+  label: 'sonnet',
+  display: 'Reviewer · sonnet',
+  packTitle: 'Reviewer',
+  packInstalled: true,
+  providerTitle: 'Claude Code',
+  bin: 'claude',
+  available: true,
+  ...over,
+});
+
+check('pohled Specialisté ukazuje pracovníky, ne metody', () => {
+  Object.assign(state.snapshot, {
+    probe: { ok: true },
+    packs: [RG_PACK],
+    hires: [
+      HIRE(),
+      HIRE({ id: 'review-graph@codex', provider: 'codex', model: null, label: 'codex',
+        display: 'Reviewer · codex', providerTitle: 'Codex CLI', bin: 'codex' }),
+    ],
+  });
+  const rows = new views.ToolsTree().roots();
+  assert.deepStrictEqual(rows.map((r) => r.item.label),
+    ['Reviewer · sonnet', 'Reviewer · codex'],
+    'dva providery nad jednou metodou musí být dva řádky — jinak se mezi nimi nedá vybrat');
+  assert.deepStrictEqual(rows.map((r) => r.item.id),
+    ['hire:review-graph@claude', 'hire:review-graph@codex']);
+  for (const r of rows) assert.strictEqual(r.item.contextValue, 'agencyHire');
+});
+
+check('pracovník nese runner, metoda nese zadání i konfiguraci', () => {
+  const rows = new views.ToolsTree().roots();
+  const kdo = rows[0].children.find((c) => c.item.label === 'Who handles it');
+  assert.strictEqual(kdo.item.description, 'claude · sonnet');
+  // Informativní řádek NESMÍ nic spouštět: `command` na TreeItem se pouští
+  // obyčejným kliknutím, takže by se agent rozjel jen tím, že si panel čteš.
+  assert.strictEqual(kdo.item.command, undefined,
+    'čtení panelu nesmí otevřít terminál');
+
+  const codex = rows[1].children.find((c) => c.item.label === 'Who handles it');
+  assert.strictEqual(codex.item.description, 'codex',
+    'hire bez modelu nesmí zdědit model psaný pro jiného providera');
+
+  // Sdílené věci jsou u obou a míří na tentýž pack — na tom stojí sdílená paměť.
+  for (const r of rows) {
+    const cfg = r.children.find((c) => c.item.label === 'Configuration');
+    assert.strictEqual(cfg.item.description, '.agency/review-graph.json');
+    assert.ok(cfg.item.tooltip.value.includes('Shared by every specialist'),
+      'u druhého pracovníka musí být vidět, že konfigurace je společná');
+  }
+});
+
+check('metoda, kterou nikdo nedělá, jde pořád najmout', () => {
+  Object.assign(state.snapshot, {
+    probe: { ok: true }, packs: [RG_PACK, QA_PACK], hires: [HIRE()],
+  });
+  const rows = new views.ToolsTree().roots();
+  const qa = rows.find((r) => r.item.id === 'pack:qa');
+  assert.ok(qa, 'nenajatá metoda musí zůstat vidět, jinak není kde najmout prvního');
+  assert.strictEqual(qa.item.contextValue, 'agencyPack.available');
+  assert.strictEqual(qa.item.description, 'installed, nobody hired');
+});
+
+check('pracovník bez binárky je označený, ne skrytý', () => {
+  // Roster cestuje s repozitářem, binárky ne. Kolega, který si repo naklonuje,
+  // se musí dozvědět, který specialista u něj běžet nemůže — a proč.
+  Object.assign(state.snapshot, {
+    probe: { ok: true },
+    packs: [RG_PACK],
+    hires: [HIRE({ id: 'review-graph@grok', provider: 'grok', model: 'grok-heavy',
+      label: 'grok-heavy', display: 'Reviewer · grok-heavy', bin: 'grok', available: false })],
+  });
+  const row = new views.ToolsTree().roots()[0];
+  assert.ok(String(row.item.description).includes('not on PATH'));
+  const kdo = row.children.find((c) => c.item.label === 'Who handles it');
+  assert.ok(kdo.item.tooltip.value.includes('not on PATH'));
+});
+
+check('přehled shrne roster, ne seznam packů', () => {
+  Object.assign(state.snapshot, {
+    probe: { ok: true }, cwd: 'C:/projekt', loadedAt: new Date(),
+    project: { slug: 'org/repo' }, doctor: [], runs: [], findings: [], metrics: null,
+    packs: [RG_PACK],
+    hires: [
+      HIRE(),
+      HIRE({ id: 'review-graph@grok', label: 'grok-heavy', available: false, bin: 'grok' }),
+    ],
+  });
+  const row = new views.OverviewTree().roots().find((r) => r.item.label === 'Specialists');
+  assert.ok(String(row.item.description).includes('sonnet'));
+  assert.ok(String(row.item.description).includes('1 not on PATH'),
+    'nedostupný specialista se musí ohlásit dřív, než ho někdo spustí');
+});
+
+check('dva běhy nad týmž PR jde od sebe rozeznat', () => {
+  // Bez jména specialisty jsou to v seznamu dva shodné řádky „PR #467" — a
+  // porovnat dva providery je přesně ten důvod, proč běhy vznikly dva.
+  Object.assign(state.snapshot, {
+    probe: { ok: true }, findings: [],
+    runs: [
+      { id: '01M1CGN9HAMBKK63SASPP2EYWA', pack: 'review-graph@0.1.0', status: 'ok',
+        target: 467, targetLabel: 'PR #467', kind: 'pull-request',
+        hire: 'review-graph@claude', model: 'sonnet', provider: 'claude',
+        findings: 3, undecided: 3, startedAt: new Date().toISOString() },
+      { id: '01M1CGN9HAMBKK63SASPP2EYWB', pack: 'review-graph@0.1.0', status: 'ok',
+        target: 467, targetLabel: 'PR #467', kind: 'pull-request',
+        hire: 'review-graph@codex', model: null, provider: 'codex',
+        findings: 2, undecided: 2, startedAt: new Date().toISOString() },
+    ],
+  });
+  const rows = new views.RunsTree().roots();
+  assert.ok(String(rows[0].item.description).startsWith('claude ·'));
+  assert.ok(String(rows[1].item.description).startsWith('codex ·'));
+  assert.ok(rows[0].item.tooltip.value.includes('review-graph@claude'));
+});
+
+check('výběr pracovníka jde podle politiky metody, ne podle jména', () => {
+  const review = require(path.join(SRC, 'review.js'));
+  Object.assign(state.snapshot, {
+    probe: { ok: true },
+    packs: [QA_PACK, RG_PACK, { name: 'nenainstalovany', installed: null, run: { target: 'workspace' } }],
+    hires: [
+      HIRE(),
+      HIRE({ id: 'qa@claude', pack: 'qa', display: 'QA engineer · sonnet' }),
+      HIRE({ id: 'duch@claude', pack: 'nenainstalovany', display: 'Duch · sonnet' }),
+    ],
+  });
+  assert.deepStrictEqual(review.reviewHires().map((h) => h.id), ['review-graph@claude']);
+  assert.deepStrictEqual(review.workspaceHires().map((h) => h.id), ['qa@claude'],
+    'nabízet se má jen pracovník nainstalované metody');
+});
+
+check('shoda dvou specialistů se ukáže, až když jsou dva', () => {
+  const base = {
+    project: { name: 'p' }, runs: 2,
+    triage: { accepted: 1, rejected: 0, deferred: 0, undecided: 0, precision: 1 },
+    findings: { raw: 2, kept: 1, duplicates: 1, dedupRatio: 0.5, gateYield: 0.5, gatedBy: null },
+    queue: { undecided: 0, medianAgeDays: null, oldestDays: null },
+    cost: { secondsPerKeptFinding: null },
+    byDimension: {}, bySeverity: {}, byModel: {}, rejectReasons: null,
+    byHire: {
+      'review-graph@claude': { accepted: 1, rejected: 0, deferred: 0, undecided: 0, precision: 1 },
+      'review-graph@codex': { accepted: 1, rejected: 0, deferred: 0, undecided: 0, precision: 1 },
+    },
+  };
+
+  const dva = panel.metricsHtml({ ...base, agreement: { crossHire: 1, sameHire: 0, hires: 2 } });
+  assert.ok(dva.includes('By specialist'), 'chybí rozpad po specialistech');
+  assert.ok(dva.includes('review-graph@codex'), 'druhý specialista se nevykreslil');
+  assert.ok(dva.includes('Agreement'), 'chybí shoda dvou specialistů');
+
+  // S jedním pracovníkem je shoda vždycky nula a četla by se jako selhání.
+  const jeden = panel.metricsHtml({ ...base, agreement: { crossHire: 0, sameHire: 0, hires: 1 } });
+  assert.ok(!jeden.includes('Agreement'));
+
+  // Starší data pole vůbec nemají — panel na tom nesmí spadnout.
+  assert.ok(!panel.metricsHtml(base).includes('Agreement'));
+});
+
+check('uzel stromu nese jméno, ne objekt', () => {
+  // Příkaz spuštěný z řádku stromu dostane UZEL, ne řetězec. Bez rozbalení
+  // doletí objekt až do execFile, zestringovatí se a běh zemře na
+  // `Unknown pack "[object Object]"` — chybě, která neřekne, odkud přišla.
+  Object.assign(state.snapshot, {
+    probe: { ok: true },
+    packs: [RG_PACK, QA_PACK],
+    hires: [HIRE()],
+  });
+  const rows = new views.ToolsTree().roots();
+  const hireRow = rows.find((r) => r.item.id === 'hire:review-graph@claude');
+  const packRow = rows.find((r) => r.item.id === 'pack:qa');
+
+  // Tvar id uzlů je kontrakt mezi stromem a příkazy — extension.js z něj
+  // jméno rozbaluje a nic jiného k dispozici nemá.
+  assert.strictEqual(typeof hireRow.item.id, 'string');
+  assert.ok(hireRow.item.id.startsWith('hire:'));
+  assert.ok(packRow.item.id.startsWith('pack:'));
+
+  // Akce, které klikatelné jsou, předávají jméno explicitně, ne jako uzel.
+  const cfg = hireRow.children.find((c) => c.item.label === 'Configuration');
+  assert.deepStrictEqual(cfg.item.command.arguments, ['review-graph'],
+    'konfigurace patří metodě, takže se předává jméno packu, ne pracovníka');
+});
+
+check('odvozený pracovník se nedá propustit', () => {
+  Object.assign(state.snapshot, {
+    probe: { ok: true },
+    packs: [RG_PACK],
+    hires: [HIRE({ implicit: true })],
+  });
+  const row = new views.ToolsTree().roots()[0];
+  assert.strictEqual(row.item.contextValue, 'agencyHire.implicit',
+    'za odvozeným pracovníkem není zápis v rosteru, takže Propustit nesmí jít nabídnout');
+  assert.ok(row.item.tooltip.value.includes('method configuration'),
+    'musí být vidět, odkud se ten pracovník vzal');
+
+  // Kontrakt s package.json: ostatní akce na něj platí, propuštění ne.
+  const menus = require(path.join(SRC, '..', 'package.json'))
+    .contributes.menus['view/item/context'];
+  const dismiss = menus.find((m) => m.command === 'agency.hire.remove');
+  assert.strictEqual(dismiss.when, 'viewItem == agencyHire');
+  for (const cmd of ['agency.hire.run', 'agency.pack.brief']) {
+    assert.strictEqual(menus.find((m) => m.command === cmd && /agencyHire/.test(m.when)).when,
+      'viewItem =~ /^agencyHire/', `${cmd} má platit i na odvozeného pracovníka`);
+  }
+});
+
+// --------------------------------------------------------------- spuštění
+
+/**
+ * Podstrčí odpovědi na quick picky a spočítá, na co se kdo ptal.
+ *
+ * `cli.run` se zároveň nahradí, aby test nespouštěl skutečný `agency` — zkoumá
+ * se, na co se UI ptá, ne co dělá jádro.
+ */
+function askedAbout(answers) {
+  const vscode = require.cache.vscode.exports;
+  const cli = require(path.join(SRC, 'cli.js'));
+  const asked = [];
+  const queue = [...answers];
+  cli.run = async (cwd, who) => ({
+    ok: true,
+    data: {
+      runId: '01M1CGN9HAMBKK63SASPP2EYWJ', worktree: 'C:/projekt',
+      hire: { id: who, label: 'sonnet' }, agent: { provider: 'claude', model: 'sonnet' },
+      target: { ref: 'main' }, launch: ['claude', 'go'],
+    },
+  });
+  vscode.window.showQuickPick = async (items, opts) => {
+    asked.push((opts && opts.title) || '');
+    return queue.shift();
+  };
+  vscode.window.showInputBox = async (opts) => {
+    asked.push((opts && opts.title) || '');
+    return queue.shift();
+  };
+  return asked;
+}
+
+checkAsync('spuštění z řádku pracovníka se už neptá, koho pustit', async () => {
+  const review = require(path.join(SRC, 'review.js'));
+  Object.assign(state.snapshot, {
+    probe: { ok: true }, cwd: 'C:/projekt',
+    packs: [QA_PACK],
+    hires: [
+      HIRE({ id: 'qa@claude', pack: 'qa', display: 'QA engineer · sonnet' }),
+      HIRE({ id: 'qa@codex', pack: 'qa', provider: 'codex', model: null, label: 'codex',
+        display: 'QA engineer · codex', bin: 'codex' }),
+    ],
+  });
+
+  // Klik na ▶ u „QA engineer · sonnet" — pracovník je tím kliknutím vybraný.
+  const asked = askedAbout([{ label: '$(bookmark) smoke', scenario: 'smoke' }]);
+  const kdo = state.snapshot.hires[0];
+  await review.runOverWorkspace('C:/projekt', kdo, { appendLine() {} });
+
+  assert.deepStrictEqual(asked, ['What should be tested?'],
+    'zeptat se znovu, koho pustit, je otázka, na kterou ten klik už odpověděl');
+});
+
+checkAsync('obecné spuštění se na pracovníka ptát musí', async () => {
+  const review = require(path.join(SRC, 'review.js'));
+  const asked = askedAbout([
+    { label: 'QA engineer · sonnet', hire: state.snapshot.hires[0] },
+    { label: '$(bookmark) smoke', scenario: 'smoke' },
+  ]);
+
+  await review.runOverWorkspace('C:/projekt', null, { appendLine() {} });
+
+  assert.strictEqual(asked[0], 'Which specialist should run the session?',
+    'bez vybraného pracovníka se zeptat musí — dva najatí nejsou jeden');
+});
+
+check('popisek řádku se neopakuje', () => {
+  Object.assign(state.snapshot, {
+    probe: { ok: true },
+    packs: [QA_PACK],
+    hires: [
+      HIRE({ id: 'qa@claude', pack: 'qa', display: 'QA engineer · sonnet' }),
+      HIRE({ id: 'qa@codex', pack: 'qa', provider: 'codex', model: null, label: 'codex',
+        display: 'QA engineer · codex', bin: 'codex' }),
+    ],
+  });
+  const rows = new views.ToolsTree().roots();
+  assert.strictEqual(rows[0].item.description, 'claude',
+    '„QA engineer · sonnet   sonnet" je šum; runner za tím modelem je informace');
+  assert.strictEqual(rows[1].item.description, '',
+    'když je popisek rovnou runner, není co dopisovat');
+});
+
+check('propuštění je na řádku, ne schované v pravém tlačítku', () => {
+  const menus = require(path.join(SRC, '..', 'package.json'))
+    .contributes.menus['view/item/context'];
+  const dismiss = menus.find((m) => m.command === 'agency.hire.remove');
+  assert.ok(dismiss.group.startsWith('inline'),
+    'akce jen v kontextovém menu je akce, kterou nikdo nenajde');
+  assert.strictEqual(dismiss.when, 'viewItem == agencyHire',
+    'odvozený pracovník zápis v rosteru nemá, takže není co mazat');
+});
+
+(async () => {
+  for (const [name, fn] of pending) {
+    try { await fn(); console.log(`  ok   ${name}`); }
+    catch (e) { failed += 1; console.log(`  FAIL ${name}\n       ${e.message}`); }
+  }
+  console.log(failed ? `\n${failed} selhalo\n` : '\nvšechno prošlo\n');
+  process.exit(failed ? 1 : 0);
+})();

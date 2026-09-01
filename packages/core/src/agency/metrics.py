@@ -67,6 +67,15 @@ class Tally:
         }
 
 
+def _who(rec: dict) -> tuple[str, str, str]:
+    """Model, provider and hire of a run — the three ways to slice by worker."""
+    agent = rec.get("agent") or {}
+    cost = rec.get("cost") or {}
+    model = agent.get("model") or cost.get("model") or "default"
+    provider = agent.get("provider") or cost.get("provider") or "default"
+    return model, provider, agent.get("hire") or provider
+
+
 def collect(project: Project, runs: list[Run] | None = None) -> dict:
     selected = runs if runs is not None else load_runs(project)
     now = datetime.now(timezone.utc)
@@ -75,6 +84,8 @@ def collect(project: Project, runs: list[Run] | None = None) -> dict:
     by_dimension: dict[str, Tally] = defaultdict(Tally)
     by_severity: dict[str, Tally] = defaultdict(Tally)
     by_model: dict[str, Tally] = defaultdict(Tally)
+    by_provider: dict[str, Tally] = defaultdict(Tally)
+    by_hire: dict[str, Tally] = defaultdict(Tally)
     by_pack: dict[str, Tally] = defaultdict(Tally)
     reasons: dict[str, int] = defaultdict(int)
     gated_by: dict[str, int] = defaultdict(int)
@@ -83,6 +94,55 @@ def collect(project: Project, runs: list[Run] | None = None) -> dict:
     wall = 0.0
     ages: list[float] = []
     run_rows = []
+
+    # A duplicate has to be able to ask its original how it was decided.
+    #
+    # This is what makes two providers over one pull request measurable at all.
+    # The second one to arrive is marked as a duplicate and never reaches
+    # triage — so under the per-worker breakdowns it would look like it found
+    # nothing, when in fact it independently found the same true thing. In the
+    # overall precision it stays excluded: counting one finding twice would
+    # inflate the number the whole tool is judged by.
+    index: dict[str, dict] = {}
+    verdicts: dict[str, str | None] = {}
+    for run in selected:
+        dec = decisions(run)
+        for f in run.findings():
+            fid = f.get("id")
+            if not fid:
+                continue
+            index[fid] = f
+            verdicts[fid] = (dec.get(fid) or {}).get("state")
+
+    def origin_state(f: dict) -> str | None:
+        """The decision of the finding this one duplicates. Bounded so a
+        duplicateOf cycle in a hand-edited file cannot hang the metrics."""
+        cur = f
+        for _ in range(8):
+            nxt = cur.get("duplicateOf")
+            if not nxt or nxt not in index:
+                return None
+            cur = index[nxt]
+            if cur.get("state") != "duplicate":
+                return verdicts.get(cur.get("id"))
+        return None
+
+    def origin_hire(f: dict) -> str | None:
+        cur = f
+        for _ in range(8):
+            nxt = cur.get("duplicateOf")
+            if not nxt or nxt not in index:
+                return None
+            cur = index[nxt]
+            run_id = cur.get("runId")
+            if cur.get("state") != "duplicate":
+                for r in selected:
+                    if r.id == run_id:
+                        return _who(r.record())[2]
+                return None
+        return None
+
+    agreement = {"crossHire": 0, "sameHire": 0}
 
     for run in selected:
         rec = run.record()
@@ -95,13 +155,23 @@ def collect(project: Project, runs: list[Run] | None = None) -> dict:
             gated_by[k] += v
         wall += ((rec.get("cost") or {}).get("wallClockSeconds") or 0)
 
-        model = ((rec.get("agent") or {}).get("model")
-                 or (rec.get("cost") or {}).get("model") or "default")
+        model, provider, hire = _who(rec)
         started = _parse(rec.get("startedAt"))
         run_undecided = 0
 
         for f in run.findings():
             if f.get("state") == "duplicate":
+                # A repeat still says something about its author: it found the
+                # same thing, only second. Credited to the worker, never to the
+                # overall number.
+                who_first = origin_hire(f)
+                if who_first is not None:
+                    agreement["crossHire" if who_first != hire else "sameHire"] += 1
+                inherited = origin_state(f)
+                if inherited is not None:
+                    by_model[model].add(inherited)
+                    by_provider[provider].add(inherited)
+                    by_hire[hire].add(inherited)
                 continue
             d = dec.get(f.get("id"))
             state = d["state"] if d else None
@@ -109,6 +179,8 @@ def collect(project: Project, runs: list[Run] | None = None) -> dict:
             by_dimension[f.get("dimension") or "—"].add(state)
             by_severity[f.get("severity") or "—"].add(state)
             by_model[model].add(state)
+            by_provider[provider].add(state)
+            by_hire[hire].add(state)
             by_pack[(rec.get("pack") or "—")].add(state)
             if state == "rejected" and d.get("reason"):
                 reasons[d["reason"]] += 1
@@ -119,6 +191,7 @@ def collect(project: Project, runs: list[Run] | None = None) -> dict:
 
         run_rows.append({
             "id": run.id, "pack": rec.get("pack"), "model": model,
+            "provider": provider, "hire": (rec.get("agent") or {}).get("hire"),
             "pr": (rec.get("target") or {}).get("pr"),
             "startedAt": rec.get("startedAt"), "status": rec.get("status"),
             "counts": counts, "undecided": run_undecided,
@@ -145,7 +218,14 @@ def collect(project: Project, runs: list[Run] | None = None) -> dict:
         "bySeverity": {k: by_severity[k].as_dict()
                        for k in ("blocker", "high", "medium", "low", "—") if k in by_severity},
         "byModel": {k: v.as_dict() for k, v in sorted(by_model.items())},
+        "byProvider": {k: v.as_dict() for k, v in sorted(by_provider.items())},
+        "byHire": {k: v.as_dict() for k, v in sorted(by_hire.items())},
         "byPack": {k: v.as_dict() for k, v in sorted(by_pack.items())},
+        # How often two workers land on the same thing. High cross-hire
+        # agreement means the second provider is paying for confirmation
+        # rather than for coverage — which is a reason to run them on
+        # different pull requests, not on the same one.
+        "agreement": {**agreement, "hires": len(by_hire)},
         "rejectReasons": dict(sorted(reasons.items(), key=lambda kv: -kv[1])) or None,
         "queue": {
             "undecided": overall.undecided,

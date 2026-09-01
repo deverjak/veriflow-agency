@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import proc
+from . import proc, providers
 from .config import AGENCY_DIR, Project
 from .util import out, posix, read_json, ulid, write_json
 
@@ -239,63 +239,158 @@ def resolve_brief(cfg: dict, prompt: str | None = None, scenario: str | None = N
     }
 
 
-def already_reviewed(target: dict, login: str | None) -> bool:
-    """Idempotence přes marker s head commitem — tentýž commit se nerecenzuje dvakrát."""
-    marker = f"<!-- agency:review-graph:{target['headRefOid']} -->"
-    for c in target.get("_comments", []):
-        if marker in (c.get("body") or ""):
-            return True
-    return False
+def review_marker(pack: str, head: str, hire_id: str | None = None) -> str:
+    """The marker that says a commit has already been handled.
+
+    It carries the hire, not just the pack. Without that a second provider on
+    the same commit would hit the first one's mark and refuse to start — and
+    the whole point of two specialists over one pull request would collapse.
+    The old shape (no hire) is still read, so pull requests handled before the
+    roster existed stay idempotent.
+    """
+    who = f":{hire_id}" if hire_id and hire_id != pack else ""
+    return f"<!-- agency:{pack}{who}:{head} -->"
 
 
-# Tvar spuštění agenta. Ověřený je `claude`; ostatní se dají popsat
-# v konfiguraci bez zásahu do kódu — proto je to tabulka dat, ne větvení.
-PROVIDER_DEFAULTS = {
-    "claude": {"bin": "claude", "modelFlag": "--model", "dirFlag": "--add-dir"},
-    "codex": {"bin": "codex", "modelFlag": "--model", "dirFlag": None},
-}
+def already_reviewed(target: dict, pack: str = "review-graph",
+                     hire_id: str | None = None) -> bool:
+    """Idempotence through a marker carrying the head commit — the same commit
+    is not reviewed twice by the same specialist. A different one may."""
+    markers = [review_marker(pack, target["headRefOid"], hire_id)]
+    if hire_id:
+        # History: runs from before the roster wrote the marker without a hire.
+        # For a pack's first hire that is the same worker, so it must count.
+        markers.append(review_marker(pack, target["headRefOid"]))
+    bodies = [c.get("body") or "" for c in target.get("_comments", [])]
+    return any(m in b for m in markers for b in bodies)
 
 
 def launch_argv(cfg: dict, run_dir: str, prompt: str,
                 provider: str | None = None,
-                model: str | None = None) -> tuple[list[str], dict]:
-    """Čím běh dokončit.
+                model: str | None = None,
+                hire=None) -> tuple[list[str], dict]:
+    """What to finish the run with.
 
-    Model je vlastnost úkolu, ne uživatele. Kódování si můžeš držet na tom
-    nejsilnějším a recenzi pustit levněji — je to čtení a klasifikace, ne
-    psaní. Volba se zapisuje do run recordu, protože „jaký model dává lepší
-    nálezy" je otázka, kterou tenhle nástroj má umět zodpovědět čísly.
+    The model is a property of the task, not of the user. You can keep coding
+    on the strongest one and run reviews cheaper — a review is reading and
+    classification, not writing. The choice goes into the run record, because
+    "which model produces better findings" is a question this tool is supposed
+    to answer with numbers.
+
+    Precedence: `--provider/--model` from the command > hire > pack
+    configuration. A hire is a PAIR, not two independent fields.
     """
     a = dict(cfg.get("agent") or {})
-    name = provider or a.get("provider") or "claude"
-    spec = dict(PROVIDER_DEFAULTS.get(name, {"bin": name}))
-    for k in ("bin", "modelFlag", "dirFlag"):
-        if k in a:
-            spec[k] = a[k]
+    cfg_provider = a.get("provider") or "claude"
+
+    # A hire is a PAIR (provider, model). Once one is in play the pack
+    # configuration no longer decides the model — otherwise "Reviewer · codex"
+    # would be handed `--model sonnet`, because that is what the configuration
+    # says for claude.
+    if hire is not None:
+        base_provider, base_model = hire.provider, hire.model
+    else:
+        base_provider, base_model = cfg_provider, a.get("model")
+
+    name = provider or base_provider
+    # Overriding the provider on the command line detaches the model too:
+    # `--provider codex` over a sonnet hire means codex on its own default
+    # model, not codex holding the name of a model it does not know.
+    m = model if model is not None else (base_model if name == base_provider else None)
+
+    spec = providers.spec(name)
+    # Project configuration may tune the launch shape (a different path to the
+    # binary, a wrapper) — but only for the provider it was written for.
+    if name == cfg_provider:
+        for k in ("bin", "modelFlag", "dirFlag", "promptFlag"):
+            if k in a:
+                spec[k] = a[k]
+    if m is None:
+        m = spec.get("defaultModel")
 
     argv = [spec.get("bin") or name]
-    m = model or a.get("model")
     if m and spec.get("modelFlag"):
         argv += [spec["modelFlag"], m]
     # RUN_DIR leží mimo worktree, a právě tam se zapisuje findings.json.
     # Bez tohohle se agent ptá na zápis ven z pracovního adresáře v každém běhu.
     if spec.get("dirFlag"):
         argv += [spec["dirFlag"], run_dir]
-    argv += [str(x) for x in (a.get("extraArgs") or [])]
-    argv.append(prompt)
-    return argv, {"provider": name, "model": m, "bin": argv[0]}
+    extra = a.get("extraArgs") if name == cfg_provider else None
+    argv += [str(x) for x in (extra if extra is not None else spec.get("extraArgs") or [])]
+    if spec.get("promptFlag"):
+        argv += [spec["promptFlag"], prompt]
+    else:
+        argv.append(prompt)
+    return argv, {"provider": name, "model": m, "bin": argv[0],
+                  "hire": hire.id if hire else None}
 
 
-def make_worktree(project: Project, cfg: dict, target: dict) -> Path:
+# The hire is in the path on purpose. Two specialists over one pull request is
+# the main reason the roster exists — and with a shared path the second run
+# would delete the first one's worktree in the middle of its work.
+WORKTREE_TEMPLATE = "../{repo}-review-pr-{n}-{hire}"
+
+
+def worktree_path(project: Project, cfg: dict, target: dict, hire=None) -> Path:
+    """Where the worktree will be built. Computed separately so a run can
+    record the path BEFORE it takes it — the guard below rests on that."""
+    tpl = (cfg.get("worktree") or {}).get("path") or WORKTREE_TEMPLATE
+    fields = {
+        "repo": project.root.name,
+        "n": target.get("pr") or "x",
+        "hire": hire.slug if hire else "solo",
+        "provider": (hire.provider if hire else None) or "agent",
+        "model": (hire.model if hire else None) or "default",
+    }
+    try:
+        name = tpl.format(**fields)
+    except KeyError as e:
+        raise SystemExit(
+            f"worktree.path uses {e} — known placeholders are "
+            "{repo}, {n}, {hire}, {provider}, {model}.")
+
+    # A safety net for configurations written before the roster existed: their
+    # template knows nothing about a hire and two specialists would meet in one
+    # directory. Making the path distinct is cheaper than refusing the run —
+    # the worktree is throwaway anyway and its path is printed.
+    if hire and fields["hire"] not in name:
+        name = f"{name}-{fields['hire']}"
+    return (project.root / name).resolve()
+
+
+def worktree_owner(project: Project, wt: Path, exclude: str | None = None) -> str | None:
+    """Which running run is holding this directory.
+
+    Without this a parallel run by a second specialist would silently
+    `--force`-delete the first one's worktree. Losing a review in progress is
+    worse than a refused start, so it refuses.
+    """
+    want = posix(wt)
+    for r in load_runs(project):
+        if r.id == exclude:
+            continue
+        rec = r.record()
+        if rec.get("status") == "running" and rec.get("worktree") == want:
+            return r.id
+    return None
+
+
+def make_worktree(project: Project, cfg: dict, target: dict, hire=None,
+                  run: "Run | None" = None) -> Path:
     """Jednorázový worktree na hlavičce PR.
 
     Nikdy se nečekoutuje do pracovní kopie uživatele — jeho větev i rozdělaná
     práce zůstanou netknuté.
     """
-    tpl = (cfg.get("worktree") or {}).get("path") or "../{repo}-review-pr-{n}"
-    name = tpl.format(repo=project.root.name, n=target.get("pr") or "x")
-    wt = (project.root / name).resolve()
+    wt = worktree_path(project, cfg, target, hire)
     if wt.exists():
+        busy = worktree_owner(project, wt, exclude=run.id if run else None)
+        if busy:
+            raise SystemExit(
+                f"{posix(wt)} is still held by the running run {busy[:10]}.\n"
+                "Two specialists on the same pull request need two worktrees — give this "
+                "one a name of its own via worktree.path (the {hire} placeholder does "
+                "exactly that), or finish the other run first.")
         proc.git("worktree", "remove", str(wt), "--force", cwd=project.root)
     r = proc.git("fetch", "origin", f"pull/{target['pr']}/head", cwd=project.root)
     if not r.ok:
@@ -382,11 +477,68 @@ def prepare_graph(project: Project, wt: Path, cfg: dict) -> dict:
     return info
 
 
-def collect_evidence(wt: Path, run: Run, target: dict, files: list[str]) -> dict:
+def known_memory(project: Project, run: Run) -> dict:
+    """What this project already knows — across runs, packs and specialists.
+
+    This is the shared memory. The roster allows several workers over one pack;
+    if each of them remembered only its own runs, the second provider would
+    dutifully repeat everything the first one settled an hour ago, and the
+    queue would grow twice as fast as the value.
+
+    Findings carry their decision with them: "this was already rejected as
+    by-design" is the most valuable sentence a new run can be handed on input.
+    Dedup after ingest is a safety net, not a substitute — a session that
+    starts without knowing past findings is condemned to repeat them.
+    """
+    ev = run.dir / "evidence"
+    ev.mkdir(parents=True, exist_ok=True)
+
+    known: list[dict] = []
+    specs: list[dict] = []
+    for other in load_runs(project):
+        if other.id == run.id:
+            continue
+        rec = other.record()
+        who = (rec.get("agent") or {}).get("hire")
+        dec = decisions(other)
+        for f in other.findings():
+            d = dec.get(f.get("id"))
+            a = f.get("anchor") or {}
+            known.append({
+                "id": f.get("id"), "title": f.get("title"), "dimension": f.get("dimension"),
+                "severity": f.get("severity"), "file": a.get("file"), "line": a.get("line"),
+                "decision": d["state"] if d else None,
+                "reason": d.get("reason") if d else None,
+                "runId": other.id,
+                # Who found it. Without this there is no telling "a colleague
+                # on another model already found this" from "I wrote this
+                # myself last week".
+                "hire": who, "pack": rec.get("pack"),
+                "provider": (rec.get("agent") or {}).get("provider"),
+            })
+        if (other.dir / "specs").is_dir():
+            for f in sorted((other.dir / "specs").rglob("*")):
+                if f.is_file():
+                    specs.append({"runId": other.id, "hire": who,
+                                  "path": posix(f.relative_to(project.root))})
+
+    write_json(ev / "known-findings.json", known[:300])
+    stats = {"knownFindings": len(known)}
+    if specs:
+        # Reproduction tests from earlier runs. This is the thing a repro is
+        # written as an executable file for and not as a paragraph: "is it
+        # fixed yet?" is then answered by running it, not by another session.
+        write_json(ev / "known-specs.json", specs[:200])
+        stats["knownSpecs"] = len(specs)
+    return stats
+
+
+def collect_evidence(project: Project, wt: Path, run: Run, target: dict,
+                     files: list[str]) -> dict:
     """Grafový signál. Tohle je ta část, kterou samotný diff nedá."""
     ev = run.dir / "evidence"
     ev.mkdir(parents=True, exist_ok=True)
-    stats: dict = {}
+    stats: dict = dict(known_memory(project, run))
 
     base = target.get("baseRefOid")
     if base:
@@ -419,15 +571,15 @@ def collect_evidence(wt: Path, run: Run, target: dict, files: list[str]) -> dict
 
 def collect_workspace_evidence(project: Project, run: Run, target: dict,
                                files: list[str]) -> dict:
-    """Signál pro běh bez pull requestu: co se v projektu poslední dobou dělo.
+    """Signal for a run without a pull request: what has been happening lately.
 
-    A hlavně `known-findings.json` — co už tenhle projekt ví. Dedup po ingestu
-    je pojistka, ne náhrada za to, aby pack netvrdil podruhé totéž; sezení,
-    které začne bez znalosti minulých nálezů, je odsouzené je zopakovat.
+    The project's shared memory is added by `known_memory` — the same for both
+    kinds of run, because "what this project already knows" does not depend on
+    whether a pull request or a running application is being examined.
     """
     ev = run.dir / "evidence"
     ev.mkdir(parents=True, exist_ok=True)
-    stats: dict = {"changedFiles": len(files)}
+    stats: dict = {"changedFiles": len(files), **known_memory(project, run)}
 
     base = target.get("baseRefOid")
     if base and base != target.get("headRefOid"):
@@ -438,38 +590,6 @@ def collect_workspace_evidence(project: Project, run: Run, target: dict,
     else:
         log = proc.git("log", "--oneline", "-n", "30", cwd=project.root)
     (ev / "recent-commits.txt").write_text(log.stdout or log.stderr, encoding="utf-8")
-
-    known = []
-    for other in load_runs(project):
-        if other.id == run.id:
-            continue
-        dec = decisions(other)
-        for f in other.findings():
-            d = dec.get(f.get("id"))
-            a = f.get("anchor") or {}
-            known.append({
-                "id": f.get("id"), "title": f.get("title"), "dimension": f.get("dimension"),
-                "severity": f.get("severity"), "file": a.get("file"), "line": a.get("line"),
-                "decision": d["state"] if d else None,
-                "reason": d.get("reason") if d else None,
-                "runId": other.id,
-            })
-    write_json(ev / "known-findings.json", known[:300])
-    stats["knownFindings"] = len(known)
-
-    # Reprodukční testy ze starších běhů. Tohle je ta věc, kvůli které se
-    # reprodukce píše jako spustitelný soubor a ne jako odstavec: „je to už
-    # opravené?" se pak dá zodpovědět spuštěním, ne dalším sezením.
-    specs = []
-    for other in load_runs(project):
-        if other.id == run.id or not (other.dir / "specs").is_dir():
-            continue
-        for f in sorted((other.dir / "specs").rglob("*")):
-            if f.is_file():
-                specs.append({"runId": other.id, "path": posix(f.relative_to(project.root))})
-    if specs:
-        write_json(ev / "known-specs.json", specs[:200])
-        stats["knownSpecs"] = len(specs)
     return stats
 
 
@@ -492,13 +612,18 @@ def method_hint(pack, project: Project, carried: list[str], in_worktree: bool) -
 
 
 def start(project: Project, pack_ref: str, cfg: dict, target: dict,
-          trigger: str = "manual") -> Run:
+          trigger: str = "manual", hire=None) -> Run:
     run_id = ulid()
     run = Run(run_id, project.runs_dir / run_id, project)
     run.dir.mkdir(parents=True, exist_ok=True)
     run.save_record({
         "id": run_id,
         "pack": pack_ref,
+        # Which roster entry took the run. Written at start rather than with
+        # `agent` at the end of preparation — a parallel run by a second
+        # specialist is recognisable from it before anything is created.
+        "agent": {"provider": hire.provider, "model": hire.model,
+                  "hire": hire.id} if hire else {},
         "project": {"slug": project.slug, "defaultBranch": project.default_branch},
         "target": {k: v for k, v in target.items() if not k.startswith("_")},
         # Attended je vlastnost systému, ne úmysl: běh vzniká z interaktivního
@@ -511,9 +636,68 @@ def start(project: Project, pack_ref: str, cfg: dict, target: dict,
     return run
 
 
+def unfinished(project: Project) -> list[Run]:
+    """Runs still marked as running.
+
+    Nothing here can tell whether one is alive: the CLI prepares the run and
+    prints the command, and a terminal somewhere else runs it. There is no pid
+    to check, so "unfinished" means what the record says — and closing one is
+    the user's call, made when they close the terminal.
+    """
+    return [r for r in load_runs(project) if r.record().get("status") == "running"]
+
+
+def abandon(project: Project, run: Run, reason: str | None = None) -> dict:
+    """Close a run whose agent is not coming back, and free its worktree.
+
+    The record stays. A started run is a fact, and one that was walked away
+    from is worth seeing — an hour of wall clock with nothing to show for it is
+    exactly the kind of thing the cost numbers are meant to catch.
+    """
+    rec = run.record()
+    was = rec.get("status")
+    rec["status"] = "abandoned"
+    rec["exitReason"] = reason or "the terminal was closed before the agent finished"
+    rec.setdefault("finishedAt", now())
+
+    freed = None
+    ctx = read_json(run.dir / "context.json", default={})
+    wt = ctx.get("worktree")
+    # A run without its own worktree worked in the user's working copy.
+    # Removing that would be the worst thing this tool could do, so it is
+    # decided by the record, never by comparing paths.
+    if ctx.get("worktreeOwned") is not False and wt and Path(wt).exists():
+        remove_worktree(project, Path(wt))
+        freed = wt
+    rec.pop("worktree", None)
+    run.save_record(rec)
+    return {"run": run.id, "wasRunning": was == "running", "worktreeRemoved": freed}
+
+
+def discard(project: Project, run: Run, force: bool = False) -> dict:
+    """Delete a run outright — record, evidence and all.
+
+    Kept apart from `abandon` because it destroys history, and the one thing
+    this tool must never lose is a decision somebody made. A run that has any
+    is refused; one that only produced candidates says how many are going.
+    """
+    dec = decisions(run)
+    if dec and not force:
+        raise SystemExit(
+            f"Run {run.id[:10]} carries {len(dec)} decision(s) — that is work somebody "
+            "did, and discarding it would take the numbers with it.\n"
+            "Use `agency cleanup --run <id>` to close the run and keep the record.")
+
+    counts = {"findings": len(run.findings()), "decisions": len(dec)}
+    abandon(project, run, reason="discarded")
+    shutil.rmtree(run.dir, ignore_errors=True)
+    return {"run": run.id, "removed": posix(run.dir), **counts}
+
+
 def write_context(run: Run, cfg: dict, target: dict, wt: Path,
                   files: list[str], skipped: int,
-                  brief: dict | None = None, worktree_owned: bool = True) -> None:
+                  brief: dict | None = None, worktree_owned: bool = True,
+                  hire=None, pack_name: str | None = None) -> None:
     review = dict(cfg.get("review") or {})
     review.pop("skipPatterns", None)
     # Celá konfigurace packu, aby jádro nemuselo znát klíče jednotlivých packů.
@@ -533,6 +717,18 @@ def write_context(run: Run, cfg: dict, target: dict, wt: Path,
         "filesSkipped": skipped,
         # Zadání běhu. `standing` platí pro projekt pořád, `focus` jen teď.
         "brief": brief or {"standing": None, "focus": None, "scenario": None, "source": None},
+        # Which worker took this run. The pack needs it for two things: to sign
+        # what it produces, and to use the right idempotence marker — with two
+        # specialists over one pull request a shared marker would let the first
+        # one lock the second out of the same commit.
+        "hire": ({"id": hire.id, "provider": hire.provider, "model": hire.model,
+                  "label": hire.label} if hire else None),
+        # The marker is computed by the core and handed over ready-made. A pack
+        # assembling it itself would be a second place where the rule lives,
+        # and `already_reviewed` would stop matching it the day either changes.
+        "prCommentMarker": (review_marker(pack_name, target["headRefOid"],
+                                          hire.id if hire else None)
+                            if pack_name and target.get("pr") else None),
         "review": review,
         "sinks": cfg.get("sinks") or {},
         "config": pack_config,

@@ -12,7 +12,8 @@ import os
 import sys
 from pathlib import Path
 
-from . import anchor, config, dedup, export, ingest, metrics, packs, proc, registry, runs
+from . import (anchor, config, dedup, export, hires, ingest, metrics, packs, proc,
+               providers, registry, runs)
 from .util import bundled, out, posix, read_json, strip_comments, ulid, write_json
 
 # ---------------------------------------------------------------- pomůcky
@@ -39,13 +40,26 @@ def _project(args) -> config.Project:
     return project
 
 
-def _pack_cfg(project: config.Project, pack_name: str) -> dict:
+def _pack_cfg(project: config.Project, pack_name: str, asked: str | None = None) -> dict:
+    """Configuration of the pack a run is about to use.
+
+    The name the user typed may have been a hire id, so the error has to answer
+    both readings of "not found here" — nobody hired under that name, and no
+    method installed under it either.
+    """
     cfg = project.pack_config(pack_name)
-    if cfg is None:
-        raise SystemExit(
-            f"Pack “{pack_name}” is not installed here. Run `agency add {pack_name}`."
-        )
-    return cfg
+    if cfg is not None:
+        return cfg
+
+    known = ", ".join(h.id for h in hires.load(project))
+    installed = ", ".join(project.installed().get("packs") or {})
+    lines = [f"Nothing here is called “{asked or pack_name}”."]
+    if known:
+        lines.append(f"Hired: {known}")
+    if installed:
+        lines.append(f"Methods installed: {installed}")
+    lines.append(f"Hire one: `agency hire {pack_name}`")
+    raise SystemExit("\n".join(lines))
 
 
 # ---------------------------------------------------------------- init
@@ -82,6 +96,7 @@ def cmd_init(args) -> int:
 
 def cmd_packs(args) -> int:
     project = config.discover(getattr(args, "repo", None))
+    roster = hires.describe(project, _packs_by_name()) if project else []
     data = []
     for p in packs.available():
         entry = {"name": p.name, "version": p.version, "title": p.manifest.get("title"),
@@ -96,6 +111,10 @@ def cmd_packs(args) -> int:
                  # nebo na zadani — a musel by jmena packu znat napevno.
                  "run": p.run_policy,
                  "installed": packs.installed_ref(project, p.name) if project else None}
+        # Who works by this method here. A pack can have several workers, so
+        # "which provider handles it" is no longer one field on the pack — the
+        # client renders one row per hire and must get them from the core.
+        entry["hires"] = [h for h in roster if h["pack"] == p.name]
         cfg = project.pack_config(p.name) if project else None
         if cfg:
             a = cfg.get("agent") or {}
@@ -123,22 +142,55 @@ def cmd_packs(args) -> int:
             mark = out.ok("installed " + e["installed"]) if e["installed"] else out.dim("not installed")
             print(f"  {out.bold(e['name']):28} {e['version']:8} {mark}")
             print(f"  {'':28} {out.dim(e['description'] or '')}")
+            for h in e["hires"]:
+                dot = out.ok("●") if h["available"] else out.err("●")
+                print(f"  {'':26} {dot} {h['id']:30} {out.dim(h['label'])}")
         print()
 
     return _emit(args, data, human)
 
 
 def cmd_add(args) -> int:
+    """Install a pack and put one worker on it.
+
+    Two things that used to be one. Installing brings the METHOD into the
+    project; hiring says who will work by it. They stayed one command as long
+    as a pack could have exactly one worker — the roster is what separated
+    them, and `agency add` keeps doing both so nothing that worked before has
+    to change.
+    """
     project = _project(args)
     pack = packs.load(args.pack, args.from_path)
     steps = packs.plan(pack, project)
     blocked = [s for s in steps if s["action"] == "blocked"]
 
+    provider = getattr(args, "provider", None)
+    model = getattr(args, "model", None)
+    hire = None
+
     if not args.dry_run and not blocked:
         packs.apply(pack, project, steps, detected=config.detect(project))
         registry.remember(project)  # .agency vzniklo az ted
 
+        cfg = project.pack_config(pack.name) or {}
+        if provider or model or getattr(args, "as_id", None):
+            # An explicit provider means "another worker", even when the pack
+            # already has one — that is the whole point of `agency hire`.
+            agent = cfg.get("agent") or {}
+            chosen = provider or agent.get("provider") or "claude"
+            # A model is only inherited from the configuration when it was
+            # written for this provider. Handing codex a claude model name
+            # would be a launch flag that fails on the first run.
+            chosen_model = model or (agent.get("model") if chosen == (
+                agent.get("provider") or "claude") else None)
+            hire = hires.add(project, pack.name, provider=chosen, model=chosen_model,
+                             hire_id=getattr(args, "as_id", None),
+                             title=getattr(args, "title", None))
+        else:
+            hire = hires.ensure_default(project, pack.name, cfg)
+
     data = {"pack": pack.ref, "dryRun": args.dry_run,
+            "hire": hire.as_dict() if hire else None,
             "steps": [{k: v for k, v in s.items() if k != "src"} for s in steps]}
 
     def human():
@@ -154,11 +206,129 @@ def cmd_add(args) -> int:
         elif args.dry_run:
             print(f"\n  {out.dim('Dry run, nothing was written.')}")
         else:
+            if hire:
+                where = providers.installed(hire.provider)
+                mark = out.ok("hired") if where else out.warn("hired, but not on PATH")
+                print(f"\n  {mark} {out.bold(hire.id)}  "
+                      f"{out.dim(hire.provider + (' · ' + hire.model if hire.model else ''))}")
+                print(f"  {out.dim('Run it:')} agency run {hire.id}")
+                print(f"  {out.dim('Another provider:')} "
+                      f"agency hire {pack.name} --provider <name>")
+            else:
+                # Nobody new was hired, and silence here reads like a failure.
+                # Re-running the command is how you refresh the method, so say
+                # who is already doing the work instead of saying nothing.
+                existing = hires.for_pack(project, pack.name)
+                print(f"\n  {out.dim('Already hired:')} "
+                      f"{', '.join(f'{h.id} ({h.label})' for h in existing)}")
+                print(f"  {out.dim('Add another:')} "
+                      f"agency hire {pack.name} --provider <name>")
             print(f"\n  Next: {out.bold('agency doctor')}")
         print()
 
     _emit(args, data, human)
     return 1 if blocked and not args.force else 0
+
+
+# ---------------------------------------------------------------- roster
+
+def _packs_by_name() -> dict:
+    return {p.name: p for p in packs.available()}
+
+
+def cmd_roster(args) -> int:
+    """Who is hired here. One row per worker, not per method.
+
+    The list is the answer to “can I run two providers on this?” — if a
+    provider is missing from PATH, it says so here rather than at launch.
+    """
+    project = _project(args)
+    data = hires.describe(project, _packs_by_name())
+
+    def human():
+        print(f"\n  {out.bold(project.name)}  {out.dim(posix(project.root))}\n")
+        if not data:
+            print(f"  {out.dim('Nobody hired yet.')}  agency hire review-graph\n")
+            return
+        for h in data:
+            mark = out.ok("●") if h["available"] else out.err("●")
+            model = h["model"] or out.dim("provider default")
+            print(f"  {mark} {out.bold(h['id']):34} {h['display'][:30]:32} "
+                  f"{h['provider']:10} {model}")
+            if not h["available"]:
+                print("    " + out.dim(
+                    f"`{h['bin']}` is not on PATH — this one cannot run here"))
+            if not h["packInstalled"]:
+                print("    " + out.dim(
+                    f"pack {h['pack']} is not installed — `agency add {h['pack']}`"))
+        print(f"\n  {out.dim('Run one:')} agency run <id>   "
+              f"{out.dim('Add one:')} agency hire <pack> --provider <name>\n")
+
+    return _emit(args, data, human)
+
+
+def cmd_fire(args) -> int:
+    """Remove a roster entry. The pack, its configuration and every past run
+    stay — firing a worker is not deleting their work."""
+    project = _project(args)
+    gone = hires.remove(project, args.hire)
+    if not gone:
+        # An implicit worker is the pack's own configuration wearing a name —
+        # there is no roster entry to delete. Saying "no such hire" would be a
+        # lie about something the user can see in the list.
+        for h in hires.roster(project):
+            if h.id == args.hire and h.implicit:
+                raise SystemExit(
+                    f"“{args.hire}” is not a roster entry — it is the default worker of "
+                    f"the {h.pack} method, taken from its configuration.\n"
+                    f"Remove the method itself, or hire someone explicitly first.")
+        known = ", ".join(h.id for h in hires.roster(project)) or "(nobody)"
+        raise SystemExit(f"There is no hire “{args.hire}” here. Hired: {known}")
+
+    data = {"fired": gone.as_dict(), "remaining": [h.as_dict() for h in hires.load(project)]}
+
+    def human():
+        print(f"\n  {out.ok('fired')} {out.bold(gone.id)}\n")
+        print(out.dim("  The pack, its configuration and every past run stay where they were."))
+        print(out.dim("  Findings this hire produced keep counting towards the metrics.\n"))
+
+    return _emit(args, data, human)
+
+
+def cmd_providers(args) -> int:
+    """What AI runners this machine has.
+
+    A property of the machine, not of the project — which is why adding one is
+    a command and not a commit. Once `grok` is on PATH, one `providers add`
+    makes it hireable for every pack in every project.
+    """
+    if args.remove:
+        if not providers.forget(args.remove):
+            raise SystemExit(
+                f"“{args.remove}” is not registered. Built-in providers cannot be removed.")
+    elif args.add:
+        providers.register(
+            args.add, bin=args.bin, title=args.title, modelFlag=args.model_flag,
+            dirFlag=args.dir_flag, promptFlag=args.prompt_flag,
+            defaultModel=args.default_model,
+            models=[m.strip() for m in args.models.split(",") if m.strip()]
+            if args.models else None)
+
+    data = providers.detected()
+
+    def human():
+        print()
+        for p in data:
+            mark = out.ok("●") if p["installed"] else out.dim("○")
+            tag = out.dim("built in") if p["builtin"] else out.dim("added by you")
+            print(f"  {mark} {out.bold(p['id']):14} {p['title'][:24]:26} {tag}")
+            print("    " + out.dim(p["path"] or f"`{p['bin']}` is not on PATH"))
+            if p["models"]:
+                print(f"    {out.dim('models: ' + ', '.join(p['models']))}")
+        print(f"\n  {out.dim('Add one:')} agency providers --add grok --bin grok")
+        print(f"  {out.dim('Hire it:')} agency hire review-graph --provider grok\n")
+
+    return _emit(args, data, human)
 
 
 # ---------------------------------------------------------------- doctor
@@ -192,6 +362,26 @@ def cmd_doctor(args) -> int:
             check(name, True, "not needed by the specialists hired here", fatal=False)
 
     check("git", proc.which("git"), proc.which("git") or "not on PATH")
+
+    # One check per hired worker, not one per provider. The roster is shared
+    # through the repository but the binaries are not: a colleague who clones
+    # this project has to be told which of its specialists cannot run here,
+    # and a missing binary is the one prerequisite that only shows up at launch.
+    crew = hires.roster(project)
+    for h in crew:
+        where = providers.installed(h.provider)
+        spec = providers.spec(h.provider)
+        check(f"hire {h.id}", where,
+              f"{where} · {h.label}" if where
+              else f"`{spec.get('bin') or h.provider}` is not on PATH — install it, "
+                   f"or `agency fire {h.id}`",
+              # Not fatal: one unavailable specialist must not make the whole
+              # project look broken when the others can work.
+              fatal=False)
+    if crew and not any(providers.installed(h.provider) for h in crew):
+        check("agent", False,
+              "none of the hired specialists has its runner on PATH — nothing can run here")
+
     tool_check("code-review-graph", "code-review-graph", proc.crg_version(),
                "not on PATH — `uv tool install code-review-graph`")
     login = proc.gh_login()
@@ -376,8 +566,12 @@ def _one_line(text: str, limit: int = 400) -> str:
 
 def cmd_run(args) -> int:
     project = _project(args)
-    cfg = _pack_cfg(project, args.pack)
-    pack = packs.load(args.pack)
+    # The positional argument names a WORKER, or a method when the project has
+    # only one worker for it. Resolving it here is what lets two providers be
+    # started over the same pull request without either of them being special.
+    pack_name, hire = hires.resolve(project, args.pack)
+    cfg = _pack_cfg(project, pack_name, asked=args.pack)
+    pack = packs.load(pack_name)
     policy = pack.run_policy
 
     # V --json režimu se průběh potlačí, jinak by se mísil s výstupem
@@ -391,7 +585,8 @@ def cmd_run(args) -> int:
                              ensure_ascii=False, indent=2))
         return 1
 
-    out.say(f"\n  {out.bold(pack.ref)} → {project.name}\n")
+    who = hire.display(pack.manifest.get("title")) if hire else pack.ref
+    out.say(f"\n  {out.bold(who)}  {out.dim(pack.ref)} → {project.name}\n")
 
     # Zadání se řeší první. U packu, který ho vyžaduje, by běh bez něj jen
     # spálil přípravu a skončil na agentovi, který neví, co má dělat.
@@ -422,9 +617,12 @@ def cmd_run(args) -> int:
 
         if target["_isDraft"] and not args.force:
             return refuse("The pull request is a draft. Continue with --force if that is intended.", "draft")
-        if runs.already_reviewed(target, proc.gh_login()) and not args.force:
+        if (runs.already_reviewed(target, pack.name, hire.id if hire else None)
+                and not args.force):
             return refuse(
-                f"Commit {target['headRefOid'][:8]} has already been reviewed — the marker is on the PR. Again: --force.",
+                f"Commit {target['headRefOid'][:8]} has already been reviewed by "
+                f"{hire.id if hire else pack.name} — the marker is on the PR. "
+                "Another specialist may still review it. Again: --force.",
                 "already-reviewed")
 
     skip = (cfg.get("review") or {}).get("skipPatterns") or []
@@ -441,7 +639,7 @@ def cmd_run(args) -> int:
         if not files:
             return refuse("No file left after filtering — there is nothing to review.", "no-files")
 
-    run = runs.start(project, pack.ref, cfg, target)
+    run = runs.start(project, pack.ref, cfg, target, hire=hire)
     out.step(f"run {run.id}")
 
     wt = project.root
@@ -450,8 +648,15 @@ def cmd_run(args) -> int:
     ginfo: dict = {}
     try:
         if wt_owned:
+            # The path is claimed in the record before the directory exists, so
+            # a second specialist starting a moment later sees it taken instead
+            # of force-deleting a review in progress.
+            rec = run.record()
+            rec["worktree"] = posix(runs.worktree_path(project, cfg, target, hire))
+            run.save_record(rec)
+
             out.step("building a throwaway worktree")
-            wt = runs.make_worktree(project, cfg, target)
+            wt = runs.make_worktree(project, cfg, target, hire=hire, run=run)
             out.done(posix(wt))
 
             out.step("copying the pack method into the worktree")
@@ -471,7 +676,7 @@ def cmd_run(args) -> int:
                      + (f"  {out.dim(ginfo['tool'] or '')}" if ginfo.get("tool") else ""))
 
             out.step("collecting graph signal")
-            stats = runs.collect_evidence(wt, run, target, files)
+            stats = runs.collect_evidence(project, wt, run, target, files)
             out.done("evidence/ filled" + (f"  {out.dim(str(stats))}" if stats else ""))
         else:
             out.step("collecting signal from the project")
@@ -479,7 +684,8 @@ def cmd_run(args) -> int:
             out.done(f"evidence/ filled  {out.dim(str(stats))}")
 
         runs.write_context(run, cfg, target, wt, files, skipped,
-                           brief=brief, worktree_owned=wt_owned)
+                           brief=brief, worktree_owned=wt_owned, hire=hire,
+                           pack_name=pack.name)
 
         rec = run.record()
         if ginfo:
@@ -511,7 +717,7 @@ def cmd_run(args) -> int:
         # má na obrazovce vidět, s čím agenta pouští.
         prompt += " Brief for this run: " + _one_line(brief["focus"])
     launch, agent_info = runs.launch_argv(
-        cfg, posix(run.dir), prompt,
+        cfg, posix(run.dir), prompt, hire=hire,
         provider=getattr(args, "provider", None), model=getattr(args, "model", None))
     rec = run.record()
     rec["agent"] = agent_info
@@ -526,6 +732,7 @@ def cmd_run(args) -> int:
             "runDir": posix(run.dir),
             "worktree": posix(wt),
             "worktreeOwned": wt_owned,
+            "hire": hire.as_dict() if hire else None,
             "brief": brief,
             "prompt": prompt,
             # Hotový příkaz — tvar spuštění vlastní CLI, ne klient.
@@ -553,7 +760,7 @@ def cmd_run(args) -> int:
 
     if args.launch:
         os.chdir(wt)
-        out.say(f"  {out.bold('launching claude…')}\n")
+        out.say(f"  {out.bold('launching ' + launch[0] + '…')}\n")
         os.execvp(launch[0], launch)
 
     print(f"  {out.bold('Start it:')}")
@@ -569,24 +776,71 @@ def cmd_run(args) -> int:
 
 
 def cmd_cleanup(args) -> int:
+    """Close a run that is not coming back, and take its worktree with it.
+
+    Killing the terminal leaves two things behind: a record that still says
+    `running`, and a worktree nobody will ever look at. Neither closes itself —
+    the CLI prepares a run and prints a command, and whatever runs that command
+    lives in a terminal this process knows nothing about. So there is no pid to
+    watch and no exit code to catch; closing the run is the same act as closing
+    the terminal, and it belongs to the person who did it.
+    """
     project = _project(args)
-    run = runs.find_run(project, args.run)
-    if not run:
-        raise SystemExit("No run found.")
-    ctx = read_json(run.dir / "context.json", default={})
-    wt = ctx.get("worktree")
-    # Běh bez vlastního worktree jel v pracovní kopii uživatele. Smazat ji by
-    # bylo to nejhorší, co tenhle nástroj může udělat — proto se to hlídá
-    # záznamem v kontextu, ne porovnáním cest.
-    if ctx.get("worktreeOwned") is False:
-        out.note("the run worked in the project itself — there is nothing to clean up")
-        return 0
-    if wt and Path(wt).exists():
-        runs.remove_worktree(project, Path(wt))
-        out.done(f"worktree removed: {wt}")
+
+    targets: list = []
+    if getattr(args, "unfinished", False):
+        targets = runs.unfinished(project)
+        if not targets:
+            return _emit(args, {"closed": [], "unfinished": 0},
+                         lambda: out.note("no run is still marked as running"))
     else:
-        out.note("the worktree no longer exists")
-    return 0
+        run = runs.find_run(project, args.run)
+        if not run:
+            raise SystemExit("No run found.")
+        targets = [run]
+
+    results = []
+    for run in targets:
+        rec = run.record()
+        if getattr(args, "discard", False):
+            results.append({**runs.discard(project, run, force=args.force), "action": "discarded"})
+            continue
+
+        ctx = read_json(run.dir / "context.json", default={})
+        if rec.get("status") == "running":
+            results.append({**runs.abandon(project, run), "action": "abandoned"})
+        elif ctx.get("worktreeOwned") is False:
+            # Běh bez vlastního worktree jel v pracovní kopii uživatele. Smazat ji
+            # by bylo to nejhorší, co tenhle nástroj může udělat — proto se to hlídá
+            # záznamem v kontextu, ne porovnáním cest.
+            results.append({"run": run.id, "action": "nothing",
+                            "why": "the run worked in the project itself"})
+        else:
+            wt = ctx.get("worktree")
+            gone = bool(wt and Path(wt).exists())
+            if gone:
+                runs.remove_worktree(project, Path(wt))
+                rec.pop("worktree", None)
+                run.save_record(rec)
+            results.append({"run": run.id, "action": "cleaned",
+                            "worktreeRemoved": wt if gone else None})
+
+    data = {"closed": results, "unfinished": len(runs.unfinished(project))}
+
+    def human():
+        for r in results:
+            if r["action"] == "abandoned":
+                out.done(f"{r['run'][:10]} closed as abandoned"
+                         + (f"  {out.dim('worktree removed')}" if r.get("worktreeRemoved") else ""))
+            elif r["action"] == "discarded":
+                out.done(f"{r['run'][:10]} discarded — {r['findings']} findings went with it")
+            elif r["action"] == "cleaned":
+                out.done(f"worktree removed: {r['worktreeRemoved']}" if r["worktreeRemoved"]
+                         else "the worktree no longer exists")
+            else:
+                out.note(r["why"])
+
+    return _emit(args, data, human)
 
 
 # ---------------------------------------------------------------- validate
@@ -739,7 +993,17 @@ def cmd_metrics(args) -> int:
         print()
         table("by dimension", r["byDimension"])
         table("by severity", r["bySeverity"])
+        table("by specialist", r["byHire"])
         table("by model", r["byModel"])
+        # Only worth printing once two workers have actually met over the same
+        # code — with one hire the number is always zero and says nothing.
+        ag = r.get("agreement") or {}
+        if ag.get("hires", 0) > 1 and (ag["crossHire"] or ag["sameHire"]):
+            print(f"  {out.dim('agreement')}")
+            print(f"    {'found by another specialist too':32} {ag['crossHire']}")
+            print(f"    {'found twice by the same one':32} {ag['sameHire']}")
+            print(out.dim("    A high first number means the second runner is buying "
+                          "confirmation, not coverage.\n"))
         if r["rejectReasons"]:
             print(f"  {out.dim('reasons for rejection')}")
             for k, v in r["rejectReasons"].items():
@@ -1100,9 +1364,16 @@ def cmd_status(args) -> int:
         rec = run.record()
         dec = runs.decisions(run)
         fs = run.findings()
+        agent = rec.get("agent") or {}
         data.append({
             "id": run.id, "pack": rec.get("pack"), "status": rec.get("status"),
             "startedAt": rec.get("startedAt"),
+            # Who took it. With several specialists over one pack the pack name
+            # no longer identifies the run — and comparing them is the reason
+            # for hiring more than one.
+            "hire": agent.get("hire"),
+            "provider": agent.get("provider"),
+            "model": agent.get("model"),
             "target": (rec.get("target") or {}).get("pr"),
             "kind": (rec.get("target") or {}).get("kind"),
             # Popisek cíle skládá jádro, ne klient — běh bez PR by se v UI
@@ -1116,16 +1387,26 @@ def cmd_status(args) -> int:
     def human():
         print(f"\n  {out.bold(project.name)}  {out.dim(posix(project.root))}")
         installed = [f"{n} {v.get('ref')}" for n, v in (project.installed().get("packs") or {}).items()]
-        print(f"  {out.dim('packs:')} {', '.join(installed) or out.dim('none')}\n")
+        print(f"  {out.dim('packs:')} {', '.join(installed) or out.dim('none')}")
+        crew = [f"{h.id} ({h.label})" for h in hires.roster(project)]
+        print(f"  {out.dim('hired:')} {', '.join(crew) or out.dim('nobody')}\n")
         if not data:
             print(f"  {out.dim('No runs yet.')}\n")
             return
         for d in data:
             icon = {"ok": out.ok("✓"), "no-findings": out.ok("○"), "running": out.warn("…"),
-                    "failed": out.err("✗")}.get(d["status"], out.dim("·"))
+                    "abandoned": out.dim("×"), "failed": out.err("✗")}.get(
+                        d["status"], out.dim("·"))
             pr = d["targetLabel"] or "—"
             print(f"  {icon} {d['id'][:10]} {pr[:18]:18} {d['findings']:3} findings "
                   f"{out.dim(f'{d['undecided']} undecided'):24} {out.dim(d['startedAt'] or '')}")
+        open_runs = [d for d in data if d["status"] == "running"]
+        if open_runs:
+            print(f"\n  {out.warn('still open:')} "
+                  f"{', '.join(d['id'][:10] for d in open_runs)}")
+            print(out.dim("  A run stays open until someone closes it — nothing here can see "
+                          "the terminal it runs in."))
+            print(out.dim("  Close them: agency cleanup --unfinished"))
         print()
 
     return _emit(args, data, human)
@@ -1155,12 +1436,52 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("packs", parents=[common], help="available specialists")
     s.set_defaults(fn=cmd_packs)
 
-    s = sub.add_parser("add", parents=[common], help="install a pack into the project")
-    s.add_argument("pack")
-    s.add_argument("--from", dest="from_path", help="path to the pack (for development)")
-    s.add_argument("--dry-run", action="store_true")
-    s.add_argument("--force", action="store_true", help="overwrite hand-modified files too")
-    s.set_defaults(fn=cmd_add)
+    # `hire` and `add` are one command under two names on purpose. Installing
+    # the method and putting a worker on it is a single act the first time; the
+    # second time it is only the hire, and the same flags have to work for both.
+    for name, help_text in (
+            ("hire", "hire a specialist — the same pack can be hired once per provider"),
+            ("add", "install a pack into the project (alias of `hire`)")):
+        s = sub.add_parser(name, parents=[common], help=help_text)
+        s.add_argument("pack")
+        s.add_argument("--provider",
+                       help="which runner does the work — `agency providers` lists them. "
+                            "Given explicitly it adds another worker to a pack that "
+                            "already has one.")
+        s.add_argument("--model", help="model for this worker (empty = the provider default)")
+        s.add_argument("--as", dest="as_id",
+                       help="id of the hire, e.g. reviewer-strict (default: <pack>@<provider>)")
+        s.add_argument("--title", help="how this worker is named in the UI")
+        s.add_argument("--from", dest="from_path", help="path to the pack (for development)")
+        s.add_argument("--dry-run", action="store_true")
+        s.add_argument("--force", action="store_true", help="overwrite hand-modified files too")
+        s.set_defaults(fn=cmd_add)
+
+    s = sub.add_parser("roster", parents=[common],
+                       help="who is hired here — one row per worker, not per method")
+    s.set_defaults(fn=cmd_roster)
+
+    s = sub.add_parser("fire", parents=[common],
+                       help="remove a hire; the pack, its configuration and past runs stay")
+    s.add_argument("hire")
+    s.set_defaults(fn=cmd_fire)
+
+    s = sub.add_parser("providers", parents=[common],
+                       help="AI runners available on this machine")
+    s.add_argument("--add", metavar="ID", help="register a runner, e.g. grok")
+    s.add_argument("--remove", metavar="ID")
+    s.add_argument("--bin", help="the command to run (default: the id)")
+    s.add_argument("--title", help="human-readable name")
+    s.add_argument("--model-flag", default=None,
+                   help="flag carrying the model, e.g. --model")
+    s.add_argument("--dir-flag", default=None,
+                   help="flag granting access to a directory outside the working copy; "
+                        "without it the agent has to be told about the run directory itself")
+    s.add_argument("--prompt-flag", default=None,
+                   help="flag carrying the prompt (empty = passed positionally)")
+    s.add_argument("--models", help="comma-separated list of models to offer")
+    s.add_argument("--default-model", help="model used when the hire names none")
+    s.set_defaults(fn=cmd_providers)
 
     s = sub.add_parser("doctor", parents=[common], help="check the prerequisites BEFORE a run starts")
     s.set_defaults(fn=cmd_doctor)
@@ -1172,7 +1493,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("run", parents=[common],
                        help="prepare a pack run — over a pull request, or over the project as it is")
-    s.add_argument("pack")
+    s.add_argument("pack", metavar="who",
+                   help="hire id from `agency roster`, or a pack name — a pack name "
+                        "means its first worker")
     s.add_argument("--pr", type=int, help="PR number (default: the PR of the current branch)")
     s.add_argument("--latest-merged", action="store_true",
                    help="the last merged PR — retrospective audit")
@@ -1181,8 +1504,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--scenario", help="a named brief from the pack configuration (brief.scenarios)")
     s.add_argument("--since", help="base ref for a run over the project (default: the default branch)")
     s.add_argument("--launch", action="store_true", help="start the agent right away")
-    s.add_argument("--model", help="model for this run (overrides agent.model from the configuration)")
-    s.add_argument("--provider", help="claude | codex (overrides agent.provider)")
+    s.add_argument("--model", help="model for this run (overrides the hire and the configuration)")
+    s.add_argument("--provider",
+                   help="run this one on a different runner — `agency providers` lists them")
     s.add_argument("--force", action="store_true", help="a draft or an already reviewed commit too")
     s.set_defaults(fn=cmd_run)
 
@@ -1197,7 +1521,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(fn=cmd_ingest)
 
     s = sub.add_parser("metrics", parents=[common],
-                       help="precision, dedup, queue age — by dimension, severity and model")
+                       help="precision, dedup, queue age — by dimension, severity, "
+                            "specialist and model")
     s.add_argument("--all-projects", action="store_true", help="across the project registry")
     s.set_defaults(fn=cmd_metrics)
 
@@ -1216,8 +1541,16 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("projects", parents=[common], help="projects where Agency is doing something")
     s.set_defaults(fn=cmd_projects)
 
-    s = sub.add_parser("cleanup", parents=[common], help="remove the worktree of a run")
+    s = sub.add_parser("cleanup", parents=[common],
+                       help="close a run that is not coming back and remove its worktree")
     s.add_argument("--run")
+    s.add_argument("--unfinished", action="store_true",
+                   help="every run still marked as running — what a closed terminal leaves behind")
+    s.add_argument("--discard", action="store_true",
+                   help="delete the run outright, record and evidence included; "
+                        "refused when it carries decisions")
+    s.add_argument("--force", action="store_true",
+                   help="discard even a run that carries decisions")
     s.set_defaults(fn=cmd_cleanup)
 
     s = sub.add_parser("findings", parents=[common], help="findings and their decisions")
