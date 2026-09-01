@@ -1109,11 +1109,53 @@ def cmd_ingest(args) -> int:
                 ref = "= " + (d["duplicateOf"] or "")[:10]
                 print(f"      {out.dim('·')} {label:54} {out.dim(ref)} {out.dim(d['how'])}")
         print(f"  {out.ok(str(c['kept']).rjust(3))} candidates to decide\n")
+        b = data.get("bundle") or {}
+        if b.get("error"):
+            print(f"  {out.warn('knowledge bundle not written')} {out.dim(b['error'])}")
+            print(f"  {out.dim('The findings are safe in .agency/runs/ — `agency knowledge --rebuild` catches it up.')}\n")
+        elif b.get("changed") or b.get("removed"):
+            touched = len(b.get("changed") or []) + len(b.get("removed") or [])
+            print(f"  {out.dim('knowledge')}  {touched} file{'' if touched == 1 else 's'} "
+                  f"updated in {out.dim(b['path'])}\n")
         if c["kept"]:
             print(f"  Next: {out.bold('agency findings')}  or the Agency panel in VS Code\n")
 
     _emit(args, data, human)
     return 0
+
+
+# ---------------------------------------------------------------- knowledge
+
+def cmd_knowledge(args) -> int:
+    """Co projekt ví, jako commitovaný markdown.
+
+    Bez `--rebuild` se nic nezapisuje — jen se řekne, jestli je odvozený bundle
+    v souladu s běhy. To je ta otázka, kterou má smysl umět položit: bundle je
+    přestavitelný, takže rozdíl proti `.agency/runs/` je vždycky chyba bundlu.
+    """
+    project = _project(args)
+    data = knowledge.bundle(project, write=args.rebuild)
+    data["rules"] = knowledge.rules_summary(project)
+
+    def human():
+        print(f"\n  {out.bold('knowledge')}  {out.dim(data['path'])}\n")
+        print(f"  {str(data['findings']).rjust(3)} findings"
+              f"  {out.dim('·')}  {data['rules']['total']} rules")
+        touched = data["changed"] + data["removed"]
+        plural = "" if len(touched) == 1 else "s"
+        if args.rebuild:
+            print(f"  {out.ok(str(len(touched)).rjust(3))} file{plural} rewritten"
+                  if touched else f"  {out.dim('already up to date')}")
+        elif touched:
+            print(f"  {out.warn(str(len(touched)).rjust(3))} file{plural} out of date")
+            for name in touched[:10]:
+                print(f"      {out.dim('·')} {name}")
+            print(f"\n  Next: {out.bold('agency knowledge --rebuild')}")
+        else:
+            print(f"  {out.dim('up to date with .agency/runs/')}")
+        print()
+
+    return _emit(args, data, human)
 
 
 # ---------------------------------------------------------------- metrics
@@ -1958,6 +2000,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--run", help="run id (default: the latest)")
     s.add_argument("--min-score", type=int, help="overrides review.minScore from the configuration")
     s.set_defaults(fn=cmd_ingest)
+
+    s = sub.add_parser("knowledge", parents=[common],
+                       help="what the project knows, as committed markdown — readable without Agency")
+    s.add_argument("--rebuild", action="store_true",
+                   help="rewrite .agency/knowledge/ from the runs (it is derived, always safe)")
+    s.set_defaults(fn=cmd_knowledge)
 
     s = sub.add_parser("metrics", parents=[common],
                        help="precision, dedup, queue age — by dimension, severity, "

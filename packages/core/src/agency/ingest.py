@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from . import dedup, proc
+from . import dedup, knowledge, proc
 from .config import Project
 from .runs import Run, load_runs, now
 from .util import bundled, read_json, write_json
@@ -185,4 +185,23 @@ def ingest(project: Project, run: Run, min_score: int | None = None) -> dict:
         "duplicates": dups,
         "dropped": [{k: v for k, v in d.items() if k != "finding"} for d in dropped],
         "counts": rec["counts"],
+        # Ledger se obnovuje až po bráně, protože do paměti projektu patří to,
+        # co branou prošlo — ne to, co pack napsal. Zapisuje se po uložení
+        # záznamu: kdyby zápis bundlu spadl, výsledek brány je už bezpečně na
+        # disku a `agency knowledge --rebuild` bundle dožene.
+        "bundle": _bundle(project),
     }
+
+
+def _bundle(project: Project) -> dict:
+    """Odvozený bundle se aktualizuje, ale nesmí shodit bránu.
+
+    Nálezy jsou v `.agency/runs/` uložené ještě před tímhle voláním. Selhání
+    zápisu do `.agency/knowledge/` je tedy nepříjemnost, ne ztráta dat — a
+    hlásí se jako řádek, ne jako pád, protože pád by uživatele poslal pustit
+    ingest znovu a to by nic neopravilo.
+    """
+    try:
+        return knowledge.bundle(project)
+    except OSError as e:
+        return {"error": str(e)}

@@ -89,6 +89,59 @@ def test_neznamy_klic_se_nezahazuje():
     assert rule["attestation"] == "signed-by-someone"
 
 
+# ------------------------------------------------------------------ zápis
+
+def test_co_se_zapise_se_da_precist():
+    """Ledger koncepty generuje a někdo je zase čte. Kdyby se zapisovač
+    s parserem rozešel, poznalo by se to až na rozbitém souboru v repu."""
+    front = {
+        "type": "Finding",
+        "title": 'Sink "PR" komentáře: spolkne chybu # a hlásí úspěch',
+        "status": "stable",
+        "tags": ["pack/review-graph", "severity/high"],
+        "generated": {"by": "hire:review-graph@codex", "at": "2026-08-31T21:44:00Z"},
+        "verified": [{"by": "hire:review-graph@claude", "at": "2026-09-01T00:00:00Z"}],
+        "occurrences": 2,
+        "sources": [{"resource": "agency graph impact --depth 2", "note": "3 volající, 0 testů"}],
+    }
+
+    back, body = okf.parse(okf.dump(front, "Tělo nálezu."))
+
+    assert back == front, "round-trip musí sedět do posledního klíče"
+    assert body == "Tělo nálezu."
+
+
+@pytest.mark.parametrize("value", [
+    'uvozovky "uvnitř" hodnoty',
+    "mřížka # po mezeře",
+    "dvojtečka: uprostřed",
+    "true", "42", "", "  odsazeno  ",
+    "zpětné \\ lomítko",
+])
+def test_hodnota_prezije_zapis_v_puvodnim_tvaru(value):
+    """Cokoli, co by parser přečetl jinak, se uzávorkuje. Domýšlet se nesmí
+    nic — tichý špatný výklad je horší než hlášená chyba."""
+    back, _ = okf.parse(okf.dump({"type": "Rule", "title": value}))
+
+    assert back["title"] == value
+
+
+def test_polozka_s_carkou_nejde_do_radkoveho_seznamu():
+    """V `[a, b]` je čárka oddělovač. Položka, která ji nese, by se rozpůlila
+    na dvě — a nikdo by si toho nevšiml, protože obojí je platný seznam."""
+    back, _ = okf.parse(okf.dump({"type": "Rule", "tags": ["a, s čárkou", "b"]}))
+
+    assert back["tags"] == ["a, s čárkou", "b"]
+
+
+def test_klic_bez_hodnoty_se_nepise():
+    """`key:` bez obsahu je v podporované podmnožině začátek bloku. Napsat ho
+    prázdný znamená vyrobit soubor, který se pak nepřečte."""
+    text = okf.dump({"type": "Rule", "stale_after": None, "tags": [], "generated": {}})
+
+    assert text == "---\ntype: Rule\n---\n"
+
+
 # ------------------------------------------------------------------ čtení
 
 def test_pravidlo_si_nese_jestli_jeste_plati(project):

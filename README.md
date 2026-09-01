@@ -287,7 +287,21 @@ If this call is wrong, say so here — @kuba has the last word.
 `policy.escalate` je součást podpisu schválně: agent, který řekne ne a nenapíše,
 kdo ho může přebít, není specialista, ale překážka.
 
-## Pravidla projektu jako koncepty
+## Paměť projektu jako markdown
+
+`.agency/knowledge/` je commitovaná paměť projektu. Čte ji každý provider,
+kolega v editoru i holá session bez Agency — proto je to markdown, a ne
+databáze.
+
+```
+.agency/knowledge/
+  index.md            přehled — co projekt ví, co kdo rozhodl
+  log.md              chronologie: čím se který běh zabýval, jeho vlastními slovy
+  findings/<id>.md    nálezy napříč běhy, packy a specialisty
+  rules/<id>.md       pravidla projektu — jediná část, kterou píše člověk
+```
+
+### Pravidla — píše je člověk
 
 Dimenze `repo-rules` uměla jediný vstup: ukazatel do sekce cizího markdownu
 (`review.rules`, třeba `CLAUDE.md#rules-that-will-bite-you`). Ten funguje dál,
@@ -315,11 +329,54 @@ Když selže zápis do PR komentáře, běh nesmí skončit jako `ok`. Nález se
 neztrácí tím, že se nepovedlo ho vyvěsit.
 ```
 
-Je to markdown v repu: čte ho každý provider, kolega v editoru i holá session
-bez Agency. Příprava běhu z něj udělá `evidence/known-rules.json`, `agency
-doctor` řekne „5 concepts · 1 expired“, a pravidlo, které přestalo platit, se
-označí (`status: deprecated`) místo mazání — historie rozhodnutí je to, kvůli
-čemu tenhle nástroj existuje.
+Příprava běhu z něj udělá `evidence/known-rules.json`, `agency doctor` řekne
+„5 concepts · 1 expired“, a pravidlo, které přestalo platit, se označí
+(`status: deprecated`) místo mazání — historie rozhodnutí je to, kvůli čemu
+tenhle nástroj existuje.
+
+### Ledger nálezů — generuje se
+
+`agency ingest` po bráně přepíše `findings/`. Každý nález je koncept s kotvou
+do kódu, s tím, kdo ho našel, a s tím, co se s ním pak stalo:
+
+```markdown
+---
+type: Finding
+title: "Sink PR komentáře spolkne chybu a běh hlásí úspěch"
+status: deprecated
+trust: human-reviewed
+generated:
+  by: hire:review-graph@codex
+  at: 2026-08-31T21:44:00Z
+verified:
+  - by: hire:review-graph@claude
+    at: 2026-09-01T07:10:00Z
+    how: independent-duplicate
+decision:
+  state: rejected
+  reason: by-design
+  by: human:kuba
+  at: 2026-09-01T09:02:00Z
+---
+```
+
+`trust` a `status` odpovídají na dvě různé otázky a schválně se neslily do
+jedné. `trust` je míra přezkoumání (kdo se na to díval), `status` je stav
+tvrzení (obstálo?). Zamítnutý nález má obojí zároveň — člověk se díval **a**
+tvrzení neobstálo; jako jedno pole by jedna z těch dvou vět nešla napsat.
+
+`verified` vzniká z duplicit napříč pracovníky: když nález našel `codex`
+a `claude` ho nezávisle našel znovu, není to druhý nález, ale potvrzení
+prvního. Duplicita od **téhož** pracovníka potvrzení není — to je jen týž
+pracovník podruhé, a kdyby se to počítalo, stačilo by pustit jeden pack dvakrát.
+
+Ledger je **odvozený**, stejný statut jako `agency.db`: pravda zůstává
+v `.agency/runs/` a bundle se dá kdykoli zahodit a postavit znovu.
+
+```powershell
+agency knowledge            # je bundle v souladu s běhy?
+agency knowledge --rebuild  # přestav ho z .agency/runs/
+```
 
 Formát je [Open Knowledge Format](https://github.com/google/open-knowledge-format)
 v0.2, ale je to **konvence, ne závislost**: povinné je jediné pole `type`

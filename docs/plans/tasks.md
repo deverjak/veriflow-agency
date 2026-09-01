@@ -122,15 +122,27 @@ Tři vazby, zbytek je volný:
 
 ---
 
-## Fáze 5 — ledger nálezů (~1–2 dny)
+## Fáze 5 — ledger nálezů (~1–2 dny) — **hotovo 1. 9. 2026**
 
 > [`shared-memory.md`](shared-memory.md) → **Krok 3** (argumentace [`graph-abstraction.md`](graph-abstraction.md) §5.1–5.3).
 
-- [ ] `bundle()` generuje `.agency/knowledge/findings/<id>.md` + `index.md` + `log.md` (chronologie ze `summary.md`)
-- [ ] `verified` tiery z atribuce Fáze 1: `hire:…@codex` našel → `hire:…@claude` potvrdil → `human` přijal
-- [ ] zapisuje `ingest` po bráně; jde přegenerovat příkazem — pravda zůstává v `.agency/runs/`
+- [x] `bundle()` generuje `.agency/knowledge/findings/<id>.md` + `index.md` + `log.md` (chronologie ze `summary.md`)
+- [x] `verified` tiery z atribuce Fáze 1: `hire:…@codex` našel → `hire:…@claude` potvrdil → `human` přijal
+- [x] zapisuje `ingest` po bráně; jde přegenerovat příkazem (`agency knowledge --rebuild`) — pravda zůstává v `.agency/runs/`
 
-**Hotovo, když:** paměť přečte holá session v repu bez Agency i kolega v editoru — bez nástroje a bez účtu.
+**Hotovo, když:** paměť přečte holá session v repu bez Agency i kolega v editoru — bez nástroje a bez účtu. — ✅ `tests/test_ledger.py` (15 testů), ověřeno na reálném projektu: bundle postavený z cizích běhů se celý přečte zpátky parserem, druhé přestavení nemění ani bajt.
+
+### Co plán nepředpokládal
+
+- **Duplicita nedostane vlastní soubor.** Plán mluvil o „dedup match napříč hiry“, ale nedořekl důsledek: rodina duplicit je **jeden** koncept a druhý pracovník je v něm jako `verified`. Dva soubory by tvrdily, že projekt našel dvakrát víc věcí, než našel — a `codex našel → claude potvrdil` by se přitom ztratilo úplně.
+- **`trust` a `status` musely zůstat dvě pole.** `trust` je míra přezkoumání, `status` je stav tvrzení. Zamítnutý nález je `human-reviewed` **a** `deprecated` zároveň; jako jedno pole by jedna z těch dvou vět nešla napsat. (`trust` je z OKF v0.2 hotové, nemuselo se vymýšlet.)
+- **Potvrzení musí přijít od někoho jiného.** Duplicita od téhož pracovníka není shoda dvou, je to týž pracovník podruhé — a `agency triage --by <vlastní hire>` taky ne. Bez téhle podmínky by stačilo pustit jeden pack dvakrát a tier by vyskočil.
+- **K parseru musel přibýt zapisovač** (`okf.dump`) a hned si vyžádal escapování: reálný nález má v titulku `„Ponechat moji adresu"` a bez uvozování by se z generovaného konceptu stal nečitelný soubor. Bydlí schválně v témž modulu — čtení a psaní rozdělené do dvou souborů se rozejde a pozná se to až na rozbitém repu.
+- **V bundlu není čas generování.** Kdyby byl, každé přegenerování by přepsalo všechno a `git diff` by přestal odpovídat na otázku, co se změnilo. Všechny časy v konceptech pocházejí z dat, ne z hodin.
+- **`stale_after` se u nálezu negeneruje.** Krok 3 ho vyjmenoval, ale u odvozeného nálezu není z čeho ho poctivě spočítat. Drift kotvy umí `anchor.resolve`, jenže je to git volání **na nález** — ingest by se tím stal O(n) procesů. Koncept nese `anchor.commit` a drift zůstává otázkou na vyžádání.
+- **`agency knowledge` bez `--rebuild` nic nepíše.** Otázka „je bundle v souladu s běhy?“ musí jít položit, aniž si ji nástroj po cestě sám opraví — jinak se nedá poznat, že ho někdo ručně editoval.
+- **`context.json` ukazuje na bundle absolutní cestou.** Ve worktree na hlavičce PR bundle existuje taky — ve verzi z toho commitu. Relativní cesta by specialistu poslala číst starší paměť, než jakou projekt má.
+- **`specs/` z layoutu §5.3 nevzniklo.** Reprodukce jsou spustitelné soubory v běhu; koncept kolem nich by přidal jen další cestu k témuž. Zůstává `known-specs.json`.
 
 ---
 

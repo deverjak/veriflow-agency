@@ -724,6 +724,8 @@ def write_context(run: Run, cfg: dict, target: dict, wt: Path,
                   brief: dict | None = None, worktree_owned: bool = True,
                   hire=None, pack_name: str | None = None,
                   provider: str | None = None) -> None:
+    from . import knowledge  # kruhový import: `knowledge` stojí na `runs`
+
     review = dict(cfg.get("review") or {})
     review.pop("skipPatterns", None)
     # Celá konfigurace packu, aby jádro nemuselo znát klíče jednotlivých packů.
@@ -734,6 +736,11 @@ def write_context(run: Run, cfg: dict, target: dict, wt: Path,
         "runId": run.id,
         "runDir": posix(run.dir),
         "project": {"root": posix(run.project.root), "slug": run.project.slug},
+        # Commitovaná paměť projektu. Absolutní schválně: bundle je součástí
+        # repa, takže ve worktree na hlavičce PR existuje taky — jenže ve verzi
+        # z toho commitu. Relativní cesta by specialistu poslala číst starší
+        # paměť, než jakou projekt má.
+        "knowledge": posix(run.project.agency_dir / knowledge.BUNDLE),
         "worktree": posix(wt),
         # Kdo worktree vlastní. False = běh jede v pracovní kopii uživatele
         # a nesmí do ní psát nic, co po sobě neuklidí.

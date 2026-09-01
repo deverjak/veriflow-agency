@@ -29,6 +29,7 @@ Průzkum **běžící aplikace** podle zadání, které napsal člověk. Metoda 
 | `brief.standing` | co o projektu platí **pořád** — z `.agency/qa.json` |
 | `brief.focus` | zadání **tohohle** běhu, z `--prompt` nebo ze scénáře |
 | `by` | čím se podepsat pod rozhodnutí o nálezu (`agency triage … --by <by>`). Hotové z jádra — neskládej ho sám. |
+| `knowledge` | cesta ke commitované paměti projektu (`.agency/knowledge/`) — nálezy napříč běhy a packy jako markdown, začni u `index.md`. `evidence/known-findings.json` je z ní výřez; sem si dojdi pro kontext za nálezem. Čte se, nepíše se — `findings/` generuje `agency ingest`. |
 | `config.app` | kde aplikace běží, v jakém prostředí, čím se pozná, že jede |
 | `config.playwright` | jestli a čím se řídí prohlížeč — a co smíš v projektu založit |
 | `config.personas` | za koho se vydávat |

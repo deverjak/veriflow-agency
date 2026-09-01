@@ -27,6 +27,10 @@ Podporovaná podmnožina, celá:
 
 Kotevní znaky, vícedokumentové soubory, víceřádkové skaláry (`|`, `>`) ani
 hlubší zanoření podporované nejsou a hlásí se jako chyba.
+
+Zapisovat umí `dump()` — a bydlí schválně tady, vedle parseru. Ledger nálezů
+generuje koncepty, které někdo (i tenhle parser) zase čte; kdyby čtení a psaní
+bydlelo každé jinde, rozešly by se a poznalo by se to až na rozbitém souboru.
 """
 
 from __future__ import annotations
@@ -54,9 +58,27 @@ class Concept:
 
 # ------------------------------------------------------------------ parser
 
+_ESCAPES = {"n": "\n", "t": "\t", '"': '"', "\\": "\\"}
+
+
+def _unescape(s: str) -> str:
+    out: list[str] = []
+    i = 0
+    while i < len(s):
+        if s[i] == "\\" and i + 1 < len(s):
+            out.append(_ESCAPES.get(s[i + 1], s[i + 1]))
+            i += 2
+        else:
+            out.append(s[i])
+            i += 1
+    return "".join(out)
+
+
 def _scalar(raw: str, line: int):
     v = raw.strip()
-    if v[:1] in ('"', "'") and v[-1:] == v[:1] and len(v) >= 2:
+    if v[:1] == '"' and v[-1:] == '"' and len(v) >= 2:
+        return _unescape(v[1:-1])
+    if v[:1] == "'" and v[-1:] == "'" and len(v) >= 2:
         return v[1:-1]
     # Komentář za hodnotou. Jen mimo uvozovky a jen po mezeře — `http://x#y`
     # není komentář a `a#b` taky ne.
@@ -178,6 +200,72 @@ def parse(text: str) -> tuple[dict, str]:
             block, i = _block(lines, i + 1, 0)
             front[key] = _parse_block(block)
     return front, "\n".join(raw_lines[end + 1:]).strip()
+
+
+# ------------------------------------------------------------------ zápis
+
+#: Co se dá napsat bez uvozovek, aniž by to parser přečetl jinak. Dvojtečka
+#: uvnitř vadit nemůže (dělí se na první), mřížka po mezeře ano — proto tady
+#: není. Cokoli mimo tuhle množinu se uzávorkuje, ne domýšlí.
+_PLAIN = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._/@:+()-]*$")
+
+
+def dump_scalar(value) -> str:
+    if value is None:
+        return "null"
+    if value is True or value is False:
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    s = str(value).replace("\n", " ").replace("\r", " ")
+    plain = (_PLAIN.match(s) and s == s.strip()
+             and s.lower() not in ("true", "false", "null", "~")
+             and not _INT.match(s))
+    if plain:
+        return s
+    return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _dump_key(key: str, value) -> list[str]:
+    if isinstance(value, dict):
+        pairs = [(k, v) for k, v in value.items() if v is not None]
+        if not pairs:
+            return []
+        return [f"{key}:"] + [f"  {k}: {dump_scalar(v)}" for k, v in pairs]
+
+    if isinstance(value, list):
+        if not value:
+            return []
+        if all(isinstance(x, dict) for x in value):
+            lines = [f"{key}:"]
+            for item in value:
+                pairs = [(k, v) for k, v in item.items() if v is not None]
+                if not pairs:
+                    continue
+                lines.append(f"  - {pairs[0][0]}: {dump_scalar(pairs[0][1])}")
+                lines += [f"    {k}: {dump_scalar(v)}" for k, v in pairs[1:]]
+            return lines if len(lines) > 1 else []
+        items = [dump_scalar(x) for x in value]
+        # Čárka je v řádkovém seznamu oddělovač, ne obsah — položka, která ji
+        # nese, musí jít do bloku, jinak ji čtení rozpůlí na dvě.
+        if any("," in x for x in items):
+            return [f"{key}:"] + [f"  - {x}" for x in items]
+        return [f"{key}: [" + ", ".join(items) + "]"]
+
+    return [f"{key}: {dump_scalar(value)}"]
+
+
+def dump(front: dict, body: str = "") -> str:
+    """Koncept jako text. Klíč bez hodnoty se nepíše — `key:` bez obsahu je
+    v podmnožině nahoře zanoření, a psát něco, co se nepřečte, je vada."""
+    lines = [FENCE]
+    for key, value in front.items():
+        if value is not None:
+            lines += _dump_key(key, value)
+    lines.append(FENCE)
+    text = "\n".join(lines) + "\n"
+    body = (body or "").strip()
+    return f"{text}\n{body}\n" if body else text
 
 
 # ------------------------------------------------------------------ čtení

@@ -33,6 +33,7 @@ Recenze pull requestu s **doloženými** nálezy. Strukturální signál, který
 | `review.minScore` / `review.language` | práh a jazyk výstupu |
 | `brief.standing` / `brief.focus` | volitelné zadání od člověka — na co se u téhle recenze zaměřit. `focus` platí pro tenhle běh, `standing` pro projekt pořád. |
 | `by` | čím se podepsat pod rozhodnutí o nálezu (`agency triage … --by <by>`). Hotové z jádra — neskládej ho sám. |
+| `knowledge` | cesta ke commitované paměti projektu (`.agency/knowledge/`) — nálezy napříč běhy jako markdown, začni u `index.md`. Cesta je absolutní schválně: ve worktree je paměť taky, ale ve verzi z hlavičky PR. Čte se, nepíše se — `findings/` generuje `agency ingest`. |
 
 Když `context.json` chybí, běžíš mimo `agency run`. Řekni to uživateli a nabídni `agency run review-graph --pr <n>` — deterministickou přípravu ručně nesimuluj, je to zdroj tichých chyb.
 
