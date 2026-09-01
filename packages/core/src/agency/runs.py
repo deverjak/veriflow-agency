@@ -467,7 +467,7 @@ def prepare_graph(project: Project, wt: Path, cfg: dict) -> dict:
 
 #: Co z připravených statistik je paměť, ne grafový signál. Sbírá se při téže
 #: přípravě, ale v run recordu patří jinam — `graph` popisuje stav indexu.
-MEMORY_STATS = ("knownFindings", "knownSpecs")
+MEMORY_STATS = ("knownFindings", "knownSpecs", "knownRules")
 
 
 def known_memory(project: Project, run: Run) -> dict:

@@ -287,6 +287,45 @@ If this call is wrong, say so here — @kuba has the last word.
 `policy.escalate` je součást podpisu schválně: agent, který řekne ne a nenapíše,
 kdo ho může přebít, není specialista, ale překážka.
 
+## Pravidla projektu jako koncepty
+
+Dimenze `repo-rules` uměla jediný vstup: ukazatel do sekce cizího markdownu
+(`review.rules`, třeba `CLAUDE.md#rules-that-will-bite-you`). Ten funguje dál,
+ale vedle něj je teď `.agency/knowledge/rules/` — pravidlo jako soubor, který
+si nese, jestli ještě platí:
+
+```markdown
+---
+type: Rule
+title: "Sink PR komentáře nesmí spolknout chybu"
+status: stable
+tags: [area/export, severity/high]
+stale_after: 2026-12-01
+generated:
+  by: human
+  at: 2026-09-01T10:00:00Z
+verified:
+  - by: hire:review-graph@claude
+    at: 2026-09-01T12:00:00Z
+sources:
+  - resource: CLAUDE.md#rules-that-will-bite-you
+---
+
+Když selže zápis do PR komentáře, běh nesmí skončit jako `ok`. Nález se
+neztrácí tím, že se nepovedlo ho vyvěsit.
+```
+
+Je to markdown v repu: čte ho každý provider, kolega v editoru i holá session
+bez Agency. Příprava běhu z něj udělá `evidence/known-rules.json`, `agency
+doctor` řekne „5 concepts · 1 expired“, a pravidlo, které přestalo platit, se
+označí (`status: deprecated`) místo mazání — historie rozhodnutí je to, kvůli
+čemu tenhle nástroj existuje.
+
+Formát je [Open Knowledge Format](https://github.com/google/open-knowledge-format)
+v0.2, ale je to **konvence, ne závislost**: povinné je jediné pole `type`
+a čtečka je v `packages/core/src/agency/okf.py` na padesát řádků. Co nepřečte,
+ohlásí s číslem řádku — tiše špatně vyložené pravidlo by bylo horší než žádné.
+
 ## Jak je to poskládané
 
 ```

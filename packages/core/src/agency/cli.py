@@ -12,8 +12,8 @@ import os
 import sys
 from pathlib import Path
 
-from . import (anchor, backlog, config, dedup, export, graph, hires, ingest, metrics,
-               packs, proc, providers, registry, runs)
+from . import (anchor, backlog, config, dedup, export, graph, hires, ingest,
+               knowledge, metrics, packs, proc, providers, registry, runs)
 from .util import bundled, out, posix, read_json, strip_comments, ulid, write_json
 
 # ---------------------------------------------------------------- pomůcky
@@ -427,6 +427,19 @@ def cmd_doctor(args) -> int:
                  if g.get("stale") else "")
               if g["exists"]
               else "missing — build it with `code-review-graph build`", fatal=False)
+
+    # Projektová pravidla jako koncepty. Rozbité pravidlo je horší než žádné:
+    # dimenze by běžela s tichou dírou v zadání a nikdo by nevěděl proč.
+    rules = knowledge.rules_summary(project)
+    if rules["total"] or rules["broken"]:
+        detail = f"{rules['total']} concepts"
+        for label, count in (("expired", rules["expired"]),
+                             ("deprecated", rules["deprecated"])):
+            if count:
+                detail += f" · {count} {label}"
+        for bad in rules["broken"]:
+            detail += f"\n{' ' * 29}{bad['path']}: {bad['error']}"
+        check("project rules", not rules["broken"], detail, fatal=False)
 
     for p in packs.available():
         ref = packs.installed_ref(project, p.name)

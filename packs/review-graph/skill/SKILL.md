@@ -52,11 +52,13 @@ Pusť dimenze z `review.dimensions` jako **paralelní čerstvé agenty**. Nemaj�
 | `tests` | Jestli testy v PR skutečně pokrývají změněné chování | `evidence/detect-changes.json` → `test_gaps[]`, `code-review-graph query tests_for <symbol> --repo <worktree>` |
 | `reuse` | Duplicitní read modely napříč vrstvami, nově mrtvý kód, zbytečná abstrakce | `evidence/dead-code.json` |
 | `errors` | Spolknuté chyby, chybějící `await`, neidempotentní handlery | diff |
-| `repo-rules` | Pravidla z `review.rules` — **obsah je projektový, ne packový** | sekce z `review.rules` |
+| `repo-rules` | Pravidla projektu — **obsah je projektový, ne packový** | `evidence/known-rules.json`, sekce z `review.rules` |
 
 Když `brief.focus` nebo `brief.standing` není `null`, **projdi zadanou oblast první a důkladněji.** Zadání mění pořadí a hloubku, ne pravidla: nález mimo zadání se nezahazuje a nález bez evidence neprojde bránou ani tehdy, když si ho zadání výslovně přeje.
 
-`repo-rules` se pouští **jen když `review.rules` není `null`.** Bez projektových pravidel běží čtyři dimenze z pěti a je to legitimní výstup, ne selhání — neuváděj to jako chybu.
+`repo-rules` se pouští, **když je čím ho krmit**: koncepty v `evidence/known-rules.json`, nebo sekce, na kterou ukazuje `review.rules`. Když není ani jedno, běží čtyři dimenze z pěti a je to legitimní výstup, ne selhání — neuváděj to jako chybu.
+
+U konceptu se řiď jeho hlavičkou. Nález stav **jen na pravidle se `status: stable`, které nevypršelo**. `deprecated` pravidlo je informace („tohle už neplatí"), ne měřítko; u pravidla s `expired: true` napiš do `exitReason`, že čeká na potvrzení člověkem, a nález na něm nestav. `verified` říká, kdo pravidlo potvrdil — pravidlo, které nikdo neprošel, není slabší pravidlo, ale je to informace do formulace nálezu.
 
 Než dimenze cokoli označí za podezřelé, **ověř to dotazem do grafu**:
 

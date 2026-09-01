@@ -14,6 +14,7 @@ Fáze 4–6) jako další odpověď, ne jako druhý zdroj pravdy.
 
 from __future__ import annotations
 
+from . import okf
 from . import runs as _runs
 from .config import Project
 from .util import posix, write_json
@@ -23,6 +24,10 @@ from .util import posix, write_json
 #: v řetězu si bere `upstream()`, který strop nemá — zadání se ořezávat nesmí.
 FOR_RUN_FINDINGS = 300
 FOR_RUN_SPECS = 200
+
+#: Commitovaný bundle. Odvozené věci (nálezy, stránky packů) sem teprve
+#: přibudou; `rules/` píše člověk a je to jediná část, kterou nic negeneruje.
+BUNDLE = "knowledge"
 
 
 def _view(run, rec: dict, finding: dict, decision: dict | None,
@@ -82,6 +87,31 @@ def assemble(project: Project, exclude: str | None = None,
     return {"findings": findings, "specs": specs}
 
 
+def rules(project: Project) -> list[dict]:
+    """Projektová pravidla jako koncepty — vstup dimenze `repo-rules`.
+
+    Do 1. 9. 2026 byl `review.rules` ukazatel do sekce cizího markdownu: buď
+    tam byla, nebo dimenze neběžela, a nic mezi tím se zjistit nedalo. Koncept
+    nese navíc stav a expiraci, takže pravidlo, které přestalo platit, se dá
+    označit místo mazání — a je vidět, že přestalo platit, dřív než na něm
+    někdo postaví nález. Ukazatel zůstává platný; tohle je vedle něj.
+    """
+    return okf.load_dir(project.agency_dir / BUNDLE / "rules",
+                        kind="Rule", root=project.root)
+
+
+def rules_summary(project: Project) -> dict:
+    """Čím se dá pochlubit doctor: kolik jich je a kolik z nich je problém."""
+    found = rules(project)
+    return {
+        "total": len([r for r in found if "error" not in r]),
+        "expired": len([r for r in found if r.get("expired")]),
+        "deprecated": len([r for r in found if r.get("status") == "deprecated"]),
+        "broken": [{"path": r["path"], "error": r["error"]}
+                   for r in found if "error" in r],
+    }
+
+
 def for_run(project: Project, run) -> dict:
     """What this project already knows — across runs, packs and specialists.
 
@@ -104,6 +134,13 @@ def for_run(project: Project, run) -> dict:
 
     write_json(ev / "known-findings.json", known["findings"][:FOR_RUN_FINDINGS])
     stats = {"knownFindings": len(known["findings"])}
+
+    known_rules = [r for r in rules(project) if "error" not in r]
+    if known_rules:
+        # Bez stropu: pravidel je řádově míň než nálezů a oříznuté pravidlo je
+        # díra v zadání, ne zkrácené pozadí.
+        write_json(ev / "known-rules.json", known_rules)
+        stats["knownRules"] = len(known_rules)
     if known["specs"]:
         # Reproduction tests from earlier runs. This is the thing a repro is
         # written as an executable file for and not as a paragraph: "is it

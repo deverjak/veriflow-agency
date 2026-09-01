@@ -102,15 +102,23 @@ Tři vazby, zbytek je volný:
 
 ---
 
-## Fáze 4 — pravidla jako koncepty (~1 den)
+## Fáze 4 — pravidla jako koncepty (~1 den) — **hotovo 1. 9. 2026**
 
 > [`shared-memory.md`](shared-memory.md) → **Krok 2** (argumentace [`graph-abstraction.md`](graph-abstraction.md) §5.4).
 
-- [ ] `.agency/knowledge/rules/` — `type: Rule`, `status`, `stale_after`, `verified`
-- [ ] dimenze `repo-rules` čte strukturovaný vstup místo ukazatele do cizího markdownu
-- [ ] doctor: „5 pravidel, 1 po expiraci“
+- [x] `.agency/knowledge/rules/` — `type: Rule`, `status`, `stale_after`, `verified`, `generated`, `sources`, `tags`
+- [x] dimenze `repo-rules` čte strukturovaný vstup (`evidence/known-rules.json`) **vedle** ukazatele do cizího markdownu
+- [x] doctor: „2 concepts · 1 expired · 1 deprecated“ + rozbité pravidlo s číslem řádku
 
-**Hotovo, když:** padlo první reálné rozhodnutí o tvaru frontmatteru — na nejmenším možném soustu.
+**Hotovo, když:** padlo první reálné rozhodnutí o tvaru frontmatteru — na nejmenším možném soustu. — ✅ `okf.py` + `tests/test_okf.py` (14 testů), ověřeno na reálném projektu (doctor i projekce do běhu).
+
+### Co plán nepředpokládal
+
+- **Vlastní čtečka místo PyYAML.** Frontmatter konceptu je úzká podmnožina YAML a závislost navíc by se tahala kvůli deseti řádkům. Cena je striktnost: co parser nepozná, ohlásí **s číslem řádku** a pravidlo se označí jako rozbité. Tichý špatný výklad pravidla je horší než pravidlo, které se nenačte — a rozbité pravidlo se nesmí ztratit mezi ostatními, jinak dimenze běží s tichou dírou v zadání.
+- **Ukazatel `review.rules` zůstává.** Koncepty jsou vedle něj, ne místo něj: projekt, který má pravidla v `CLAUDE.md`, se nemá čím rozbít. Dimenze se pouští, když je čím ji krmit — z kteréhokoli z těch dvou zdrojů.
+- **Pravidla jdou do běhu bez stropu** (na rozdíl od nálezů). Oříznuté pravidlo je díra v zadání, ne zkrácené pozadí.
+- **`knownRules` musel do `MEMORY_STATS`** — jinak by skončil v `run.graph`, což je přesně ta past, kterou u `knownFindings` odhalila Fáze 0.
+- **README dostal sekci s příkladem konceptu.** Formát, který zná jen kód, není formát čitelný bez nástroje.
 
 ---
 
