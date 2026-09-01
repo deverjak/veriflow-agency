@@ -4,6 +4,7 @@
 **Navazuje na:** [`../implementation-plan-v0.md`](../implementation-plan-v0.md) §3.1
 **Řeší:** vrstvu abstrakce nad `code-review-graph`, aby šel v budoucnu vyměnit za GitNexus, Graphify nebo cokoli dalšího — a aby se cestou opravilo to, co je křehké už dnes.
 **Součástí je** návrh na OKF pro sdílenou paměť agentů (§5) — samostatná věc, sekvencovaná za grafem.
+**Pořadí prací napříč plány:** [`tasks.md`](tasks.md)
 
 ---
 
@@ -181,6 +182,8 @@ Dělá se **až ve chvíli, kdy druhý nástroj fyzicky přibývá.** Do té dob
 ---
 
 ## 5. OKF pro sdílenou paměť agentů
+
+> **Rozpracováno:** tahle sekce má od 1. 9. 2026 vlastní plán — [`shared-memory.md`](shared-memory.md) (kroky, průzkum nástrojů, sekvencování s [`teams.md`](teams.md)). Zdejší §5.1–5.5 zůstávají jako argumentace, plán se řídí novým dokumentem.
 
 **Co OKF je:** otevřená specifikace Google Cloudu (v0.1 12. 6. 2026, v0.2 25. 7. 2026) — adresář markdown souborů s YAML frontmatterem, křížově prolinkovaných. Povinné je jediné pole `type`. Konzument nesmí bundle odmítnout kvůli neznámému `type`, neznámým klíčům ani rozbitým odkazům. Spec výslovně říká, že předepisovat storage, serving nebo **dotazovací infrastrukturu je non-goal**.
 
