@@ -302,16 +302,42 @@ packu, v řetězu i běhy předchozích členů. Jádro mu proto povolí **celý
 `.agency/`**, ne jen jeho vlastní RUN_DIR. Dát cestu a nedat k ní přístup by
 znamenalo ptát se ho na svolení k adresáři, který mu jádro samo předalo.
 
-Dál už se nepovoluje nic — zápis do zdrojáků, síť ani nástroje. Kdo chce jít
-dál, řekne si o to výslovně u svého providera:
+### Co agent smí udělat
+
+Cesta bez práva zápisu není opatrnost, je to chyba — a stála dva reálné nálezy.
+`claude -p` udělá z agenta neinteraktivní proces, ale permission model nechá na
+„zeptej se"; v řetězu není koho. Agent dvanáct minut pracoval, každý zápis mu
+systém odmítl a běh skončil jako `no-findings`: tvrzení „díval se a nic nenašel"
+o někom, kdo nesměl nic napsat.
+
+**Co metoda volá, ví pack**, ne uživatel. `run.needs` v manifestu vyjmenuje
+příkazy — `agency triage`, `git`, `gh pr view`, `code-review-graph`, `npx
+vitest` — a jádro je přeloží do tvaru konkrétního runneru. Zápis do pracovního
+adresáře a do `.agency/` je povolený vždycky.
+
+Projekt smí seznam **rozšířit**, nikdy zúžit:
 
 ```powershell
-agency config review-graph --set 'agent.extraArgs=["--permission-mode","acceptEdits"]'
+agency config review-graph --set 'agent.allow=["gh api","npm run test:e2e"]'
 ```
 
-`extraArgs` patří tomu provideru, pro kterého je konfigurace psaná. Pracovník
-na jiném runneru je nedostane — přepínač, který zná claude, by codex neuměl
-a běh by spadl na prvním spuštění.
+Zúžit ne schválně: běh, kterému chybí půlka práv, dělá tiše půlku metody
+a chybějící nález se nedá odlišit od chybějícího oprávnění.
+
+Kdo chce vypnout kontroly úplně, řekne si o to výslovně:
+
+```powershell
+agency config review-graph --set agent.unattended=bypass
+```
+
+`grant` (výchozí) pokrývá to, co metoda dělá; `bypass` i to, co dělat nemá —
+worktree je na jedno použití, stroj ne. `ask` nepovolí nic: attended agent se
+doptá, neattended umře potichu. Režim je v každém run recordu
+(`agent.authorized`), takže zpětně je vidět, s čím ten běh jel.
+
+Kolik volání bylo přesto odmítnuto, je v `agent.denied` — a je to důležitější
+číslo, než vypadá. Nenulové znamená, že běh neměřil metodu, ale svoje
+oprávnění, a porovnávat ho s jiným během je porovnávat různé věci.
 
 ## Tým — specialisté za sebou
 
@@ -337,7 +363,8 @@ takže je vidět, čím byl který člen vykopnutý:
 Upstream: legal@claude — 7 findings (5 undecided), full data in evidence/upstream.json.
 First judge those findings — `agency triage accept|reject|defer <id> --by …` —
 and only then run your own dimensions.
-Handoff from legal@claude: <prvních 40 řádků handoff.md předchůdce>
+Handoff from legal@claude (full text: …/runs/<id>/handoff.md):
+<handoff.md předchůdce>
 ```
 
 Věty v šabloně vlastní jádro, obsah v nich napsal upstream agent do
@@ -349,11 +376,24 @@ jednou.
 je „co potřebuješ ty" pro jednoho jmenovaného kolegu: co jsem nedořešil, co
 stojí na domněnce o produktu, čemu bych sám nevěřil.
 
-Čtyři vlastnosti, které z toho dělají tým a ne skript:
+Sedm vlastností, které z toho dělají tým a ne skript:
 
 - **Řetěz je v datech.** Každý `run.json` nese `chain: {id, position, of, upstream}`.
   Bez toho nejde zpětně poznat, které rozhodnutí padlo nad cizím nálezem
   v rámci předání a které samostatně.
+- **Cíl patří týmu, ne členům.** `--pr 479` vyřeší řetěz jednou a všichni ho
+  sdílejí. Dokud to tak nebylo, doputovalo `--pr` jen k packu s
+  `target: pull-request` a product owner soudil větev, kterou měl uživatel
+  zrovna checkoutnutou — nad PR #479 to byl PR #474. Jeden worktree pro celý
+  tým, po úspěchu se uklidí (`--keep-worktree` ho nechá).
+- **Běh je list.** Agent nesmí spustit další běh; `agency run` i `agency chain`
+  to zevnitř běhu odmítnou. Bez toho stačí věta „pomocí PO agenta zjisti…"
+  a recenzent si poslušně spustí vlastní běh — bez terminálu, bez oprávnění
+  a se záznamem, který tvrdí, že u něj někdo byl.
+- **Je vidět, co se děje.** Člen řetězu jede neattended, takže mu jádro čte
+  proud událostí: řádka na každý nástroj, `agent.jsonl` a `agent.md` do
+  RUN_DIRu, tahy a cena do záznamu. `launching claude…` a deset minut ticha se
+  z venku nedá odlišit od zaseknutého procesu.
 - **Jeden tým = jeden provider** (v1). Jeden binár, jeden credential, jedna sada
   quirků na terminálu. Handoff je souborový, takže mix providerů není
   architektonická překážka — je to změna jedné validace, až se pipeline osvědčí.
@@ -362,11 +402,27 @@ stojí na domněnce o produktu, čemu bych sám nevěřil.
   a vytiskne se, kde se dá navázat ručně.
 - **Neúplný řetěz je poznat.** `of` je v záznamu právě proto: zastavený tým se
   v přehledu nesmí tvářit jako dokončený, jen kratší.
+- **Prázdný výstup je selhání, ne prázdný výsledek.** Když agent nenapsal
+  `findings.json`, brána za něj `[]` nevyrobí: běh je `failed` s
+  `exitReason: no-output` a řetěz na něm stojí. `[]`, které napsal specialista,
+  zůstává výsledkem — „díval jsem se a nic tam není" je měření.
+
+Zadání se zadává **po členech**, ne jedno pro všechny:
+
+```powershell
+agency chain review-graph@claude po@claude --pr 479 `
+  --focus review-graph@claude:"projdi PR technicky" `
+  --focus po@claude:"dává tahle změna produktový smysl?"
+```
+
+Bez toho čte recenzent instrukci psanou product ownerovi a poslušně na ni
+odpovídá. Věta adresovaná někomu jinému není kontext, je to matoucí pokyn.
 
 V VS Code je to **Run a team…** — výběr po jednom, protože pořadí je celý smysl
-věci a QuickPick ho neumí zaručit. Běhy jednoho týmu drží v přehledu pohromadě
-pod jedním uzlem. Orchestruje pořád CLI: extension pošle do terminálu
-`agency chain …` a dál se dívá.
+věci a QuickPick ho neumí zaručit; na zadání se panel zeptá zvlášť pro každého
+člena. Běhy jednoho týmu drží v přehledu pohromadě pod jedním uzlem, a když
+byla nějakému členovi odmítnuta volání, je to na řádku vidět. Orchestruje pořád
+CLI: extension pošle do terminálu `agency chain …` a dál se dívá.
 
 ## Paměť projektu jako markdown
 

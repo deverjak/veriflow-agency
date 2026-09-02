@@ -192,20 +192,27 @@ Hindsight adaptér byl 1. 9. 2026 postavený (`edbf924`, 19 souborů, 846 řádk
 
 ---
 
-## Fáze 8 — neattended běh: řetěz, který doběhne s výstupem
+## Fáze 8 — neattended běh: řetěz, který doběhne s výstupem — **hotovo 2. 9. 2026** (kromě Kroku 8)
 
 > [`unattended.md`](unattended.md). Vzniklo 2. 9. 2026 z prvního reálného řetězu: členové v `claude -p` nesmějí nic zapsat, brána to zapíše jako `no-findings`, orchestrátor to nevidí a workspace pack soudí checkoutnutou větev místo `--pr`.
 
-- [ ] **Krok 1** — autorizace v provideru jako data (`editsGrant`, `allow…`, `bypassArgs`), `run.needs` v manifestu packu, `agent.allow` v projektu; bypass jen opt-in
-- [ ] **Krok 2** — chybějící `findings.json` je `failed: no-output`, ne `[]`; `--wait` vrací ≠ 0; řetěz se zastaví
-- [ ] **Krok 4** — cíl řetězu se řeší jednou, jeden worktree pro všechny členy, stejný `target` v záznamech
-- [ ] **Krok 5** — handoff celý (strop v bajtech), prompt při 0 nálezech, `AGENCY_RUN` guard proti vnořeným běhům
-- [ ] **Krok 3** — `proc.stream` + `events.py`, průběh v terminálu, `agent.jsonl` / `agent.md`, `agent.turns/denied`, `cost.usd`; `run.v1` rozšířit napřed
-- [ ] **Krok 6** — `trigger.attended` a `cost.credential` z faktů, zpráva řetězu, `validate --fix`
-- [ ] **Krok 7** — extension: `failed` krok, otevřít summary/handoff/agent.md
+- [x] **Krok 1** — autorizace v provideru jako data (`editsGrant`, `allow…`, `bypassArgs`), `run.needs` v manifestu packu, `agent.allow` v projektu; bypass jen opt-in
+- [x] **Krok 2** — chybějící `findings.json` je `failed: no-output`, ne `[]`; `--wait` vrací ≠ 0; řetěz se zastaví
+- [x] **Krok 4** — cíl řetězu se řeší jednou, jeden worktree pro všechny členy, stejný `target` v záznamech
+- [x] **Krok 5** — handoff celý (strop v bajtech), prompt při 0 nálezech, `AGENCY_RUN` guard proti vnořeným běhům
+- [x] **Krok 3** — `proc.stream` + `events.py`, průběh v terminálu, `agent.jsonl` / `agent.md`, `agent.turns/denied`, `cost.usd`; `run.v1` rozšířit napřed
+- [x] **Krok 6** — `trigger.attended` a `cost.credential` z faktů, zpráva řetězu, `validate --fix`
+- [x] **Krok 7** — extension: `failed` krok, otevřít summary/handoff/agent.md
 - [ ] **Krok 8** — přejímka: sedm podmínek nad `main-panel` PR #479, všechny najednou
 
 **Hotovo, když:** projde Krok 8. Ne dřív — dnešní opravy byly každá ověřená tím, že se agent spustil, a žádná tím, že něco zapsal.
+
+### Co plán nepředpokládal
+
+- **Nenulový exit code přebíjí prázdný výstup.** Plán je bral jako dvě samostatné větve, ale když nastanou obě, je „agent spadl" konkrétnější diagnóza než „nic nenapsal" — pád ten prázdný výstup vysvětluje. `no-output` je proto vyhrazené pro čistý konec bez zápisu, což je právě ten případ, který nikdo nečekal.
+- **Pojistka proti spuštění skutečného agenta hlídala jen půlku cesty.** Byla v `test_chain.py` a stála na `proc.attend`. Jakmile řetěz přešel na `proc.stream`, testy začaly pouštět `claude` na stroji, který je pouští, a čekat na něj — jeden test běžel deset minut, než ho někdo zabil. Přesunula se do `conftest.py` a hlídá obě funkce; hlídat jednu z dvojice byla ta chyba, ne to, že chyběl timeout.
+- **`worktree_owned` a „jsem ve worktree" přestaly být totéž.** Člen řetězu pracuje v jednorázovém checkoutu, který nesmí smazat. Dokud to byla jedna proměnná, dostal by buď `pages: null` chybně, nebo by po sobě uklidil worktree ostatním členům pod rukama.
+- **Codexí větev zůstává neověřená.** `--sandbox workspace-write`, `--add-dir` i `--json` jsou přečtené z nápovědy 0.144.3, ne odjeté. Roster uživatele je dnes celý `@claude`; první codex řetěz to musí potvrdit. Napsat to jako data a přiznat to v komentáři je lepší než to neuvést vůbec.
 
 ---
 

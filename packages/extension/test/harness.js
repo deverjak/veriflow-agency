@@ -628,6 +628,42 @@ check('nedoběhnutý tým se netváří jako hotový', () => {
   assert.ok(rows[0].item.tooltip.value.includes('stopped after 1 of 3'));
 });
 
+check('tým, kterému se nedalo zapsat, není tým bez nálezů', () => {
+  // Tohle je celý rozdíl, kvůli kterému vznikla Fáze 8. Řetěz nad PR #479
+  // doběhl dvakrát „úspěšně" a nevyrobil nic — agentovi byl odmítnutý každý
+  // zápis. V panelu to vypadalo identicky jako tým, který se podíval a nic
+  // nenašel; dokud se odmítnutí neukáže, posílá panel uživatele hledat do
+  // terminálu.
+  Object.assign(state.snapshot, {
+    probe: { ok: true }, findings: [],
+    runs: [
+      { id: '01M1CGN9HAMBKK63SASPP2EYWA', pack: 'review-graph@0.1.0', status: 'failed',
+        targetLabel: 'PR #479', kind: 'merged-pull-request', hire: 'review-graph@claude',
+        exitReason: 'the agent wrote no findings.json', denied: 5,
+        outputs: ['agent.md'],
+        chain: { id: '01M1TEAM0000000000000000DD', position: 1, of: 2, upstream: [] },
+        findings: 0, undecided: 0, startedAt: new Date().toISOString() },
+      { id: '01M1CGN9HAMBKK63SASPP2EYWB', pack: 'po@0.1.0', status: 'no-findings',
+        targetLabel: 'PR #479', kind: 'merged-pull-request', hire: 'po@claude',
+        denied: 0, outputs: [],
+        chain: { id: '01M1TEAM0000000000000000DD', position: 2, of: 2, upstream: [] },
+        findings: 0, undecided: 0, startedAt: new Date().toISOString() },
+    ],
+  });
+  const rows = new views.RunsTree().roots();
+
+  assert.ok(String(rows[0].item.description).includes('5 denied'),
+    'odmítnutí patří na řádek, ne do logu');
+  assert.strictEqual(rows[0].item.iconPath.id, 'error', 'spadlý člen zčervená celý tým');
+  assert.ok(rows[0].item.tooltip.value.includes('widen'),
+    'tooltip má říct, co s tím uživatel udělá');
+
+  const step = rows[0].children[0];
+  assert.ok(String(step.item.description).includes('5 denied'));
+  assert.ok(step.item.tooltip.value.includes('agent.md'),
+    'poslední slova agenta jsou jediné místo, kde ta analýza zbyla');
+});
+
 check('na uzel týmu jde kliknout pravým', () => {
   // Uzel řetězu nesl `contextValue`, na který necílilo žádné menu — pravé
   // tlačítko tedy nenabídlo vůbec nic. Skupinový uzel bez akcí je slepá ulička:

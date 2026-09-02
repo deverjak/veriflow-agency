@@ -443,14 +443,21 @@ function groupChains(nodes, runs) {
     const findings = members.reduce((n, { other }) => n + (other.findings || 0), 0);
     const undecided = members.reduce((n, { other }) => n + (other.undecided || 0), 0);
     const who = members.map(({ other }) => String(other.hire || other.pack || '?').split('@')[0]);
-    // Neúplný řetěz se nemá tvářit jako hotový — `of` je v záznamu právě proto.
+    // An incomplete chain must not look finished — that is what `of` is in the
+    // record for.
     const short = members.length < c.of;
+    // A chain whose every step "succeeded" and produced nothing used to look
+    // exactly like one that worked. A failed member, and the count of calls its
+    // agents were refused, are the two things that tell them apart.
+    const broke = members.some(({ other }) => other.status === 'failed');
+    const denied = members.reduce((n, { other }) => n + (other.denied || 0), 0);
 
     out.push(node(who.join(' → '), {
       id: `chain:${c.id}`,
-      description: `${members.length}/${c.of} steps · ${findings} findings · ${undecided} undecided`,
-      iconId: short ? 'debug-disconnect' : 'organization',
-      color: short ? 'charts.orange' : undefined,
+      description: `${members.length}/${c.of} steps · ${findings} findings`
+        + `${denied ? ` · ${denied} denied` : ''} · ${undecided} undecided`,
+      iconId: broke ? 'error' : short ? 'debug-disconnect' : 'organization',
+      color: broke ? 'charts.red' : short ? 'charts.orange' : undefined,
       collapsed: true,
       contextValue: 'agencyChain',
       children: members.map(({ j, other }) => {
@@ -465,12 +472,17 @@ function groupChains(nodes, runs) {
         '',
         ...members.map(({ other }) =>
           `- ${other.chain.position}/${other.chain.of} \`${other.hire || other.pack}\``
-          + ` — ${other.findings} findings, ${other.status}`),
+          + ` — ${other.findings} findings, ${other.status}`
+          + (other.denied ? `, **${other.denied} denied**` : '')),
         '',
-        short
-          ? `The chain stopped after ${members.length} of ${c.of} steps. `
-            + 'What did run is recorded; the rest can be finished by hand.'
-          : 'Each member judged what the previous one found before running its own dimensions.',
+        denied
+          ? `${denied} tool call(s) were refused across this team. A member that may not `
+            + 'write finishes cleanly and records nothing, which is not the same as finding '
+            + 'nothing — widen `agent.allow` in the pack configuration.'
+          : short
+            ? `The chain stopped after ${members.length} of ${c.of} steps. `
+              + 'What did run is recorded; the rest can be finished by hand.'
+            : 'Each member judged what the previous one found before running its own dimensions.',
       ].join('\n'),
     }));
   });
@@ -495,10 +507,15 @@ function runNode(r, s) {
       // this list. Which of them produced it is the only thing telling the two
       // rows apart, so it goes into the row itself, not just the tooltip.
       const who = r.hire || r.model || r.provider;
+      // A refused tool call is not a detail. It means the run measured its own
+      // authorization rather than the pack's method, and a row that hides it
+      // reads as "found nothing" — the exact confusion this whole change is
+      // about.
+      const denied = r.denied ? ` · ${r.denied} denied` : '';
       return node(r.targetLabel || r.id.slice(0, 10), {
         id: `run:${r.id}`,
         description: `${who ? `${String(who).split('@').pop()} · ` : ''}`
-          + `${r.findings} findings · ${ago(r.startedAt)}`,
+          + `${r.findings} findings${denied} · ${ago(r.startedAt)}`,
         iconId: st[0], color: st[1],
         collapsed: true,
         // A run still marked running is the only one worth offering to close —
@@ -509,6 +526,12 @@ function runNode(r, s) {
           ? mine.map((f) => findingNode(f, { showFile: true }))
           : [node('no findings', { iconId: 'circle-outline' })],
         tooltip: `Run \`${r.id}\`\n\n- status: \`${r.status}\`\n- pack: \`${r.pack}\`\n`
+          + (r.exitReason ? `- why: _${r.exitReason}_\n` : '')
+          + (r.denied
+            ? `- **${r.denied} tool call(s) denied** — the run measured its permissions, `
+              + 'not the method. Widen `agent.allow` in the pack configuration.\n'
+            : '')
+          + ((r.outputs || []).length ? `- left behind: ${r.outputs.map((n) => `\`${n}\``).join(', ')}\n` : '')
           + (r.hire ? `- specialist: \`${r.hire}\`${r.model ? ` · \`${r.model}\`` : ''}\n` : '')
           + `- ${{ 'merged-pull-request': 'retrospective audit', workspace: 'over the project as it was' }[r.kind]
             || 'open PR'}\n`

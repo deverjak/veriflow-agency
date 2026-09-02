@@ -2072,9 +2072,19 @@ def cmd_status(args) -> int:
             "targetLabel": _target_label(rec.get("target") or {}),
             "brief": (rec.get("brief") or {}).get("focus")
                      or (rec.get("brief") or {}).get("standing"),
-            # Členství v řetězu. Klient tím seskupuje běhy, které patřily
-            # k sobě — bez toho vypadá tým jako několik nesouvisejících běhů.
+            # Chain membership. The client groups runs that belonged together
+            # by it — without it a team looks like several unrelated runs.
             "chain": rec.get("chain"),
+            # Why a run failed, and how much of that was missing permission
+            # rather than missing findings. A panel showing only a red icon
+            # sends the user back to the terminal to find out which.
+            "exitReason": rec.get("exitReason"),
+            "denied": (agent.get("denied") or {}).get("count") or 0,
+            # What the run left behind besides findings. `agent.md` is where an
+            # unattended agent's own words end up, and for a run that was
+            # refused every write it is the only place they exist.
+            "outputs": [n for n in ("summary.md", "handoff.md", "agent.md")
+                        if (run.dir / n).is_file()],
             "findings": len(fs), "undecided": sum(1 for f in fs if f.get("id") not in dec),
         })
 
