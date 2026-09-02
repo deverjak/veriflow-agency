@@ -28,7 +28,7 @@ from .util import read_json, write_json
 
 # An empty `promptFlag` means a positional argument — both claude and codex.
 FIELDS = ("title", "bin", "modelFlag", "dirFlag", "promptFlag", "promptSeparator",
-          "extraArgs", "models", "defaultModel")
+          "unattendedPrefix", "extraArgs", "models", "defaultModel")
 
 BUILTIN: dict[str, dict] = {
     "claude": {
@@ -47,6 +47,11 @@ BUILTIN: dict[str, dict] = {
         #   claude -p --add-dir DIR -- "text"  → odpoví
         # Nebylo to vidět, protože běh doběhl „úspěšně" bez nálezů.
         "promptSeparator": "--",
+        # Bez tohohle se řetěz nehne. `claude` podle vlastní nápovědy
+        # „starts an interactive session by default" — po dokončení úkolu
+        # nekončí, sedí na promptu a čeká na další vstup. Orchestrátor tedy
+        # nikdy nedostane exit code a další člen se nespustí.
+        "unattendedPrefix": ["-p"],
         "extraArgs": [],
         "models": ["opus", "sonnet", "haiku"],
         "defaultModel": None,
@@ -60,6 +65,9 @@ BUILTIN: dict[str, dict] = {
         # Nic variadického před promptem není, takže oddělovač není potřeba —
         # a neověřený `--` u cizího parseru je riziko, ne opatrnost.
         "promptSeparator": None,
+        # `codex exec` je podpříkaz, ne přepínač — proto se vkládá hned za
+        # binárku a ne mezi volby.
+        "unattendedPrefix": ["exec"],
         "extraArgs": [],
         "models": [],
         "defaultModel": None,
@@ -91,6 +99,10 @@ def load() -> dict[str, dict]:
                                    # Výchozí `None`, protože cizí runner nemusí
                                    # `--` znát. Kdo ho potřebuje, nastaví si ho.
                                    "promptSeparator": None,
+                                   # Prázdná: cizí runner nemusí neattended
+                                   # režim mít, a hádat ho znamená řetěz, který
+                                   # se zasekne na prvním kroku.
+                                   "unattendedPrefix": [],
                                    "extraArgs": [], "models": [], "defaultModel": None}
         base.update({k: v for k, v in over.items() if k in FIELDS})
         merged[pid] = base

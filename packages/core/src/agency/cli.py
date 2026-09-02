@@ -764,7 +764,10 @@ def cmd_run(args, chain: dict | None = None) -> int:
         if not files:
             return refuse("No file left after filtering — there is nothing to review.", "no-files")
 
-    run = runs.start(project, pack.ref, cfg, target, hire=hire)
+    # Člen řetězu běží neattended: orchestrátor čeká na jeho konec, takže do něj
+    # nikdo vstupovat nemůže. Samostatný běh zůstává attended i s `--wait`.
+    run = runs.start(project, pack.ref, cfg, target, hire=hire,
+                     attended=chain is None)
     out.step(f"run {run.id}")
 
     wt = project.root
@@ -832,7 +835,7 @@ def cmd_run(args, chain: dict | None = None) -> int:
         upstream_payload = None
         if chain:
             rec = run.record()
-            rec["chain"] = chain
+            rec["chain"] = chains.record_block(chain)
             run.save_record(rec)
             if chain["upstream"]:
                 upstream_payload = chains.write_upstream(project, run, chain["upstream"])
@@ -889,13 +892,17 @@ def cmd_run(args, chain: dict | None = None) -> int:
     if brief["focus"]:
         # Zadání jde i do spouštěcího příkazu, ne jen do context.json: uživatel
         # má na obrazovce vidět, s čím agenta pouští.
-        prompt += " Brief for this run: " + _one_line(brief["focus"])
+        shared = chain is not None and not chain.get("ownBrief")
+        label = ("Brief for the chain as a whole — parts of it may be addressed to other "
+                 "members; do only your part and leave theirs to them"
+                 if shared else "Brief for this run")
+        prompt += f" {label}: " + _one_line(brief["focus"])
     launch, agent_info = runs.launch_argv(
         # Celá paměť projektu, ne jen RUN_DIR: `context.json` posílá specialistu
         # do bundlu, do stránek packu a v řetězu do upstream běhů. Povolit mu
         # jen jeden z nich znamená ptát se ho na svolení k cestám, které jsme
         # mu sami dali.
-        cfg, posix(project.agency_dir), prompt, hire=hire,
+        cfg, posix(project.agency_dir), prompt, hire=hire, unattended=chain is not None,
         provider=getattr(args, "provider", None), model=getattr(args, "model", None))
     rec = run.record()
     rec["agent"] = agent_info
@@ -982,6 +989,17 @@ def cmd_chain(args) -> int:
         # na překlepu ve třetím jméně, už zaplatil dva běhy.
         packs.load(m.pack)
 
+    # Runner bez neattended režimu spustí interaktivní sezení, které po
+    # dokončení úkolu nekončí — orchestrátor by na něm čekal navždycky. Radši
+    # o tom vědět teď než po deseti minutách ticha.
+    for m in members:
+        prov = m.hire.provider if m.hire else None
+        if prov and not providers.spec(prov).get("unattendedPrefix"):
+            out.fail(f"{prov} has no unattended mode registered — {m.label} will open an "
+                     f"interactive session and the chain will wait for you to close it. "
+                     f"`agency providers --add {prov} --unattended-prefix <flag>`")
+
+    focus = chains.per_member(members, getattr(args, "focus", None) or [])
     chain_id = ulid()
     out.say(f"\n  {out.bold('chain')}  "
             f"{out.dim(' → '.join(m.label for m in members))}  ·  {chain_id[:10]}\n")
@@ -991,10 +1009,23 @@ def cmd_chain(args) -> int:
         # Přepínače chainu platí pro každý krok stejně; `members` a `fn` jsou
         # věci orchestrátoru a členu by nedávaly smysl. `--json` je vypnuté
         # natvrdo: `--wait` píše do téhož stdout jako agent.
-        carried = {k: v for k, v in vars(args).items() if k not in ("members", "fn")}
+        carried = {k: v for k, v in vars(args).items()
+                   if k not in ("members", "fn", "focus")}
         step = argparse.Namespace(**{**carried, "pack": member.ref,
-                                     "wait": True, "launch": False, "json": False})
+                                     "wait": True, "launch": False, "json": False,
+                                     # Zadání per člen vyhrává nad společným.
+                                     # Bez toho čte recenzent instrukce psané
+                                     # product ownerovi a poslušně na ně
+                                     # odpovídá — viděno na prvním reálném
+                                     # řetězu.
+                                     "prompt": focus.get(member.label) or carried.get("prompt")})
+        # Dostal tenhle člen zadání psané JEMU, nebo společné pro celý řetěz?
+        # Rozdíl musí být v promptu vidět: společná věta typu „udělej review
+        # a pomocí PO agenta zjisti…" mluví ke dvěma lidem a recenzent na tu
+        # druhou půlku poslušně odpoví, když mu nikdo neřekne, že není jeho.
+        own = member.label in focus
         block = chains.block(chain_id, position, len(members), list(done))
+        block["ownBrief"] = own
 
         if done:
             # Vzkaz předchůdce jde do promptu jako jeho slova, ne jako převyprávění.
@@ -2194,6 +2225,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="the last merged PR — retrospective audit")
     s.add_argument("--prompt", "-p",
                    help="what the chain should focus on — every member gets it")
+    s.add_argument("--focus", action="append", metavar="WHO:TEXT",
+                   help="a brief for one member only, e.g. --focus po:\"is it worth it?\" "
+                        "(repeatable; overrides --prompt for that member)")
     s.add_argument("--scenario", help="a named brief from the pack configuration (brief.scenarios)")
     s.add_argument("--since", help="base ref for a run over the project (default: the default branch)")
     s.add_argument("--model", help="model for every step (overrides the hire and the configuration)")

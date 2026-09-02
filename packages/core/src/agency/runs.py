@@ -274,7 +274,7 @@ def cfg_provider(cfg: dict) -> str:
 def launch_argv(cfg: dict, memory_dir: str, prompt: str,
                 provider: str | None = None,
                 model: str | None = None,
-                hire=None) -> tuple[list[str], dict]:
+                hire=None, unattended: bool = False) -> tuple[list[str], dict]:
     """What to finish the run with.
 
     `memory_dir` je to, co se agentovi povolí číst mimo pracovní adresář —
@@ -322,6 +322,13 @@ def launch_argv(cfg: dict, memory_dir: str, prompt: str,
         m = spec.get("defaultModel")
 
     argv = [spec.get("bin") or name]
+    # Neattended režim je to, co dělá z řetězu řetěz: `claude` i `codex` jinak
+    # startují interaktivní sezení, které po dokončení úkolu NEKONČÍ — sedí na
+    # promptu a čeká na další vstup. Orchestrátor pak nikdy nedostane exit code
+    # a další člen se nespustí. Předpona jde hned za binárku, protože u codexu
+    # je to podpříkaz (`exec`), ne přepínač.
+    if unattended:
+        argv += [str(x) for x in (spec.get("unattendedPrefix") or [])]
     if m and spec.get("modelFlag"):
         argv += [spec["modelFlag"], m]
     # Uživatelské přepínače PŘED adresářem, ne za ním. `--add-dir` je
@@ -662,7 +669,7 @@ def method_hint(pack, project: Project, carried: list[str], in_worktree: bool) -
 
 
 def start(project: Project, pack_ref: str, cfg: dict, target: dict,
-          trigger: str = "manual", hire=None) -> Run:
+          trigger: str = "manual", hire=None, attended: bool = True) -> Run:
     run_id = ulid()
     run = Run(run_id, project.runs_dir / run_id, project)
     run.dir.mkdir(parents=True, exist_ok=True)
@@ -679,7 +686,10 @@ def start(project: Project, pack_ref: str, cfg: dict, target: dict,
         # Attended je vlastnost systému, ne úmysl: běh vzniká z interaktivního
         # příkazu, takže credential je subscription. Unattended větev by musela
         # mít API klíč s rozpočtem — a ta zatím neexistuje.
-        "trigger": {"kind": trigger, "attended": True},
+        # Attended není přání, je to fakt o běhu — `cost.credential` z něj
+        # odvozuje, jestli se platí předplatným, nebo API klíčem. Člen řetězu
+        # běží bez možnosti do něj vstoupit, a tak se to i zapíše.
+        "trigger": {"kind": trigger, "attended": attended},
         "startedAt": now(),
         "status": "running",
     })
@@ -852,7 +862,12 @@ def write_context(run: Run, cfg: dict, target: dict, wt: Path,
         # Členství v řetězu, nebo `null` u samostatného běhu. Pack se podle
         # toho pozná, že má napřed soudit cizí nálezy z `evidence/upstream.json`
         # a po sobě nechat `handoff.md` — obojí je kontrakt v jeho SKILL.md.
-        "chain": ({**chain, "upstreamFile": "evidence/upstream.json",
+        # Jen schématické klíče plus ukazatele na soubory. Vzkaz předchůdce sem
+        # nepatří — ten je v promptu, a druhá kopie téhož textu by znamenala dvě
+        # místa, která se můžou rozejít.
+        "chain": ({**{k: chain[k] for k in ("id", "position", "of", "upstream")
+                      if k in chain},
+                   "upstreamFile": "evidence/upstream.json",
                    "handoffFile": "handoff.md"} if chain else None),
         "review": review,
         "sinks": cfg.get("sinks") or {},

@@ -49,7 +49,8 @@ def install(project, *names: str) -> None:
 def args(project, *members, **over) -> SimpleNamespace:
     base = dict(repo=str(project.root), json=False, members=list(members),
                 pr=None, latest_merged=False, prompt="reconsent po expiraci",
-                scenario=None, since=None, model=None, provider=None, force=False)
+                scenario=None, since=None, model=None, provider=None, force=False,
+                focus=None)
     base.update(over)
     return SimpleNamespace(**base)
 
@@ -318,6 +319,109 @@ def test_zastaveny_retez_rekne_co_dobehlo(team, monkeypatch, capsys):
 
     assert "1/3" in printed and "2/3" in printed and "3/3" in printed
     assert "not started" in printed
+
+
+# ------------------------------------------------------------- autonomie
+
+def test_clen_retezu_bezi_neattended(team, monkeypatch, capsys):
+    """Tohle je rozdíl mezi řetězem a seznamem příkazů.
+
+    `claude` i `codex` startují ve výchozím stavu interaktivní sezení, které po
+    dokončení úkolu NEKONČÍ — sedí na promptu a čeká na další vstup.
+    Orchestrátor pak nikdy nedostane exit code a druhý člen se nespustí. Přesně
+    to se stalo na prvním reálném řetězu: recenzent dopsal závěr v 10:31 a pak
+    se nestalo nic, dokud uživatel nezasáhl ručně.
+    """
+    seen = specialist(team, monkeypatch)
+
+    cli.cmd_chain(args(team, "legal", "po"))
+    capsys.readouterr()
+
+    for step in seen["argv"]:
+        assert "-p" in step, f"člen řetězu musí běžet neattended: {step}"
+        assert step.index("-p") == 1, "u codexu je to podpříkaz, takže hned za binárkou"
+
+
+def test_samostatny_beh_zustava_attended(project, make_run):
+    """`--wait` nemění attended charakter: uživatel sezení vidí a může do něj
+    vstoupit. Neattended je vlastnost ČLENA ŘETĚZU, ne čekání na konec."""
+    cfg = {"agent": {"provider": "claude", "model": "sonnet"}}
+    assert "-p" not in runs.launch_argv(cfg, "/mem", "P")[0]
+    assert "-p" in runs.launch_argv(cfg, "/mem", "P", unattended=True)[0]
+
+
+def test_zaznam_rekne_ze_beh_nebyl_attended(team, monkeypatch, capsys):
+    """`cost.credential` se z toho odvozuje. Tvrdit „attended" o běhu, do kterého
+    nikdo vstoupit nemohl, znamená účtovat ho ke špatnému kreditu."""
+    specialist(team, monkeypatch)
+
+    cli.cmd_chain(args(team, "legal", "po"))
+    capsys.readouterr()
+
+    for run in runs.load_runs(team):
+        assert run.record()["trigger"]["attended"] is False
+
+
+def test_zaznam_retezu_sedi_na_run_v1(team, monkeypatch, capsys):
+    """Blok `chain` má v `run.v1` zavřený seznam klíčů. Orchestrátor si v tomtéž
+    dictu vozí vzkaz předchůdce a příznak zadání — do záznamu nesmí ani jedno."""
+    specialist(team, monkeypatch, handoff="Vzkaz.")
+
+    cli.cmd_chain(args(team, "legal", "po"))
+    capsys.readouterr()
+
+    for run in runs.load_runs(team):
+        assert set(run.record()["chain"]) == set(chain.RECORD_KEYS)
+        code = cli.main(["validate", "--run", run.id, "--repo", str(team.root), "--json"])
+        assert json.loads(capsys.readouterr().out)["recordErrors"] == []
+        assert code == 0
+
+
+# ------------------------------------------------------------- zadání per člen
+
+def test_zadani_pro_jednoho_clena_nedostanou_ostatni(team, monkeypatch, capsys):
+    """Bez tohohle dostávali všichni týž `--prompt`. Věta adresovaná někomu
+    jinému není kontext, je to matoucí instrukce — recenzent na prvním reálném
+    řetězu poslušně odpovídal na produktové otázky psané product ownerovi."""
+    specialist(team, monkeypatch)
+
+    cli.cmd_chain(args(team, "legal", "po",
+                       prompt="projdi VOP", focus=["po@claude:dává to produktový smysl?"]))
+    capsys.readouterr()
+
+    first, second = sorted(runs.load_runs(team), key=lambda r: r.id)
+    legal_prompt = (first.dir / "prompt.txt").read_text(encoding="utf-8")
+    po_prompt = (second.dir / "prompt.txt").read_text(encoding="utf-8")
+
+    assert "projdi VOP" in legal_prompt
+    assert "produktový smysl" not in legal_prompt, "cizí zadání se k recenzentovi nesmí dostat"
+    assert "dává to produktový smysl?" in po_prompt
+    assert "projdi VOP" not in po_prompt
+
+
+def test_spolecne_zadani_rekne_ze_je_spolecne(team, monkeypatch, capsys):
+    """Když se zadání nerozdělí, musí být aspoň vidět, že mluví i k ostatním."""
+    specialist(team, monkeypatch)
+
+    cli.cmd_chain(args(team, "legal", "po", prompt="udělej review a zjisti smysl"))
+    capsys.readouterr()
+
+    prompt = (sorted(runs.load_runs(team), key=lambda r: r.id)[0]
+              .dir / "prompt.txt").read_text(encoding="utf-8")
+    assert "Brief for the chain as a whole" in prompt
+    assert "do only your part" in prompt
+
+
+def test_zadani_pro_neznameho_clena_se_odmitne(team):
+    """Tiše zahozené zadání je horší než chybová hláška."""
+    with pytest.raises(SystemExit, match="not in this chain"):
+        cli.cmd_chain(args(team, "legal", "po", focus=["qa:cokoli"]))
+
+
+@pytest.mark.parametrize("bad", ["po", ":text", "po:", ""])
+def test_spatny_tvar_zadani_se_odmitne(team, bad):
+    with pytest.raises(SystemExit, match="Expected <who>:<text>"):
+        cli.cmd_chain(args(team, "legal", "po", focus=[bad]))
 
 
 # ------------------------------------------------------------------ přehled

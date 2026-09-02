@@ -76,9 +76,21 @@ def one_provider(members: list[Member]) -> str | None:
             f"workers from the same provider.")
 
 
+#: Co z orchestračního bloku smí do `run.json`. `chain` má v `run.v1` zavřený
+#: seznam klíčů, takže vzkaz předchůdce ani zadání per člen — věci, které
+#: orchestrátor v tomtéž dictu vozí — do záznamu nepatří. Bez tohohle filtru
+#: byl každý týmový běh neplatný záznam a `agency validate` to hlásilo.
+RECORD_KEYS = ("id", "position", "of", "upstream")
+
+
 def block(chain_id: str, position: int, of: int, upstream: list[str]) -> dict:
     """Blok `chain` do run recordu. Tvar hlídá `run.v1`."""
     return {"id": chain_id, "position": position, "of": of, "upstream": list(upstream)}
+
+
+def record_block(chain: dict) -> dict:
+    """Jen to, co `run.v1` u bloku `chain` zná. Zbytek je věc orchestrátoru."""
+    return {k: chain[k] for k in RECORD_KEYS if k in chain}
 
 
 def find_member(project, chain_id: str, position: int):
@@ -170,3 +182,32 @@ def step_prompt(base: str, member: Member, position: int, of: int,
     if handoff:
         lines.append(f"Handoff from {who}:\n{handoff}")
     return "\n".join(lines)
+
+
+def per_member(members: list[Member], focus: list[str]) -> dict[str, str]:
+    """`--focus po:"…"` — zadání pro jednoho člena, ne pro celý řetěz.
+
+    Bez tohohle dostávali všichni týž `--prompt`. Na prvním reálném řetězu to
+    dopadlo přesně tak, jak muselo: uživatel napsal „udělej review a pomocí PO
+    agenta zjisti, jestli to dává produktový smysl", recenzent tu druhou půlku
+    přečetl jako svoji a začal odpovídat na produktové otázky. Věta adresovaná
+    někomu jinému není kontext, je to matoucí instrukce.
+
+    Klíčem je jméno, kterým člen v řetězu vystupuje — id pracovníka, nebo jméno
+    packu, když se řetěz skládal z packů. Neznámé jméno se odmítne: tiše
+    zahozené zadání je horší než chybová hláška.
+    """
+    known = {m.label for m in members} | {m.pack for m in members} | {m.ref for m in members}
+    out_: dict[str, str] = {}
+    for item in focus:
+        who, sep, text = str(item).partition(":")
+        who, text = who.strip(), text.strip()
+        if not sep or not who or not text:
+            raise SystemExit(f"Expected <who>:<text>, got “{item}”.")
+        if who not in known:
+            raise SystemExit(
+                f"“{who}” is not in this chain. Members: {', '.join(m.label for m in members)}")
+        for m in members:
+            if who in (m.label, m.pack, m.ref):
+                out_[m.label] = text
+    return out_
