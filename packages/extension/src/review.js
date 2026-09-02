@@ -249,6 +249,34 @@ async function runOverWorkspace(cwd, who, log) {
  * Vybere PR, nechá CLI udělat deterministickou přípravu a pustí agenty.
  * Vrací data prvního běhu, nebo null, když uživatel odešel.
  */
+/**
+ * Který pull request. Jedno místo pro běh i pro řetěz.
+ *
+ * Vynechat tenhle krok znamená, že se cíl vezme z aktuální větve — a uživatel,
+ * který spustil recenzi z panelu, o žádné aktuální větvi nepřemýšlel. Napsat
+ * číslo PR do zadání ten cíl nezmění: zadání čte agent, cíl vybírá příprava.
+ */
+async function pickPr(cwd, title) {
+  const picked = await vscode.window.withProgress(
+    { location: vscode.ProgressLocation.Window, title: 'Agency: loading pull requests…' },
+    async () => {
+      const prs = await cli.prs(cwd, { state: 'all', limit: 30 });
+      if (!prs.length) {
+        vscode.window.showWarningMessage(
+          'Agency: no pull requests. Check `gh auth status` and that this repo has a remote.');
+        return null;
+      }
+      return vscode.window.showQuickPick(items(prs), {
+        title,
+        placeHolder: 'Open and merged — merged ones get a retrospective audit',
+        matchOnDescription: true,
+        matchOnDetail: true,
+      });
+    });
+  return (picked && picked.pr) || null;
+}
+
+
 async function pickAndRun(cwd, log) {
   const candidates = reviewHires();
   if (!candidates.length) {
@@ -261,25 +289,8 @@ async function pickAndRun(cwd, log) {
     return null;
   }
 
-  const picked = await vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Window, title: 'Agency: loading pull requests…' },
-    async () => {
-      const prs = await cli.prs(cwd, { state: 'all', limit: 30 });
-      if (!prs.length) {
-        vscode.window.showWarningMessage(
-          'Agency: no pull requests. Check `gh auth status` and that this repo has a remote.');
-        return null;
-      }
-      return vscode.window.showQuickPick(items(prs), {
-        title: 'Which pull request should be reviewed?',
-        placeHolder: 'Open and merged — merged ones get a retrospective audit',
-        matchOnDescription: true,
-        matchOnDetail: true,
-      });
-    });
-
-  if (!picked || !picked.pr) return null;
-  const pr = picked.pr;
+  const pr = await pickPr(cwd, 'Which pull request should be reviewed?');
+  if (!pr) return null;
 
   const chosen = await pickHires(candidates, {
     title: `PR #${pr.number} — which specialists should review it?`,
@@ -405,10 +416,28 @@ async function pickAndChain(cwd, log) {
     return null;
   }
 
+  // Cíl se musí vybrat, ne odvodit. Když je v týmu někdo, kdo recenzuje pull
+  // request, a nikdo se nezeptá, vezme se PR aktuální větve — a číslo napsané
+  // do zadání na tom nic nezmění, protože zadání čte agent, kdežto cíl vybírá
+  // deterministická příprava. Členové nad projektem `--pr` prostě ignorují.
+  const reviewsPr = order.some((h) => {
+    const p = packInfo(h.pack);
+    return p && p.run && p.run.target === 'pull-request';
+  });
+  let pr = null;
+  if (reviewsPr) {
+    pr = await pickPr(cwd, `Team ${order.map((h) => h.label || h.id).join(' → ')} — which pull request?`);
+    if (!pr) return null;
+  }
+
   const brief = await askBrief(order[0].pack);
   if (brief === null) return null;
 
   const args = ['chain', ...order.map((h) => h.id)];
+  if (pr) args.push('--pr', String(pr.number));
+  // Už zrecenzovaný commit by řetěz zastavil hned na prvním kroku. Uživatel ho
+  // právě vybral ze seznamu, kde je označený — je to volba, ne omyl.
+  if (pr && pr.reviewed) args.push('--force');
   if (brief.scenario) args.push('--scenario', brief.scenario);
   else if (brief.prompt) args.push('--prompt', brief.prompt);
 

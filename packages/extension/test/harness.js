@@ -825,6 +825,117 @@ check('propuštění je na řádku, ne schované v pravém tlačítku', () => {
     'propustit jde každý pracovník — v rosteru jsou jen skuteční');
 });
 
+/** Tým, který sestaví terminálový příkaz místo spuštění běhu — `agency chain`
+ *  si běhy pouští sám, takže se tady zkoumá, co se pošle do terminálu. */
+function chainAskedAbout(answers) {
+  const vscode = require.cache.vscode.exports;
+  const cli = require(path.join(SRC, 'cli.js'));
+  const asked = [];
+  const sent = [];
+  const queue = [...answers];
+  cli.prs = async () => [
+    { number: 479, title: 'Generátor odmítne placeholder identitu', state: 'merged',
+      reviewed: false, mergedAt: '2026-09-02', author: 'kuba' },
+    { number: 474, title: 'CTA poptávky míří na kotvu formuláře', state: 'merged',
+      reviewed: true, mergedAt: '2026-09-02', author: 'kuba' },
+  ];
+  vscode.window.showQuickPick = async (items, opts) => {
+    asked.push((opts && opts.title) || '');
+    return queue.shift();
+  };
+  vscode.window.showInputBox = async (opts) => {
+    asked.push((opts && opts.title) || '');
+    return queue.shift();
+  };
+  vscode.window.createTerminal = () => ({
+    show() {}, dispose() {},
+    sendText(t) { sent.push(t); },
+  });
+  return { asked, sent };
+}
+
+checkAsync('tým s recenzentem se musí zeptat, který PR', async () => {
+  // Tohle se nezeptalo a uživatel napsal číslo PR do zadání. Cíl se tím
+  // nezměnil — zadání čte agent, cíl vybírá deterministická příprava — takže
+  // recenzent dostal PR aktuální větve a zastavil se s otázkou, proč mu zadání
+  // mluví o něčem jiném.
+  const review = require(path.join(SRC, 'review.js'));
+  Object.assign(state.snapshot, {
+    probe: { ok: true }, cwd: 'C:/projekt',
+    packs: [RG_PACK, PO_PACK],
+    hires: [
+      HIRE({ id: 'review-graph@claude', pack: 'review-graph', display: 'Reviewer · sonnet' }),
+      HIRE({ id: 'po@claude', pack: 'po', display: 'Product owner · sonnet' }),
+    ],
+  });
+
+  const { asked, sent } = chainAskedAbout([
+    { label: 'Reviewer · sonnet', hire: state.snapshot.hires[0] },
+    { label: 'Product owner · sonnet', hire: state.snapshot.hires[1] },
+    { label: '#479', pr: { number: 479, reviewed: false } },
+    'zjisti, jestli to dává produktový smysl',
+  ]);
+
+  await review.pickAndChain('C:/projekt', { appendLine() {} });
+
+  assert.ok(asked.some((t) => /which pull request/i.test(t)),
+    'bez téhle otázky se cíl vezme z aktuální větve a nikdo se to nedozví');
+  assert.strictEqual(sent.length, 1);
+  assert.ok(sent[0].includes('--pr 479'), `vybraný PR musí být v příkazu: ${sent[0]}`);
+  assert.ok(sent[0].includes('chain review-graph@claude po@claude'));
+});
+
+checkAsync('tým jen nad projektem se na PR neptá', async () => {
+  // QA i PO pracují nad projektem. Otázka, na kterou nikdo nepotřebuje znát
+  // odpověď, je jen krok navíc.
+  const review = require(path.join(SRC, 'review.js'));
+  Object.assign(state.snapshot, {
+    probe: { ok: true }, cwd: 'C:/projekt',
+    packs: [QA_PACK, PO_PACK],
+    hires: [
+      HIRE({ id: 'po@claude', pack: 'po', display: 'Product owner · sonnet' }),
+      HIRE({ id: 'qa@claude', pack: 'qa', display: 'QA engineer · sonnet' }),
+    ],
+  });
+
+  const { asked, sent } = chainAskedAbout([
+    { label: 'Product owner · sonnet', hire: state.snapshot.hires[0] },
+    { label: 'QA engineer · sonnet', hire: state.snapshot.hires[1] },
+    'co má tým řešit',
+  ]);
+
+  await review.pickAndChain('C:/projekt', { appendLine() {} });
+
+  assert.ok(!asked.some((t) => /which pull request/i.test(t)));
+  // `--prompt` v sobě `--pr` obsahuje, takže se hledá celý přepínač.
+  assert.ok(!/\s--pr\s/.test(sent[0]), sent[0]);
+});
+
+checkAsync('už zrecenzovaný PR tým nezastaví hned na prvním kroku', async () => {
+  // Uživatel ho právě vybral ze seznamu, kde je označený jako zrecenzovaný —
+  // je to volba, ne omyl. Bez `--force` by se řetěz zastavil na `already-reviewed`.
+  const review = require(path.join(SRC, 'review.js'));
+  Object.assign(state.snapshot, {
+    probe: { ok: true }, cwd: 'C:/projekt',
+    packs: [RG_PACK, PO_PACK],
+    hires: [
+      HIRE({ id: 'review-graph@claude', pack: 'review-graph', display: 'Reviewer · sonnet' }),
+      HIRE({ id: 'po@claude', pack: 'po', display: 'Product owner · sonnet' }),
+    ],
+  });
+
+  const { sent } = chainAskedAbout([
+    { label: 'Reviewer · sonnet', hire: state.snapshot.hires[0] },
+    { label: 'Product owner · sonnet', hire: state.snapshot.hires[1] },
+    { label: '#474', pr: { number: 474, reviewed: true } },
+    '',
+  ]);
+
+  await review.pickAndChain('C:/projekt', { appendLine() {} });
+
+  assert.ok(sent[0].includes('--force'), sent[0]);
+});
+
 (async () => {
   for (const [name, fn] of pending) {
     try { await fn(); console.log(`  ok   ${name}`); }
