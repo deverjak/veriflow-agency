@@ -249,6 +249,27 @@ def authorization(provider_id: str, needs: list[str], mode: str = "grant") -> li
     return argv
 
 
+def streaming(provider_id: str) -> tuple[list[str], str | None]:
+    """How to ask this runner for a live event stream — flags and dialect together.
+
+    One function, because these two are one decision. They were two: the flags
+    lived in the provider table and the dialect was read separately at the launch
+    site, and the flags were never read at all. The result was an orchestrator
+    parsing a stream it had forgotten to request — `claude -p` printing one blob
+    of prose at the very end, twelve minutes of nothing before it, and a run
+    record with no turns, no cost and no denials because there was no JSON to
+    take them from.
+
+    Returning both from one place makes that class of mismatch unrepresentable:
+    no dialect, no flags.
+    """
+    s = spec(provider_id)
+    dialect = s.get("streamDialect")
+    if not dialect:
+        return [], None
+    return [str(x) for x in (s.get("streamArgs") or [])], dialect
+
+
 def installed(provider_id: str) -> str | None:
     """Path to the binary, or None.
 

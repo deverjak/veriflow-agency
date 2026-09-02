@@ -205,6 +205,65 @@ def test_the_report_names_the_denials(project, make_run, monkeypatch, capsys):
     assert "Write" in printed
 
 
+def test_streaming_is_actually_asked_for():
+    """The flags have to reach the command line, not just the provider table.
+
+    They did not, and the whole of Step 3 was dead because of it: `streamArgs`
+    was defined in `providers.py` and read by nothing, so `claude -p` ran in
+    plain text mode and printed one blob when it was completely finished. The
+    orchestrator sat on a silent pipe for twenty minutes, `agent.jsonl` stayed
+    empty, and turns, cost and denials were all null.
+
+    The old tests could not catch it: they fed JSONL to the parser directly, so
+    they proved the translator worked while nobody was requesting a translation.
+    """
+    argv, _ = runs.launch_argv({}, "/mem", "p", provider="claude", stream=True)
+
+    assert "--output-format" in argv
+    assert argv[argv.index("--output-format") + 1] == "stream-json"
+    assert "--verbose" in argv, "stream-json in print mode is refused without it"
+
+
+def test_an_attended_run_is_not_asked_to_stream():
+    """A terminal shows the agent to a person. Piping JSONL at them instead
+    would be a downgrade, not a feature."""
+    argv, _ = runs.launch_argv({}, "/mem", "p", provider="claude")
+
+    assert "--output-format" not in argv
+
+
+def test_the_flags_and_the_dialect_come_from_one_place():
+    """Asking for a stream and knowing how to read it is one decision. It was
+    two — a table entry and a separate lookup at the launch site — and they
+    disagreed silently: the dialect was set, the flags were never sent."""
+    args, dialect = providers.streaming("claude")
+
+    assert dialect == "claude-stream-json"
+    assert args, "a dialect with no flags is the bug this pairs against"
+
+    argv, _ = runs.launch_argv({}, "/mem", "p", provider="claude", stream=True)
+    assert all(a in argv for a in args)
+
+
+def test_a_runner_with_no_dialect_gets_no_flags():
+    """A foreign runner's stream shape cannot be guessed. It falls back to the
+    terminal, which is worse UX and still works — unlike a parser that silently
+    finds nothing."""
+    assert providers.streaming("nosuchrunner") == ([], None)
+
+
+def test_the_allow_list_is_still_protected_when_streaming():
+    """`--allowedTools` is variadic. With streaming on there are two flags that
+    could follow it, and the prompt must not be one of them."""
+    argv, _ = runs.launch_argv({}, "/mem", "the prompt", provider="claude",
+                               needs=["git"], stream=True)
+
+    assert argv[-1] == "the prompt" and argv[-2] == "--"
+    assert argv[argv.index("--allowedTools") + 1].startswith("Bash(")
+    after = argv[argv.index("--allowedTools"):]
+    assert any(a.startswith("--") for a in after[1:]), "a flag closes the rule list"
+
+
 # ------------------------------------------------------------- event stream
 
 INIT = '{"type":"system","subtype":"init","session_id":"abc-123"}'

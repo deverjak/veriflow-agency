@@ -34,11 +34,12 @@ class Event:
 
     `kind` is a small closed vocabulary, so dialects stay comparable:
 
-      * `start`   — the session began; `session` carries the runner's id
-      * `tool`    — the agent is calling a tool; `tool` and `detail`
-      * `denied`  — a tool call was refused (this is the one that matters)
-      * `text`    — the agent said something; `detail` is the text
-      * `done`    — the end; `turns`, `usd`, `denials`, `detail` = last message
+      * `start`    — the session began; `session` carries the runner's id
+      * `tool`     — the agent is calling a tool; `tool` and `detail`
+      * `denied`   — a tool call was refused (this is the one that matters)
+      * `thinking` — the agent reasoning; `detail` is the text
+      * `text`     — the agent said something; `detail` is the text
+      * `done`     — the end; `turns`, `usd`, `denials`, `detail` = last message
     """
     kind: str
     tool: str | None = None
@@ -102,6 +103,12 @@ def claude(line: str) -> list[Event]:
             if b.get("type") == "tool_use":
                 out_.append(Event("tool", tool=b.get("name"),
                                   detail=_tool_detail(b.get("name") or "", b.get("input") or {})))
+            elif b.get("type") == "thinking" and (b.get("thinking") or "").strip():
+                # Probed on claude 2.1.258: a thinking block arrives on its own
+                # assistant event, before the tool call it leads to. Dropping it
+                # was why the progress lines said what the agent touched and
+                # never what it was trying to do.
+                out_.append(Event("thinking", detail=b["thinking"]))
             elif b.get("type") == "text" and b.get("text", "").strip():
                 out_.append(Event("text", detail=b["text"]))
         return out_

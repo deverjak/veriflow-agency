@@ -946,16 +946,21 @@ def cmd_run(args, chain: dict | None = None) -> int:
                  if shared else "Brief for this run")
         prompt += f" {label}: " + _one_line(brief["focus"])
     launch, agent_info = runs.launch_argv(
-        # Celá paměť projektu, ne jen RUN_DIR: `context.json` posílá specialistu
-        # do bundlu, do stránek packu a v řetězu do upstream běhů. Povolit mu
-        # jen jeden z nich znamená ptát se ho na svolení k cestám, které jsme
-        # mu sami dali.
+        # The project's whole memory, not just RUN_DIR: `context.json` sends the
+        # specialist into the bundle, into the pack's pages and, in a chain,
+        # into upstream runs. Allowing only one of those means asking it for
+        # permission to walk paths we handed it ourselves.
         cfg, posix(project.agency_dir), prompt, hire=hire, unattended=chain is not None,
         provider=getattr(args, "provider", None), model=getattr(args, "model", None),
-        # Co metoda volá, ví pack. Bez tohohle seznamu je agent v neattended
-        # režimu němý: `agency triage` ani `code-review-graph query` mu systém
-        # nepovolí a nálezy skončí ve scrollbacku terminálu.
-        needs=policy.get("needs"))
+        # What the method calls is the pack's knowledge. Without this list an
+        # agent is mute in unattended mode: neither `agency triage` nor
+        # `code-review-graph query` is permitted, and the findings end up in the
+        # terminal's scrollback.
+        needs=policy.get("needs"),
+        # A chain member is read as a stream; a standalone run keeps the
+        # terminal. Not a preference — it is whether anyone can answer a
+        # question the agent asks.
+        stream=chain is not None)
     rec = run.record()
     rec["agent"] = agent_info
     run.save_record(rec)
@@ -997,11 +1002,9 @@ def cmd_run(args, chain: dict | None = None) -> int:
     out.say()
 
     if args.wait:
-        # A chain member is read as a stream; a standalone run keeps the
-        # terminal. The difference is not a preference — it is whether anyone
-        # can answer a question the agent asks.
-        dialect = (providers.spec(agent_info["provider"]).get("streamDialect")
-                   if chain else None)
+        # The same source as the flags above, so the two cannot disagree: asking
+        # for a stream and knowing how to read it is one decision.
+        dialect = providers.streaming(agent_info["provider"])[1] if chain else None
         return _wait_for_agent(project, run, launch, wt, wt_owned,
                                dialect=dialect, chain=chain)
 
@@ -1236,23 +1239,50 @@ def _duration(seconds: float) -> str:
     return f"{s}s" if s < 60 else f"{s // 60}m {s % 60:02d}s"
 
 
+#: How many wrapped lines of one reasoning block reach the terminal. Enough to
+#: see what the agent is thinking about, not enough to bury the chain's own
+#: output — a thinking block can run to thousands of tokens, and the whole of it
+#: is kept in `agent.jsonl` either way.
+THINKING_LINES = 3
+
+
+def _wrapped(text: str, limit: int) -> list[str]:
+    import shutil as _shutil
+    import textwrap
+    width = max(40, min(_shutil.get_terminal_size((100, 24)).columns, 100) - 6)
+    lines = textwrap.wrap(" ".join(str(text).split()), width=width)
+    if len(lines) <= limit:
+        return lines
+    return lines[:limit] + ["…"]
+
+
 def _progress(event) -> None:
-    """One line per thing the agent does.
+    """One line per thing the agent does — and a glimpse of why.
 
-    This is what a chain member used to be missing entirely. `launching claude…`
+    This is what a chain member was missing entirely. `launching claude…`
     followed by twelve minutes of silence is indistinguishable from a hung
-    process — the user said exactly that ("it's stuck or non-interactive") while
-    the agent was in fact working and being refused one write after another.
+    process, and a user reported it as exactly that while the agent was in fact
+    working and being refused one write after another.
 
-    The agent's prose is deliberately NOT printed as it arrives. It would drown
-    the chain's own output, and it has a better home: `RUN_DIR/agent.md`.
+    Reasoning is shown, clipped. The first version of this deliberately hid it
+    to keep the output clean, which turned out to be the wrong trade: a list of
+    tool calls says what the agent touched, never what it is trying to do. The
+    full text stays in `agent.jsonl`, and the closing message in `agent.md`.
     """
     if event.kind == "tool":
         label = event.tool or "?"
-        out.say(f"  {out.dim('·')} {label:<12} {out.dim(event.detail or '')}")
+        out.say(f"  {out.dim('·')} {out.bold(label)}  {out.dim(event.detail or '')}")
     elif event.kind == "denied":
-        out.say(f"  {out.err('×')} {(event.tool or '?'):<12} "
+        out.say(f"  {out.err('×')} {out.bold(event.tool or '?')}  "
                 f"{out.dim((event.detail or '') + '  — denied')}")
+    elif event.kind == "thinking":
+        for i, line in enumerate(_wrapped(event.detail or "", THINKING_LINES)):
+            out.say(f"  {out.dim('~' if i == 0 else ' ')} {out.dim(line)}")
+    elif event.kind == "text":
+        # The agent talking, as opposed to thinking. Worth a touch more contrast
+        # — it is the closest thing to it reporting progress in its own words.
+        for i, line in enumerate(_wrapped(event.detail or "", THINKING_LINES)):
+            out.say(f"  {out.dim('›' if i == 0 else ' ')} {line}")
 
 
 def _wait_for_agent(project, run, launch: list[str], wt: Path, wt_owned: bool,

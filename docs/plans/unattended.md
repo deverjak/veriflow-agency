@@ -132,6 +132,24 @@ Projekt může seznam **rozšířit** (`agent.allow` v `.agency/<pack>.json`, ta
 - Ctrl-C: zabít dítě, `abandon`, jako dnes.
 - Attended `--wait` a `--launch` beze změny.
 
+**Co se u tohohle kroku nepovedlo napoprvé:** `streamArgs` skončily v tabulce
+providera a **nikdo je nepřidal na příkazovou řádku**. `streamDialect` se četl
+zvlášť v místě spuštění, takže orchestrátor parsoval proud, o který nikdy
+nepožádal — `claude -p` běžel v textovém režimu, dvacet minut mlčel a pak vypsal
+jeden blok prózy, který parser neuměl přečíst. `agent.jsonl` zůstal prázdný,
+`turns`/`usd`/`denied` null. Testy to nechytily, protože podstrkávaly JSONL rovnou
+parseru: ověřovaly překladač, ne to, že se o překlad vůbec požádá.
+
+Oprava má dvě části a druhá je ta důležitá: `providers.streaming()` vrací **flagy
+i dialekt jedním voláním**, takže „mám dialekt, ale neposlal jsem flagy" je stav,
+který nejde vyrobit. Plus test, který kouká do argv, ne do parseru.
+
+**Reasoning se tiskne taky.** První verze ho schválně skrývala, aby výstup zůstal
+čistý — špatný kompromis: seznam nástrojů řekne, čeho se agent dotkl, nikdy ne co
+se snaží udělat. Bloky `thinking` chodí v proudu živě (ověřeno sondou: první
+v 4,8 s, tool_use v 5,1 s), tisknou se zkrácené na tři řádky a celé zůstávají
+v `agent.jsonl`.
+
 > **Hotovo, když:** člen řetězu v terminálu ukazuje, co agent právě dělá; po doběhnutí je v `run.json` počet tahů, odmítnutí a cena; `RUN_DIR/agent.md` obsahuje poslední zprávu agenta; `tests/test_events.py` parsuje zaznamenaný proud obou dialektů (fixtury z reálného běhu, ne vymyšlené).
 
 ### Krok 4 — cíl patří řetězu (~půl dne)
@@ -214,6 +232,22 @@ Z reálného transkriptu (`-p` bez povolení): `git diff`, `ls`, `grep`, `find`,
 Výsledný JSON `claude -p` má klíče: `type, subtype, is_error, num_turns, duration_ms, duration_api_ms, total_cost_usd, usage, modelUsage, permission_denials, session_id, result, stop_reason, …`. `is_error` je `false` i při odmítnutí — signál je jen v `permission_denials`.
 
 Bez stdin (roura bez dat) claude tři vteřiny čeká a varuje; `DEVNULL` to řeší.
+
+**Proud teče průběžně** — ověřeno druhou sondou (`-p --output-format stream-json
+--verbose`, haiku, úkol se čtením adresáře):
+
+| čas | událost |
+|---|---|
+| 1,8 s | `system` (init, `session_id`) |
+| 4,8 s | `assistant` · blocks=**thinking** |
+| 5,1 s | `assistant` · blocks=**tool_use** |
+| 6,6 s | `user` (tool_result) |
+| 7,8 s | `assistant` · thinking, pak text |
+| 8,4 s | `result` — `num_turns`, `total_cost_usd`, `permission_denials` |
+
+Tedy: reasoning i volání nástrojů jsou k dispozici **živě**, kdežto odmítnutí až
+v závěrečném `result`. Počet odmítnutých volání se proto ukáže na konci kroku, ne
+během něj — to není chyba orchestrátoru, tak to claude posílá.
 
 ---
 

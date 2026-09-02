@@ -308,7 +308,8 @@ def launch_argv(cfg: dict, memory_dir: str, prompt: str,
                 provider: str | None = None,
                 model: str | None = None,
                 hire=None, unattended: bool = False,
-                needs: list[str] | None = None) -> tuple[list[str], dict]:
+                needs: list[str] | None = None,
+                stream: bool = False) -> tuple[list[str], dict]:
     """What to finish the run with.
 
     `memory_dir` je to, co se agentovi povolí číst mimo pracovní adresář —
@@ -384,11 +385,25 @@ def launch_argv(cfg: dict, memory_dir: str, prompt: str,
     # would be soaked up into the rule list.
     auth = providers.authorization(name, authorized_commands(cfg, needs),
                                    authorization_mode(cfg))
-    if auth and not spec.get("dirFlag") and spec.get("allowFlag") in auth:
+
+    # Ask for the event stream. Without these flags `claude -p` prints one blob
+    # of prose when it is completely done, so an orchestrator reading the pipe
+    # sees nothing for as long as the agent works — which is indistinguishable
+    # from a hung process, and is exactly what a user reported after twenty
+    # minutes of silence. The flags existed in the provider table and nothing
+    # ever put them on the command line.
+    stream_args = providers.streaming(name)[0] if stream else []
+
+    # `allowFlag` is variadic, so a FLAG has to follow its rules. Both of the
+    # things that can follow start with one (`--output-format`, `--add-dir`);
+    # with neither, the separator or the prompt itself would be soaked up.
+    if (auth and spec.get("allowFlag") in auth
+            and not stream_args and not spec.get("dirFlag")):
         # Better no rules than rules that swallow the prompt. The grant
         # (`--permission-mode …`) stays; the command list is dropped.
         auth = auth[:auth.index(spec["allowFlag"])]
     argv += auth
+    argv += stream_args
 
     # Paměť projektu leží mimo worktree, a právě tam se zapisuje findings.json.
     # Jeden adresář, ne seznam: `.agency/` je nadmnožina RUN_DIRu, bundlu
