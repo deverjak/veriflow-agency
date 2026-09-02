@@ -404,6 +404,52 @@ function activate(context) {
     await refresh();
   });
 
+  reg('agency.chain.discard', async (arg) => {
+    const chainId = chainIdOf(arg);
+    if (!chainId) return;
+    const members = (state.snapshot.runs || [])
+      .filter((r) => r.chain && r.chain.id === chainId)
+      .sort((a, b) => a.chain.position - b.chain.position);
+    if (!members.length) return;
+
+    // Týž zákaz jako u jednoho běhu, jen se sčítá přes celý řetěz: rozhodnutí
+    // je práce, kterou někdo odvedl, a čísla přesnosti se počítají z něj.
+    const decided = members.reduce(
+      (n, r) => n + Math.max((r.findings || 0) - (r.undecided || 0), 0), 0);
+    if (decided) {
+      vscode.window.showWarningMessage(
+        `Agency: the team carries ${decided} decision(s) — discarding it would take `
+        + 'the numbers with it. Discard the individual runs that have none, or close them.');
+      return;
+    }
+
+    const findings = members.reduce((n, r) => n + (r.findings || 0), 0);
+    const running = members.filter((r) => r.status === 'running').length;
+    const yes = await vscode.window.showWarningMessage(
+      `Discard the whole team — ${members.length} run(s)?`,
+      { modal: true,
+        detail: members.map((r) => `${r.chain.position}/${r.chain.of}  ${r.hire || r.pack}`
+          + ` — ${r.targetLabel || ''}`).join('\n')
+          + `\n\nThe records, their evidence and ${findings} finding(s) are deleted.`
+          + (running ? `\n${running} of them is still marked running.` : '') },
+      'Discard');
+    if (yes !== 'Discard') return;
+
+    for (const r of members) {
+      const res = await cli.cleanup(state.snapshot.cwd, { run: r.id, discard: true });
+      if (!res.ok) {
+        // Zastavit se na prvním nezdaru: dopočítat zbytek naslepo by nechalo
+        // řetěz rozpůlený a uživatel by nevěděl, co ještě existuje.
+        vscode.window.showErrorMessage(
+          `Agency: ${r.id.slice(0, 10)} — ${res.error}. The rest of the team was left alone.`);
+        await refresh();
+        return;
+      }
+      log.appendLine(`[cleanup] discarded ${r.id} (chain ${chainId.slice(0, 10)})`);
+    }
+    await refresh();
+  });
+
   reg('agency.run.discard', async (arg) => {
     const id = runIdOf(arg);
     if (!id) return;
@@ -781,6 +827,13 @@ function runIdOf(arg) {
   if (typeof arg === 'string') return arg;
   const id = arg && arg.item && arg.item.id;         // node id: "run:<id>"
   if (id && String(id).startsWith('run:')) return String(id).slice(4);
+  return null;
+}
+
+function chainIdOf(arg) {
+  if (typeof arg === 'string') return arg;
+  const id = arg && arg.item && arg.item.id;         // node id: "chain:<id>"
+  if (id && String(id).startsWith('chain:')) return String(id).slice(6);
   return null;
 }
 

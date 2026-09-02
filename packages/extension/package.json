@@ -2,7 +2,7 @@
   "name": "veriflow-agency",
   "displayName": "Agency",
   "description": "Specialists you hire into your repository. Pull request reviews with evidence-backed findings, triage right next to the code, and measurable precision.",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "publisher": "veriflow",
   "license": "UNLICENSED",
   "private": true,
@@ -183,6 +183,12 @@
         "title": "Close run",
         "category": "Agency",
         "icon": "$(stop-circle)"
+      },
+      {
+        "command": "agency.chain.discard",
+        "title": "Discard the whole team…",
+        "category": "Agency",
+        "icon": "$(trash)"
       },
       {
         "command": "agency.run.discard",
@@ -553,6 +559,11 @@
           "command": "agency.run.discard",
           "group": "9_remove@1",
           "when": "viewItem =~ /^agencyRun/"
+        },
+        {
+          "command": "agency.chain.discard",
+          "group": "9_remove@1",
+          "when": "viewItem == agencyChain"
         }
       ],
       "comments/commentThread/title": [

@@ -628,6 +628,34 @@ check('nedoběhnutý tým se netváří jako hotový', () => {
   assert.ok(rows[0].item.tooltip.value.includes('stopped after 1 of 3'));
 });
 
+check('na uzel týmu jde kliknout pravým', () => {
+  // Uzel řetězu nesl `contextValue`, na který necílilo žádné menu — pravé
+  // tlačítko tedy nenabídlo vůbec nic. Skupinový uzel bez akcí je slepá ulička:
+  // uživatel vidí tým jako jednu věc, ale zahodit ho musí po jednom běhu.
+  const chain = { id: '01M1TEAM0000000000000000CC', of: 2 };
+  Object.assign(state.snapshot, {
+    probe: { ok: true }, findings: [],
+    runs: [
+      { id: '01M1CGN9HAMBKK63SASPP2EYWA', pack: 'review-graph@0.1.0', status: 'ok',
+        targetLabel: 'PR #474', kind: 'pull-request', hire: 'review-graph@claude',
+        chain: { ...chain, position: 1, upstream: [] },
+        findings: 0, undecided: 0, startedAt: new Date().toISOString() },
+      { id: '01M1CGN9HAMBKK63SASPP2EYWB', pack: 'po@0.1.0', status: 'running',
+        targetLabel: 'main', kind: 'workspace', hire: 'po@claude',
+        chain: { ...chain, position: 2, upstream: ['01M1CGN9HAMBKK63SASPP2EYWA'] },
+        findings: 0, undecided: 0, startedAt: new Date().toISOString() },
+    ],
+  });
+  const row = new views.RunsTree().roots()[0];
+  assert.strictEqual(row.item.contextValue, 'agencyChain');
+
+  const menus = require(path.join(SRC, '..', 'package.json'))
+    .contributes.menus['view/item/context'];
+  const hit = menus.filter((m) => m.when === 'viewItem == agencyChain');
+  assert.ok(hit.length, 'contextValue bez jediného menu = pravé tlačítko nenabídne nic');
+  assert.ok(hit.some((m) => m.command === 'agency.chain.discard'));
+});
+
 check('samostatný běh se do týmu nezabalí', () => {
   Object.assign(state.snapshot, {
     probe: { ok: true }, findings: [],
