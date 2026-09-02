@@ -271,11 +271,18 @@ def cfg_provider(cfg: dict) -> str:
     return (cfg.get("agent") or {}).get("provider") or "claude"
 
 
-def launch_argv(cfg: dict, run_dir: str, prompt: str,
+def launch_argv(cfg: dict, memory_dir: str, prompt: str,
                 provider: str | None = None,
                 model: str | None = None,
                 hire=None) -> tuple[list[str], dict]:
     """What to finish the run with.
+
+    `memory_dir` je to, co se agentovi povolí číst mimo pracovní adresář —
+    `.agency/` projektu. Dlouho tam chodil jen RUN_DIR, jenže `context.json`
+    posílá specialistu i jinam: do `knowledge` bundlu, do stránek packu a
+    v řetězu do upstream běhů. Běh ve worktree se proto po každém takovém
+    čtení ptal na svolení k adresáři, který mu jádro samo předalo — dávat
+    cestu a nedat k ní přístup je chyba autorizace, ne otravnost.
 
     The model is a property of the task, not of the user. You can keep coding
     on the strongest one and run reviews cheaper — a review is reading and
@@ -317,12 +324,17 @@ def launch_argv(cfg: dict, run_dir: str, prompt: str,
     argv = [spec.get("bin") or name]
     if m and spec.get("modelFlag"):
         argv += [spec["modelFlag"], m]
-    # RUN_DIR leží mimo worktree, a právě tam se zapisuje findings.json.
-    # Bez tohohle se agent ptá na zápis ven z pracovního adresáře v každém běhu.
-    if spec.get("dirFlag"):
-        argv += [spec["dirFlag"], run_dir]
+    # Uživatelské přepínače PŘED adresářem, ne za ním. `--add-dir` je
+    # variadický a bere všechno až po první volbu; `extraArgs` začínající
+    # hodnotou by mu padly do klína. Takhle za ním stojí rovnou `--`.
     extra = a.get("extraArgs") if name == configured else None
     argv += [str(x) for x in (extra if extra is not None else spec.get("extraArgs") or [])]
+    # Paměť projektu leží mimo worktree, a právě tam se zapisuje findings.json.
+    # Jeden adresář, ne seznam: `.agency/` je nadmnožina RUN_DIRu, bundlu
+    # i upstream běhů, takže se nemusí řešit, kolik hodnot která variadická
+    # volba spolkne.
+    if spec.get("dirFlag"):
+        argv += [spec["dirFlag"], memory_dir]
     if spec.get("promptFlag"):
         argv += [spec["promptFlag"], prompt]
     else:

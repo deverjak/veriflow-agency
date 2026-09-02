@@ -22,8 +22,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from agency import chain, cli, hires, packs, proc, runs
-from agency.util import write_json
+from pathlib import Path
+
+from agency import chain, cli, hires, knowledge, packs, proc, runs
+from agency.util import posix, write_json
 
 from conftest import make_finding
 
@@ -60,10 +62,11 @@ def specialist(project, monkeypatch, *, findings=1, handoff: str | None = None,
     v promptu, ale fake ho v `proc.attend` nedostane. Zapisuje to, na čem stojí
     předání: nálezy a `handoff.md`.
     """
-    seen = {"steps": 0}
+    seen = {"steps": 0, "argv": []}
 
     def fake(argv, cwd=None):
         seen["steps"] += 1
+        seen["argv"].append(list(argv))
         run = next(r for r in runs.load_runs(project)
                    if r.record().get("status") == "running")
         write_json(run.findings_path,
@@ -252,6 +255,41 @@ def test_mlceni_agenta_se_nenahrazuje(team, monkeypatch, capsys):
     prompt = (second.dir / "prompt.txt").read_text(encoding="utf-8")
     assert "Handoff from" not in prompt
     assert "1 findings" in prompt
+
+
+def test_agent_smi_cist_celou_pamet_projektu(team, monkeypatch, capsys):
+    """Autorizace musí pokrýt to, co jádro samo předalo.
+
+    `context.json` posílá specialistu do `knowledge` bundlu, do stránek packu
+    a v řetězu do `evidence/upstream.json` s odkazy na cizí běhy. Dlouho se
+    přitom povoloval jen RUN_DIR, takže běh ve worktree narazil na „Read
+    outside the working directories" u adresáře, na který ho poslalo jádro.
+    Dát cestu a nedat k ní přístup je chyba autorizace, ne otravnost.
+    """
+    seen = specialist(team, monkeypatch)
+
+    cli.cmd_chain(args(team, "legal", "po"))
+    capsys.readouterr()
+
+    for step in seen["argv"]:
+        assert "--add-dir" in step
+        allowed = step[step.index("--add-dir") + 1]
+        assert allowed == posix(team.agency_dir), (
+            f"agent dostal povolený {allowed}, ale čte celou paměť projektu")
+
+
+def test_povoleny_adresar_pokryva_upstream_i_bundle(team, monkeypatch, capsys):
+    """Konkrétně: run dir druhého člena, běh prvního člena a knowledge bundle
+    leží všechny pod tím jedním povoleným adresářem."""
+    seen = specialist(team, monkeypatch)
+
+    cli.cmd_chain(args(team, "legal", "po"))
+    capsys.readouterr()
+
+    allowed = Path(seen["argv"][1][seen["argv"][1].index("--add-dir") + 1])
+    first, second = sorted(runs.load_runs(team), key=lambda r: r.id)
+    for path in (second.dir, first.dir, team.agency_dir / knowledge.BUNDLE):
+        assert allowed in path.parents or allowed == path, f"{path} je mimo povolený adresář"
 
 
 # ------------------------------------------------------------------ zastavení

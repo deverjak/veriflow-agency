@@ -891,7 +891,11 @@ def cmd_run(args, chain: dict | None = None) -> int:
         # má na obrazovce vidět, s čím agenta pouští.
         prompt += " Brief for this run: " + _one_line(brief["focus"])
     launch, agent_info = runs.launch_argv(
-        cfg, posix(run.dir), prompt, hire=hire,
+        # Celá paměť projektu, ne jen RUN_DIR: `context.json` posílá specialistu
+        # do bundlu, do stránek packu a v řetězu do upstream běhů. Povolit mu
+        # jen jeden z nich znamená ptát se ho na svolení k cestám, které jsme
+        # mu sami dali.
+        cfg, posix(project.agency_dir), prompt, hire=hire,
         provider=getattr(args, "provider", None), model=getattr(args, "model", None))
     rec = run.record()
     rec["agent"] = agent_info

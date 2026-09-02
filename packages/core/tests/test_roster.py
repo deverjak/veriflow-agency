@@ -287,6 +287,19 @@ def test_oddelovac_odpada_kdyz_ma_provider_promptFlag(project, monkeypatch):
     assert argv == ["flagged", "--prompt", "P"]
 
 
+def test_uzivatelske_prepinace_stoji_pred_adresarem(project):
+    """`--add-dir` je variadický a bere všechno až po první volbu. `extraArgs`
+    začínající hodnotou by mu proto padly do klína — pořadí je tady obrana,
+    ne kosmetika. Za adresářem stojí rovnou `--`."""
+    cfg = {"agent": {"provider": "claude",
+                     "extraArgs": ["--permission-mode", "acceptEdits"]}}
+    argv, _ = runs.launch_argv(cfg, "/mem", "P")
+
+    assert argv.index("--permission-mode") < argv.index("--add-dir")
+    assert argv[argv.index("--add-dir") + 2] == "--", "za adresářem musí být oddělovač"
+    assert argv[-1] == "P"
+
+
 def test_dodatecne_argumenty_patri_svemu_providerovi(project):
     """`extraArgs` jsou psané pro jednoho providera. Druhému by mohly nedávat
     smysl — nebo být rovnou chyba."""

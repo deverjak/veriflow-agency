@@ -294,6 +294,25 @@ If this call is wrong, say so here — @kuba has the last word.
 `policy.escalate` je součást podpisu schválně: agent, který řekne ne a nenapíše,
 kdo ho může přebít, není specialista, ale překážka.
 
+### Na co se agent smí ptát
+
+Běh recenzenta jede ve worktree, ale paměť projektu leží v `.agency/` hlavního
+repa — a `context.json` do ní specialistu posílá: knowledge bundle, stránky
+packu, v řetězu i běhy předchozích členů. Jádro mu proto povolí **celý
+`.agency/`**, ne jen jeho vlastní RUN_DIR. Dát cestu a nedat k ní přístup by
+znamenalo ptát se ho na svolení k adresáři, který mu jádro samo předalo.
+
+Dál už se nepovoluje nic — zápis do zdrojáků, síť ani nástroje. Kdo chce jít
+dál, řekne si o to výslovně u svého providera:
+
+```powershell
+agency config review-graph --set 'agent.extraArgs=["--permission-mode","acceptEdits"]'
+```
+
+`extraArgs` patří tomu provideru, pro kterého je konfigurace psaná. Pracovník
+na jiném runneru je nedostane — přepínač, který zná claude, by codex neuměl
+a běh by spadl na prvním spuštění.
+
 ## Tým — specialisté za sebou
 
 Právník najde, že chybí reconsent flow. Je to nález, nebo ne? Odpověď nezná
