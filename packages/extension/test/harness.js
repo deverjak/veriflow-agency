@@ -822,7 +822,7 @@ check('propuštění je na řádku, ne schované v pravém tlačítku', () => {
   assert.ok(dismiss.group.startsWith('inline'),
     'akce jen v kontextovém menu je akce, kterou nikdo nenajde');
   assert.strictEqual(dismiss.when, 'viewItem == agencyHire',
-    'odvozený pracovník zápis v rosteru nemá, takže není co mazat');
+    'propustit jde každý pracovník — v rosteru jsou jen skuteční');
 });
 
 (async () => {

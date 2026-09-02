@@ -115,9 +115,8 @@ def test_retez_potrebuje_aspon_dva_cleny(team):
 def test_mix_provideru_se_odmitne_hned(team):
     """Vědomé zúžení v1 — jeden binár, jeden credential, jedna sada quirků.
     Podstatné je „hned": uživatel, kterému to spadne po prvním běhu, už zaplatil."""
-    # Jménem hire, ne packu: `hires.add` napřed zhmotní stávajícího pracovníka,
-    # takže po instalaci existuje `po@claude` i `po@codex` a holé „po" by sáhlo
-    # po tom prvním.
+    # Jménem hire, ne packu: instalace zapsala `po@claude` a tohle přidá
+    # druhého, takže holé „po" by sáhlo po tom prvním — a mix by se neprojevil.
     second = hires.add(team, pack="po", provider="codex")
 
     with pytest.raises(SystemExit, match="one provider at a time"):
