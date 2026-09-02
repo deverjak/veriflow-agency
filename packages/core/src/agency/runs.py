@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import graph, hires, proc, providers
+from . import events, graph, hires, proc, providers
 from .config import AGENCY_DIR, Project
 from .util import out, posix, read_json, ulid, write_json
 
@@ -271,10 +271,44 @@ def cfg_provider(cfg: dict) -> str:
     return (cfg.get("agent") or {}).get("provider") or "claude"
 
 
+#: The authorization modes `agent.unattended` accepts in a pack's config.
+#: `grant` is the default and covers what the method does. `bypass` is the
+#: user's deliberate opt-in; `ask` is the off switch for whoever would rather
+#: click the permission prompts themselves.
+AUTH_MODES = ("grant", "bypass", "ask")
+
+
+def authorization_mode(cfg: dict) -> str:
+    a = dict(cfg.get("agent") or {})
+    mode = str(a.get("unattended") or "grant").strip().lower()
+    if mode not in AUTH_MODES:
+        raise SystemExit(
+            f"agent.unattended is “{mode}” — known modes are "
+            f"{', '.join(AUTH_MODES)}.")
+    return mode
+
+
+def authorized_commands(cfg: dict, needs: list[str] | None) -> list[str]:
+    """What the agent may call: the pack manifest's list plus the project's.
+
+    Widen, never narrow. The manifest describes the method — if a project could
+    trim it, the result would be a run that quietly does half of what its pack
+    promises, and nobody could tell a missing finding from a missing permission.
+    """
+    a = dict(cfg.get("agent") or {})
+    out_: list[str] = []
+    for cmd in [*(needs or []), *(a.get("allow") or [])]:
+        cmd = str(cmd).strip()
+        if cmd and cmd not in out_:
+            out_.append(cmd)
+    return out_
+
+
 def launch_argv(cfg: dict, memory_dir: str, prompt: str,
                 provider: str | None = None,
                 model: str | None = None,
-                hire=None, unattended: bool = False) -> tuple[list[str], dict]:
+                hire=None, unattended: bool = False,
+                needs: list[str] | None = None) -> tuple[list[str], dict]:
     """What to finish the run with.
 
     `memory_dir` je to, co se agentovi povolí číst mimo pracovní adresář —
@@ -336,6 +370,26 @@ def launch_argv(cfg: dict, memory_dir: str, prompt: str,
     # hodnotou by mu padly do klína. Takhle za ním stojí rovnou `--`.
     extra = a.get("extraArgs") if name == configured else None
     argv += [str(x) for x in (extra if extra is not None else spec.get("extraArgs") or [])]
+
+    # Authorization: handing the agent a path without the right to use it is a
+    # bug, not caution. Without this block `claude -p` refuses every Write into
+    # RUN_DIR and every `agency triage` — and because `is_error` stays false on
+    # a denial, the run then claims it looked and found nothing. Seen on a real
+    # chain 2026-09-02: five refused `findings.json` writes, status
+    # `no-findings`.
+    #
+    # It sits here on purpose: `allowFlag` is variadic just like `--add-dir`, so
+    # another FLAG has to follow it. That flag is `dirFlag` on the line below —
+    # and where a provider has none, `promptSeparator` or the prompt itself
+    # would be soaked up into the rule list.
+    auth = providers.authorization(name, authorized_commands(cfg, needs),
+                                   authorization_mode(cfg))
+    if auth and not spec.get("dirFlag") and spec.get("allowFlag") in auth:
+        # Better no rules than rules that swallow the prompt. The grant
+        # (`--permission-mode …`) stays; the command list is dropped.
+        auth = auth[:auth.index(spec["allowFlag"])]
+    argv += auth
+
     # Paměť projektu leží mimo worktree, a právě tam se zapisuje findings.json.
     # Jeden adresář, ne seznam: `.agency/` je nadmnožina RUN_DIRu, bundlu
     # i upstream běhů, takže se nemusí řešit, kolik hodnot která variadická
@@ -353,7 +407,13 @@ def launch_argv(cfg: dict, memory_dir: str, prompt: str,
             argv.append(spec["promptSeparator"])
         argv.append(prompt)
     return argv, {"provider": name, "model": m, "bin": argv[0],
-                  "hire": hire.id if hire else None}
+                  "hire": hire.id if hire else None,
+                  # What the agent was authorized with. It belongs in the
+                  # record because "the run found nothing" and "the run was not
+                  # allowed to write" are otherwise indistinguishable
+                  # afterwards — which is exactly what happened three times on
+                  # 2026-09-02.
+                  "authorized": authorization_mode(cfg)}
 
 
 # The hire is in the path on purpose. Two specialists over one pull request is
@@ -426,6 +486,38 @@ def make_worktree(project: Project, cfg: dict, target: dict, hire=None,
     r = proc.git("fetch", "origin", f"pull/{target['pr']}/head", cwd=project.root)
     if not r.ok:
         # mergnutý PR se smazanou větví — hlavička bývá dosažitelná i tak
+        proc.git("fetch", "origin", target["headRefOid"], cwd=project.root)
+    ref = "FETCH_HEAD" if r.ok else target["headRefOid"]
+    r = proc.git("worktree", "add", "--detach", str(wt), ref, cwd=project.root)
+    if not r.ok:
+        raise SystemExit(f"The worktree could not be created:\n{r.stderr.strip()}")
+    return wt
+
+
+#: Where a team's shared checkout lives. Named after the chain, not after a
+#: hire: several members work in it and none of them owns it.
+CHAIN_WORKTREE = "../{repo}-chain-{n}-{chain}"
+
+
+def make_chain_worktree(project: Project, target: dict, chain_id: str) -> Path:
+    """One checkout for the whole team.
+
+    A chain used to let every member build its own, which meant the same pull
+    request checked out N times, the graph rebuilt N times, and — the part that
+    actually broke things — a workspace pack left sitting in the user's own
+    branch while the reviewer read the pull request.
+    """
+    wt = (project.root / CHAIN_WORKTREE.format(
+        repo=project.root.name, n=target.get("pr") or "x",
+        chain=chain_id[:10].lower())).resolve()
+    return _checkout(project, target, wt)
+
+
+def _checkout(project: Project, target: dict, wt: Path) -> Path:
+    r = proc.git("fetch", "origin", f"pull/{target['pr']}/head", cwd=project.root)
+    if not r.ok:
+        # A merged pull request whose branch is gone — its head is usually
+        # reachable anyway.
         proc.git("fetch", "origin", target["headRefOid"], cwd=project.root)
     ref = "FETCH_HEAD" if r.ok else target["headRefOid"]
     r = proc.git("worktree", "add", "--detach", str(wt), ref, cwd=project.root)
@@ -683,12 +775,14 @@ def start(project: Project, pack_ref: str, cfg: dict, target: dict,
                   "hire": hire.id} if hire else {},
         "project": {"slug": project.slug, "defaultBranch": project.default_branch},
         "target": {k: v for k, v in target.items() if not k.startswith("_")},
-        # Attended je vlastnost systému, ne úmysl: běh vzniká z interaktivního
-        # příkazu, takže credential je subscription. Unattended větev by musela
-        # mít API klíč s rozpočtem — a ta zatím neexistuje.
-        # Attended není přání, je to fakt o běhu — `cost.credential` z něj
-        # odvozuje, jestli se platí předplatným, nebo API klíčem. Člen řetězu
-        # běží bez možnosti do něj vstoupit, a tak se to i zapíše.
+        # Attendedness is a fact about the process, not a wish: it says whether
+        # anyone could step into this run at all, which is what decides whether
+        # a question the agent asks can ever be answered. A chain member runs
+        # with nobody able to enter it, and that is what gets written.
+        #
+        # It is NOT what decides who paid. `cost.credential` reads the runner's
+        # environment for that — `claude -p` is unattended and still runs on the
+        # subscription, so deriving payment from attendedness was simply wrong.
         "trigger": {"kind": trigger, "attended": attended},
         "startedAt": now(),
         "status": "running",
@@ -696,7 +790,93 @@ def start(project: Project, pack_ref: str, cfg: dict, target: dict,
     return run
 
 
-def attend(project: Project, run: Run, launch: list[str], cwd: Path) -> dict:
+#: How an agent's own run recognises itself. `cmd_run` and `cmd_chain` read
+#: these and refuse to start — a run is a leaf, not a node. Without them one
+#: sentence in a brief ("use the PO agent to find out…") is enough for an agent
+#: to start its own run: no terminal, no permissions, and a record claiming
+#: `attended: true`. Seen 2026-09-02.
+RUN_ENV = "AGENCY_RUN"
+CHAIN_ENV = "AGENCY_CHAIN"
+
+#: How to tell what paid for a run. A key present in the runner's environment
+#: is a fact; `trigger.attended` is the caller's intent, and `claude -p` proves
+#: it wrong — unattended and still running on the subscription.
+API_KEY_ENV = {"claude": ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"),
+               "codex": ("OPENAI_API_KEY",)}
+
+
+#: Blocks in a run record whose keys `run.v1` closes. An orchestrator carries
+#: more in the same dict than the record is allowed to hold, and a block that
+#: leaked through leaves an invalid document on disk — `chain.handoff` did
+#: exactly that before `record_block` existed.
+CLOSED_BLOCKS = {
+    "chain": ("id", "position", "of", "upstream"),
+}
+
+
+def repair_record(run: Run) -> list[str]:
+    """Drop what `run.v1` does not know, and say what was dropped.
+
+    For records written before the contract caught up with them. `agency
+    validate` reports them today; without this the only fix was hand-editing
+    JSON, which is how a record ends up wrong in a second way.
+    """
+    rec = run.record()
+    removed: list[str] = []
+    for name, allowed in CLOSED_BLOCKS.items():
+        block = rec.get(name)
+        if not isinstance(block, dict):
+            continue
+        for key in [k for k in block if k not in allowed]:
+            block.pop(key)
+            removed.append(f"{name}.{key}")
+    if removed:
+        run.save_record(rec)
+    return removed
+
+
+def refuse_nested(command: str) -> None:
+    """A run does not start runs.
+
+    Nothing stopped an agent from calling `agency run` from inside its own
+    session, and on 2026-09-02 one did: the brief said "use the PO agent to find
+    out whether…", so the reviewer obediently started `agency run po@claude
+    --wait` from its own tool. What came out was a run with no owner, no
+    terminal, no permission to write anything, and a record claiming
+    `attended: true`.
+
+    Who runs, and in what order, is a person's decision (`teams.md` §3.3). The
+    refusal is here rather than in the prompt because a prompt is advice and this
+    has to be a rule.
+    """
+    rid = os.environ.get(RUN_ENV)
+    if not rid:
+        return
+    chain_id = os.environ.get(CHAIN_ENV)
+    where = f" (chain {chain_id[:10]})" if chain_id else ""
+    raise SystemExit(
+        f"`{command}` was called from inside run {rid[:10]}{where}. A run does "
+        f"not start runs: write findings.json and handoff.md, and the chain "
+        f"continues on its own. If you meant to add a specialist, that is a "
+        f"decision for the person running `agency chain`, not for an agent in "
+        f"the middle of a step.")
+
+
+def credential(provider: str | None) -> str:
+    keys = API_KEY_ENV.get(provider or "", ())
+    return "api-key" if any(os.environ.get(k) for k in keys) else "subscription"
+
+
+def agent_env(run: Run, chain: dict | None = None) -> dict[str, str]:
+    env = {RUN_ENV: run.id}
+    if chain and chain.get("id"):
+        env[CHAIN_ENV] = str(chain["id"])
+    return env
+
+
+def attend(project: Project, run: Run, launch: list[str], cwd: Path,
+           dialect: str | None = None, on_event=None,
+           chain: dict | None = None, timeout: float | None = None) -> dict:
     """Spustit agenta, počkat na něj a zapsat, jak dopadl.
 
     Tohle je celý rozdíl mezi `--launch` a `--wait`: proces, který se nenahradí,
@@ -704,31 +884,81 @@ def attend(project: Project, run: Run, launch: list[str], cwd: Path) -> dict:
     dodnes říká „no pid to watch and no exit code to catch"; pro běh spuštěný
     touhle cestou to přestává platit.
 
+    Two paths, because the audience differs. **Attended** (`dialect=None`)
+    inherits the terminal: the agent is talking to a person and a pipe would
+    take that away. **Unattended** reads an event stream — nobody is talking to
+    it, so the core takes its output, translates it (`events.py`) and stores it.
+    Until 2026-09-02 only the first path existed, so a chain member was mute for
+    ten minutes and what mattered (five refused writes) survived only in the
+    provider's own transcript.
+
     Stav běhu tady nevzniká. O tom, jestli je běh `ok`, rozhoduje brána podle
     toho, co agent napsal — exit code je do toho rozhodnutí vstup, ne ono samo.
     """
+    env = agent_env(run, chain)
     started = time.monotonic()
-    code = proc.attend(launch, cwd=cwd)
+    collected: list = []
+
+    if dialect:
+        raw = (run.dir / "agent.jsonl").open("w", encoding="utf-8")
+
+        def line(text: str) -> None:
+            # The whole stream to disk, including lines the translator does
+            # not understand. Next time someone asks why a run wrote nothing,
+            # the answer should be in the run, not in `~/.claude/projects`.
+            raw.write(text + "\n")
+            for e in events.parse(dialect, text):
+                collected.append(e)
+                if on_event:
+                    on_event(e)
+        try:
+            code = proc.stream(launch, cwd=cwd, env=env, on_line=line, timeout=timeout)
+        finally:
+            raw.close()
+    else:
+        code = proc.attend(launch, cwd=cwd, env=env)
+
     seconds = round(time.monotonic() - started, 1)
+    summary = events.summarize(collected) if collected else {}
 
     rec = run.record()
     agent = {**(rec.get("agent") or {}), "exitCode": code}
+    if collected:
+        # The agent's last message, on disk. This is where two finished
+        # analyses vanished on 2026-09-02: the agent printed them to the
+        # terminal because it was not allowed to write them, and a scrollback
+        # is not a project's memory.
+        if summary.get("last"):
+            (run.dir / "agent.md").write_text(str(summary["last"]).rstrip() + "\n",
+                                              encoding="utf-8")
+        agent["sessionId"] = summary.get("session")
+        agent["turns"] = summary.get("turns")
+        denied = events.denial_count(collected)
+        agent["denied"] = {"count": denied, "tools": summary.get("denied") or []}
     rec["agent"] = agent
     # `cost.wallClockSeconds` je v `run.v1` od začátku a dodnes ho nic
     # nevyplňovalo — nebylo co měřit. Metriky ho čtou (`s per candidate`),
     # takže tenhle zápis nezapíná nic nového, jen dosud mrtvé číslo.
+    tokens = summary.get("tokens") or {}
     rec["cost"] = {
         **(rec.get("cost") or {}),
         "provider": agent.get("provider"),
         "model": agent.get("model"),
-        # Credential se odvozuje z triggeru, ne z domněnky: attended běh jede na
-        # předplatném, unattended by musel mít klíč s rozpočtem.
-        "credential": "subscription" if (rec.get("trigger") or {}).get("attended") else "api-key",
+        # From the runner's environment, not from `trigger.attended`. Deriving
+        # payment from attendedness meant claiming a chain member runs on an API
+        # key — while `claude -p` runs on the same subscription an interactive
+        # session does.
+        "credential": credential(agent.get("provider")),
         "wallClockSeconds": seconds,
+        **({"usd": summary["usd"]} if summary.get("usd") is not None else {}),
+        **({"inputTokens": tokens["input"]} if tokens.get("input") is not None else {}),
+        **({"outputTokens": tokens["output"]} if tokens.get("output") is not None else {}),
     }
     rec["finishedAt"] = now()
     run.save_record(rec)
-    return {"exitCode": code, "wallClockSeconds": seconds}
+    return {"exitCode": code, "wallClockSeconds": seconds,
+            "turns": summary.get("turns"), "usd": summary.get("usd"),
+            "denied": (agent.get("denied") or {}).get("count") or 0}
 
 
 def failed(run: Run, reason: str) -> dict:
@@ -808,8 +1038,16 @@ def write_context(run: Run, cfg: dict, target: dict, wt: Path,
                   files: list[str], skipped: int,
                   brief: dict | None = None, worktree_owned: bool = True,
                   hire=None, pack_name: str | None = None,
-                  provider: str | None = None, chain: dict | None = None) -> None:
-    from . import knowledge  # kruhový import: `knowledge` stojí na `runs`
+                  provider: str | None = None, chain: dict | None = None,
+                  in_worktree: bool | None = None) -> None:
+    from . import knowledge  # circular import: `knowledge` stands on `runs`
+
+    # Being IN a worktree and OWNING one stopped being the same thing when a
+    # chain started building one for all its members. The member works in a
+    # throwaway checkout it must not delete, so the two questions get two
+    # answers.
+    if in_worktree is None:
+        in_worktree = worktree_owned
 
     review = dict(cfg.get("review") or {})
     review.pop("skipPatterns", None)
@@ -824,17 +1062,20 @@ def write_context(run: Run, cfg: dict, target: dict, wt: Path,
         # Commitovaná paměť projektu. Absolutní schválně: bundle je součástí
         # repa, takže ve worktree na hlavičce PR existuje taky — jenže ve verzi
         # z toho commitu. Relativní cesta by specialistu poslala číst starší
-        # paměť, než jakou projekt má.
+        # memory than the project actually has.
         "knowledge": posix(run.project.agency_dir / knowledge.BUNDLE),
-        # Kam si pack zapisuje vlastní závěry. `null` pro běh ve worktree, a to
-        # ne z opatrnosti: worktree stojí na hlavičce PR a zápis by skončil
-        # v jednorázovém adresáři, který `agency run` po sobě smaže. Cesta přes
-        # RUN_DIR pro recenzenta přijde, až bude co aplikovat při `ingest`.
+        # Where the pack writes its own conclusions. `null` for a run inside a
+        # worktree, and not out of caution: the worktree stands on the pull
+        # request's head, so the write would land in a throwaway directory the
+        # tool deletes afterwards. A route through RUN_DIR for the reviewer
+        # arrives once there is something for `ingest` to apply.
         "pages": (posix(knowledge.pages_dir(run.project, pack_name, cfg))
-                  if pack_name and not worktree_owned else None),
+                  if pack_name and not in_worktree else None),
         "worktree": posix(wt),
-        # Kdo worktree vlastní. False = běh jede v pracovní kopii uživatele
-        # a nesmí do ní psát nic, co po sobě neuklidí.
+        # Who owns the worktree — that is, who cleans it up. False means either
+        # the run works in the user's own working copy (write nothing you do not
+        # clean up) or a chain built this checkout for several members and will
+        # remove it when they are all done.
         "worktreeOwned": worktree_owned,
         "target": {k: v for k, v in target.items() if not k.startswith("_")},
         "files": files,

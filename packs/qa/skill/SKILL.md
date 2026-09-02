@@ -256,6 +256,18 @@ Specy zůstávají v běhovém adresáři a commitují se s ním — jsou to rep
 
 Paměť patří **projektu**, ne packu. Zapiš ji a nech ji tam; git ceremonii kolem ní nedělej.
 
+
+## 8b. Když běžíš v řetězu
+
+`context.json` → `chain` je u samostatného běhu `null`. Když není, jsi jeden člen týmu.
+
+**Nespouštíš další běhy** — žádné `agency run`, žádné `agency chain`; jádro to odmítne. Zmiňuje-li
+zadání jiného specialistu, je ta věta pro řetěz, ne pro tebe.
+
+**Když za tebou někdo stojí** (`chain.position < chain.of`), napiš `<RUN_DIR>/handoff.md`: co se
+nepodařilo reprodukovat a proč, co jsi nechal za sebou v aplikaci, které nálezy stojí na domněnce
+o zamýšleném chování — a tu domněnku má potvrdit on, ne ty. Celý soubor jde do jeho promptu.
+
 ## 9. Úklid
 
 Aplikaci nech ve stavu, ve kterém jsi ji našel: odhlas se, zavři prohlížeč, testovací data, která šla bezpečně vrátit, vrať. Když jsi něco nechal za sebou (nedokončená rezervace, testovací účet), napiš to na konec `plan.md` — jinak to příští sezení najde jako nález.

@@ -237,7 +237,8 @@ def test_bez_hire_rozhoduje_konfigurace(project):
     cfg = {"agent": {"provider": "claude", "model": "sonnet", "extraArgs": ["--x"]}}
     argv, info = runs.launch_argv(cfg, "/run", "P")
 
-    assert info == {"provider": "claude", "model": "sonnet", "bin": "claude", "hire": None}
+    assert info == {"provider": "claude", "model": "sonnet", "bin": "claude",
+                    "hire": None, "authorized": "grant"}
     assert "--add-dir" in argv and "/run" in argv and "--x" in argv
     assert argv[-1] == "P"
 

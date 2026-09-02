@@ -287,8 +287,13 @@ the next specialist, not a recap for the record.
   exactly the ones the next member can confirm or kill,
 - where you are unsure, and what you would not trust without a second pair of eyes.
 
-Keep it short: the first 40 lines go into the next member's prompt verbatim, the rest stays in the
-file. Do not repeat the findings — they arrive as data. Write what the data does not carry.
+Keep it short because it is read, not because it is truncated — it goes into the next member's
+prompt whole, and its path is there too. Do not repeat the findings; they arrive as data. Write what
+the data does not carry.
+
+**You cannot start another run.** No `agency run`, no `agency chain`. If the answer needs a
+specialist you are not, say so in the handoff and name which one — assembling a team is the person's
+decision, not yours.
 
 ## 9. What you do not touch
 

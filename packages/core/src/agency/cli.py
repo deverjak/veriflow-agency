@@ -690,6 +690,9 @@ def cmd_run(args, chain: dict | None = None) -> int:
             "--wait and --json do not go together: the agent writes to this same "
             "stdout, so nothing could promise the output is a single JSON document. "
             "Prepare the run with --json and close it with `agency ingest`.")
+    # A run is a leaf. An agent that starts its own run produces one nobody
+    # owns — no terminal, no authorization, and a record that lies about both.
+    runs.refuse_nested("agency run")
     project = _project(args)
     # The positional argument names a WORKER, or a method when the project has
     # only one worker for it. Resolving it here is what lets two providers be
@@ -729,7 +732,22 @@ def cmd_run(args, chain: dict | None = None) -> int:
             f"brief.default in {posix(project.pack_config_path(pack.name))}.",
             "no-brief")
 
-    if policy["target"] == "workspace":
+    shared_target = (chain or {}).get("target")
+    if shared_target is not None:
+        # The chain resolved the target once, before its first step, and every
+        # member gets that same one. Until 2026-09-02 each member resolved its
+        # own, and because `--pr` only reaches a pack whose target is a pull
+        # request, a `review-graph → po` chain over PR #479 had the product owner
+        # judging whatever branch happened to be checked out — PR #474, as it
+        # turned out. Two members, two different pull requests, one chain id.
+        target = dict(shared_target)
+        if target["kind"] == "workspace":
+            out.done(f"{target['ref']} @ {target['headRefOid'][:8]}  "
+                     f"{out.dim('the chain’s target')}")
+        else:
+            out.done(f"PR #{target['pr']} — {(target.get('title') or '')[:58]}  "
+                     f"{out.dim('the chain’s target')}")
+    elif policy["target"] == "workspace":
         out.step("resolving the workspace")
         target = runs.resolve_workspace_target(project, getattr(args, "since", None))
         out.done(f"{target['ref']} @ {target['headRefOid'][:8]}"
@@ -755,27 +773,50 @@ def cmd_run(args, chain: dict | None = None) -> int:
     files = [f for f in all_files if not runs._skip(f, skip)]
     skipped = len(all_files) - len(files)
 
+    # How the file list reads depends on what the PACK does with it, not on what
+    # kind of target the chain handed over. A product owner given a pull request
+    # still treats the changes as a place to look first.
     if policy["target"] == "workspace":
-        # Prázdný seznam změn běh nezastaví: QA zkouší aplikaci, ne diff.
-        # Změny jsou vodítko, kde hledat nejdřív, ne hranice běhu.
+        # An empty change list does not stop the run: QA tries the application,
+        # not the diff. Changes are a hint about where to look first, not the
+        # boundary of the run.
         out.done(f"{len(files)} changed files  {out.dim('— where to look first, not a boundary')}")
     else:
         out.done(f"{len(files)} files to review  {out.dim(f'({skipped} filtered out)')}")
         if not files:
             return refuse("No file left after filtering — there is nothing to review.", "no-files")
 
-    # Člen řetězu běží neattended: orchestrátor čeká na jeho konec, takže do něj
-    # nikdo vstupovat nemůže. Samostatný běh zůstává attended i s `--wait`.
+    # A chain member runs unattended: the orchestrator is waiting for it to end,
+    # so nobody can step into it. A standalone run stays attended even with
+    # `--wait`.
     run = runs.start(project, pack.ref, cfg, target, hire=hire,
                      attended=chain is None)
     out.step(f"run {run.id}")
 
     wt = project.root
     wt_owned = bool(policy["worktree"])
+    # A worktree the CHAIN built. The member works in it but does not own it:
+    # removing it would pull the ground out from under the members still to
+    # come, and each member building its own would mean the same pull request
+    # checked out N times and the graph rebuilt N times.
+    shared_wt = (chain or {}).get("worktree")
     carried: list[str] = []
     ginfo: dict = {}
     try:
-        if wt_owned:
+        if shared_wt:
+            wt = Path(shared_wt)
+            # `in_worktree` for the method hint and for `context.json`: the
+            # member IS in a worktree, it just is not the one who cleans it up.
+            in_worktree = True
+            wt_owned = False
+            out.done(f"working in the chain’s worktree  {out.dim(posix(wt))}")
+
+            out.step("copying the pack method into the worktree")
+            carried = runs.materialize_pack(project, pack, wt)
+            out.done(f"{len(carried)} files" if carried
+                     else "the pack installs nothing into the project")
+        elif wt_owned:
+            in_worktree = True
             # The path is claimed in the record before the directory exists, so
             # a second specialist starting a moment later sees it taken instead
             # of force-deleting a review in progress.
@@ -792,14 +833,16 @@ def cmd_run(args, chain: dict | None = None) -> int:
             out.done(f"{len(carried)} files" if carried
                      else "the pack installs nothing into the project")
         else:
-            # Bez worktree, vědomě: aplikace, kterou pack zkouší, běží nad
-            # pracovní kopií — s nainstalovanými závislostmi a s .env.
-            # Zdrojový kód je pro takový běh ke ČTENÍ, zapisuje se do RUN_DIR.
+            in_worktree = False
+            # No worktree, deliberately: the application a pack is trying runs
+            # over the working copy — with its dependencies installed and its
+            # .env. For such a run the source is to be READ; writes go to
+            # RUN_DIR.
             out.done(f"working in the project itself  {out.dim(posix(wt))}")
 
-        # Na co se tenhle běh ptá. Paměti projektu bývá víc, než kolik se vejde
-        # do okna, a bez dotazu se ořezává podle stáří — tedy zapomíná to
-        # důležité ve prospěch toho čerstvého.
+        # What this run is asking about. A project's memory tends to be larger
+        # than the window, and without a query it gets trimmed by age — which
+        # forgets what matters in favour of what is recent.
         query = knowledge.query_for(pack.name, brief, target)
 
         if policy["graph"]:
@@ -830,8 +873,9 @@ def cmd_run(args, chain: dict | None = None) -> int:
                          f"{queue.get('draftItems', 0)} drafts · "
                          f"{queue.get('roadmapFiles', 0)} roadmap files")
 
-        # Řetěz: blok do záznamu a plný upstream do evidence. Pořadí je dané —
-        # `write_context` na oba odkazuje, takže musí existovat dřív než ono.
+        # The chain: its block into the record and the full upstream into
+        # evidence. The order is fixed — `write_context` points at both, so both
+        # have to exist before it runs.
         upstream_payload = None
         if chain:
             rec = run.record()
@@ -845,14 +889,15 @@ def cmd_run(args, chain: dict | None = None) -> int:
 
         runs.write_context(run, cfg, target, wt, files, skipped,
                            brief=brief, worktree_owned=wt_owned, hire=hire,
+                           in_worktree=in_worktree,
                            pack_name=pack.name,
                            provider=getattr(args, "provider", None), chain=chain)
 
         rec = run.record()
-        # Paměť není grafový signál. `graph` v run.v1 má zavřený seznam klíčů a
-        # `knownFindings` mezi ně nepatří — slité dohromady dělaly ze záznamu
-        # neplatný dokument, na který se nikdy nikdo nezeptal: `agency validate`
-        # kontroluje findings.v1, run.v1 nikdo.
+        # Memory is not a graph signal. `graph` has a closed key list in run.v1
+        # and `knownFindings` is not among them — merged together they made every
+        # record an invalid document nobody ever asked about: `agency validate`
+        # checked finding.v1, and run.v1 nobody.
         memory = {k: stats.pop(k) for k in runs.MEMORY_STATS if k in stats}
         if ginfo:
             rec["graph"] = {**ginfo, **stats}
@@ -872,26 +917,29 @@ def cmd_run(args, chain: dict | None = None) -> int:
         run.save_record(rec)
         raise
 
-    # Kde se metoda packu vezme, ví `runs.method_hint` — ve worktree je jen
-    # díky materialize_pack, v projektu tam, kam ji položila instalace.
+    # Where a pack's method comes from is `runs.method_hint`'s business — inside
+    # a worktree it is there only thanks to materialize_pack, in the project it
+    # is wherever the installation put it.
     prompt = (
-        f"{runs.method_hint(pack, project, carried, in_worktree=wt_owned)} "
+        f"{runs.method_hint(pack, project, carried, in_worktree=in_worktree)} "
         f"RUN_DIR={posix(run.dir)} — start from its context.json. "
         f"The required output is RUN_DIR/findings.json following finding.v1."
     )
     if chain:
-        # Vykopnutí člena řetězu vlastní jádro — šablona je testovatelná a celá
-        # skončí v `prompt.txt`, takže se dá číst, proč člen svou roli pochopil
-        # nebo nepochopil. Obsahové věty v ní ale psal upstream agent.
+        # The core owns the kick-off of a chain member — the template is
+        # testable and ends up whole in `prompt.txt`, so it is readable why a
+        # member understood its role or did not. The sentences with content in
+        # it, though, were written by the upstream agent.
         member = chains.Member(pack.name, pack.name, hire)
         prompt = chains.step_prompt(
             prompt, member, chain["position"], chain["of"],
             (upstream_payload or {}).get("runs") or [],
             (upstream_payload or {}).get("counts") or {"findings": 0, "undecided": 0},
-            chain.get("handoff"))
+            chain.get("handoff"), chain.get("handoffPath"))
     if brief["focus"]:
-        # Zadání jde i do spouštěcího příkazu, ne jen do context.json: uživatel
-        # má na obrazovce vidět, s čím agenta pouští.
+        # The brief goes into the launch command too, not only into
+        # context.json: the user should see on screen what the agent is being
+        # started with.
         shared = chain is not None and not chain.get("ownBrief")
         label = ("Brief for the chain as a whole — parts of it may be addressed to other "
                  "members; do only your part and leave theirs to them"
@@ -903,7 +951,11 @@ def cmd_run(args, chain: dict | None = None) -> int:
         # jen jeden z nich znamená ptát se ho na svolení k cestám, které jsme
         # mu sami dali.
         cfg, posix(project.agency_dir), prompt, hire=hire, unattended=chain is not None,
-        provider=getattr(args, "provider", None), model=getattr(args, "model", None))
+        provider=getattr(args, "provider", None), model=getattr(args, "model", None),
+        # Co metoda volá, ví pack. Bez tohohle seznamu je agent v neattended
+        # režimu němý: `agency triage` ani `code-review-graph query` mu systém
+        # nepovolí a nálezy skončí ve scrollbacku terminálu.
+        needs=policy.get("needs"))
     rec = run.record()
     rec["agent"] = agent_info
     run.save_record(rec)
@@ -945,7 +997,13 @@ def cmd_run(args, chain: dict | None = None) -> int:
     out.say()
 
     if args.wait:
-        return _wait_for_agent(project, run, launch, wt, wt_owned)
+        # A chain member is read as a stream; a standalone run keeps the
+        # terminal. The difference is not a preference — it is whether anyone
+        # can answer a question the agent asks.
+        dialect = (providers.spec(agent_info["provider"]).get("streamDialect")
+                   if chain else None)
+        return _wait_for_agent(project, run, launch, wt, wt_owned,
+                               dialect=dialect, chain=chain)
 
     if args.launch:
         os.chdir(wt)
@@ -967,14 +1025,16 @@ def cmd_run(args, chain: dict | None = None) -> int:
 
 
 def cmd_chain(args) -> int:
-    """`agency chain legal po` — specialisté za sebou, s předáním mezi nimi.
+    """`agency chain legal po` — specialists in sequence, handing over between them.
 
-    Orchestrace je smyčka nad `cmd_run`, ne druhá cesta ke spuštění běhu. Je to
-    záměr: kdyby chain běh připravoval sám, měl by projekt dvě místa, kde vzniká
-    worktree, evidence a run record — a to druhé by tiše zastarávalo. Chain umí
-    jen tři věci navíc, které samostatný běh nemá: složit členy, předat výstup
-    dál a zastavit se, když někdo neuspěje.
+    The orchestration is a loop over `cmd_run`, not a second way to start a run.
+    That is deliberate: if the chain prepared runs itself, the project would have
+    two places where a worktree, evidence and a run record come into being, and
+    the second would quietly rot. A chain adds exactly three things a standalone
+    run does not have: assembling the members, passing the output on, and
+    stopping when one of them fails.
     """
+    runs.refuse_nested("agency chain")
     project = _project(args)
     members = chains.resolve(project, args.members)
 
@@ -985,53 +1045,104 @@ def cmd_chain(args) -> int:
         raise SystemExit(mixed)
 
     for m in members:
-        # Radši teď než po prvním doběhnutém běhu: uživatel, kterému chain spadne
-        # na překlepu ve třetím jméně, už zaplatil dva běhy.
+        # Better now than after the first run finishes: a user whose chain dies
+        # on a typo in the third name has already paid for two runs.
         packs.load(m.pack)
 
-    # Runner bez neattended režimu spustí interaktivní sezení, které po
-    # dokončení úkolu nekončí — orchestrátor by na něm čekal navždycky. Radši
-    # o tom vědět teď než po deseti minutách ticha.
+    # A runner with no unattended mode opens an interactive session that does
+    # not end when the task is done — the orchestrator would wait on it forever.
+    # Better to know now than after ten minutes of silence.
+    #
+    # Authorization is the same class of problem and was the more expensive one:
+    # an agent that may not write finishes cleanly, writes nothing, and the run
+    # looks like "found nothing". Both are checked before anything is paid for.
     for m in members:
         prov = m.hire.provider if m.hire else None
-        if prov and not providers.spec(prov).get("unattendedPrefix"):
+        if not prov:
+            continue
+        if not providers.spec(prov).get("unattendedPrefix"):
             out.fail(f"{prov} has no unattended mode registered — {m.label} will open an "
                      f"interactive session and the chain will wait for you to close it. "
                      f"`agency providers --add {prov} --unattended-prefix <flag>`")
+        elif not providers.authorizes(prov):
+            out.fail(f"{prov} has no way to authorize an unattended agent registered — "
+                     f"{m.label} will be refused every write it attempts and the run will "
+                     f"end looking like it found nothing. "
+                     f"`agency providers --add {prov} --edits-grant <flag>`")
 
     focus = chains.per_member(members, getattr(args, "focus", None) or [])
     chain_id = ulid()
     out.say(f"\n  {out.bold('chain')}  "
             f"{out.dim(' → '.join(m.label for m in members))}  ·  {chain_id[:10]}\n")
 
+    # The target belongs to the chain, not to its members. `--pr N` used to
+    # reach only a pack whose own target is a pull request; every workspace pack
+    # in the same chain silently judged whatever branch was checked out. On
+    # 2026-09-02 that meant a chain launched over PR #479 whose product owner
+    # reviewed PR #474 — and nothing in the output said so.
+    target = chains.target(project, getattr(args, "pr", None),
+                           getattr(args, "latest_merged", False),
+                           getattr(args, "since", None))
+    if target["kind"] == "workspace":
+        out.done(f"target: {target['ref']} @ {target['headRefOid'][:8]}"
+                 + (f"  {out.dim('uncommitted changes included')}" if target.get("dirty") else ""))
+    else:
+        kind = "merged (retrospective audit)" if target["kind"] == "merged-pull-request" else "open"
+        out.done(f"target: PR #{target['pr']} — {(target.get('title') or '')[:52]}  {out.dim(kind)}")
+    out.say()
+
+    # One checkout for the whole team, when any member wants one. Each member
+    # building its own meant the same pull request checked out N times and the
+    # graph rebuilt N times — and, worse, a workspace pack sitting in the user's
+    # own branch while the reviewer read the pull request.
+    wants_worktree = any(packs.load(m.pack).run_policy["worktree"] for m in members)
+    chain_wt = None
+    if wants_worktree and target.get("pr"):
+        out.step("building one worktree for the team")
+        chain_wt = runs.make_chain_worktree(project, target, chain_id)
+        out.done(posix(chain_wt))
+
     done: list[str] = []
+    failed_at: int | None = None
     for position, member in enumerate(members, start=1):
-        # Přepínače chainu platí pro každý krok stejně; `members` a `fn` jsou
-        # věci orchestrátoru a členu by nedávaly smysl. `--json` je vypnuté
-        # natvrdo: `--wait` píše do téhož stdout jako agent.
+        # The chain's own flags apply to every step alike; `members` and `fn`
+        # belong to the orchestrator and would mean nothing to a member.
+        # `--json` is hard-off: `--wait` writes into the same stdout the agent
+        # does.
         carried = {k: v for k, v in vars(args).items()
                    if k not in ("members", "fn", "focus")}
         step = argparse.Namespace(**{**carried, "pack": member.ref,
                                      "wait": True, "launch": False, "json": False,
-                                     # Zadání per člen vyhrává nad společným.
-                                     # Bez toho čte recenzent instrukce psané
-                                     # product ownerovi a poslušně na ně
-                                     # odpovídá — viděno na prvním reálném
-                                     # řetězu.
+                                     # A per-member brief beats a shared one.
+                                     # Without it the reviewer reads
+                                     # instructions written for the product
+                                     # owner and dutifully answers them — seen
+                                     # on the first real chain.
                                      "prompt": focus.get(member.label) or carried.get("prompt")})
-        # Dostal tenhle člen zadání psané JEMU, nebo společné pro celý řetěz?
-        # Rozdíl musí být v promptu vidět: společná věta typu „udělej review
-        # a pomocí PO agenta zjisti…" mluví ke dvěma lidem a recenzent na tu
-        # druhou půlku poslušně odpoví, když mu nikdo neřekne, že není jeho.
+        # Did this member get a brief written FOR IT, or one shared by the whole
+        # chain? The difference has to show in the prompt: a shared sentence like
+        # "do a review and use the PO agent to find out…" is addressed to two
+        # people, and the reviewer will dutifully answer the second half unless
+        # somebody tells it that half is not its own.
         own = member.label in focus
         block = chains.block(chain_id, position, len(members), list(done))
         block["ownBrief"] = own
+        block["target"] = chains.member_target(target, {})
+        # A member that wants a worktree gets the chain's. One that does not
+        # (qa needs the running application, with its dependencies and .env)
+        # stays in the working copy — the target in its record is still the
+        # chain's, so what it examined remains legible.
+        if chain_wt and packs.load(member.pack).run_policy["worktree"]:
+            block["worktree"] = posix(chain_wt)
 
         if done:
-            # Vzkaz předchůdce jde do promptu jako jeho slova, ne jako převyprávění.
+            # The predecessor's message goes into the prompt as its own words,
+            # not as a retelling.
             previous = chains.find_member(project, chain_id, position - 1)
-            text, source = chains.handoff_text(previous) if previous else (None, None)
+            text, source, where = (chains.handoff_text(previous) if previous
+                                   else (None, None, None))
             block["handoff"] = text
+            block["handoffPath"] = where
             if source:
                 out.say(f"  {out.dim('handing over ' + source + ' from ' + members[position - 2].label)}")
 
@@ -1043,22 +1154,45 @@ def cmd_chain(args) -> int:
             done.append(run.id)
 
         if code != 0:
-            # Pokračovat potichu by znamenalo, že další člen soudí nálezy, které
-            # nevznikly. Co doběhlo, je zapsané a dokončit to jde ručně.
+            # Going on quietly would mean the next member judging findings that
+            # never came into being. What did finish is recorded, and finishing
+            # the rest by hand is possible.
             out.say()
             out.fail(f"the chain stops at step {position}/{len(members)} ({member.label})")
-            _chain_report(chain_id, members, done, position)
-            return code
+            failed_at = position
+            break
 
-    out.say()
-    out.done(f"chain finished — {len(done)} runs  {out.dim(chain_id[:10])}")
-    _chain_report(chain_id, members, done, len(members))
-    return 0
+    reached = failed_at or len(members)
+    if failed_at is None:
+        out.say()
+        out.done(f"chain finished — {len(done)} runs  {out.dim(chain_id[:10])}")
+
+    if chain_wt:
+        if failed_at is None and not getattr(args, "keep_worktree", False):
+            # The chain owns the checkout, so it is the chain that removes it.
+            # A stopped chain keeps it: the worktree is the only place showing
+            # what the member that failed was working on.
+            runs.remove_worktree(project, chain_wt)
+            out.say(f"  {out.dim('worktree removed')}")
+        else:
+            out.say(f"  {out.dim('worktree kept:')} {posix(chain_wt)}")
+
+    _chain_report(chain_id, members, done, reached, project)
+    return 1 if failed_at else 0
 
 
-def _chain_report(chain_id: str, members, done: list[str], reached: int) -> None:
-    """Co doběhlo a čím to stojí. Tiskne se po dokončení i po zastavení —
-    přerušený řetěz je pořád výsledek, jen kratší."""
+def _chain_report(chain_id: str, members, done: list[str], reached: int,
+                  project=None) -> None:
+    """What finished, what it stands on, and what it cost.
+
+    Printed after completion and after a stop alike — an interrupted chain is
+    still a result, only a shorter one.
+
+    It used to print two ids and nothing else, which is why a chain that
+    produced no findings at all still read as a success. What a member left
+    behind, what it was refused and what it cost are the three things that tell
+    "found nothing" from "was not allowed to write anything".
+    """
     out.say()
     for i, member in enumerate(members, start=1):
         run_id = done[i - 1] if i <= len(done) else None
@@ -1067,33 +1201,82 @@ def _chain_report(chain_id: str, members, done: list[str], reached: int) -> None
         if i == reached and run_id and reached < len(members):
             state += out.dim("  (stopped here)")
         out.say(f"  {mark} {i}/{len(members)}  {member.label:<24} {state}")
+
+        run = runs.find_run(project, run_id) if (project and run_id) else None
+        if not run:
+            continue
+        rec = run.record()
+        agent, cost = rec.get("agent") or {}, rec.get("cost") or {}
+        bits = [f"{rec.get('status', '?')}"]
+        if rec.get("counts"):
+            bits.append(f"{rec['counts'].get('kept', 0)} kept")
+        if agent.get("turns"):
+            bits.append(f"{agent['turns']} turns")
+        if cost.get("wallClockSeconds"):
+            bits.append(_duration(cost["wallClockSeconds"]))
+        if cost.get("usd"):
+            bits.append(f"${cost['usd']:.2f}")
+        denied = (agent.get("denied") or {}).get("count") or 0
+        left = [n for n in ("summary.md", "handoff.md", "agent.md")
+                if (run.dir / n).is_file()]
+        line = f"      {out.dim(' · '.join(bits))}"
+        if denied:
+            line += f"  {out.err(f'{denied} denied')}"
+        if left:
+            line += f"  {out.dim('· ' + ', '.join(left))}"
+        out.say(line)
     out.say()
     if done:
         out.say(f"  {out.dim('Triage queue:')}  agency triage --list")
 
 
 def _duration(seconds: float) -> str:
-    """Doba běhu tak, jak ji čte člověk."""
+    """A run's duration the way a person reads it."""
     s = int(round(seconds))
     return f"{s}s" if s < 60 else f"{s // 60}m {s % 60:02d}s"
 
 
-def _wait_for_agent(project, run, launch: list[str], wt: Path, wt_owned: bool) -> int:
-    """`--wait`: spustit agenta, počkat na něj a pustit bránu rovnou.
+def _progress(event) -> None:
+    """One line per thing the agent does.
 
-    Attended charakter se nemění — agent píše do tohohle terminálu a dá se do
-    něj vstoupit. Mění se, kdo drží konec: dosud musel uživatel po doběhnutí
-    napsat `agency ingest` a když na to zapomněl, zůstal běh navždycky
-    `running` — bez nálezů, bez čísel a s worktree navíc.
+    This is what a chain member used to be missing entirely. `launching claude…`
+    followed by twelve minutes of silence is indistinguishable from a hung
+    process — the user said exactly that ("it's stuck or non-interactive") while
+    the agent was in fact working and being refused one write after another.
+
+    The agent's prose is deliberately NOT printed as it arrives. It would drown
+    the chain's own output, and it has a better home: `RUN_DIR/agent.md`.
+    """
+    if event.kind == "tool":
+        label = event.tool or "?"
+        out.say(f"  {out.dim('·')} {label:<12} {out.dim(event.detail or '')}")
+    elif event.kind == "denied":
+        out.say(f"  {out.err('×')} {(event.tool or '?'):<12} "
+                f"{out.dim((event.detail or '') + '  — denied')}")
+
+
+def _wait_for_agent(project, run, launch: list[str], wt: Path, wt_owned: bool,
+                    dialect: str | None = None, chain: dict | None = None) -> int:
+    """`--wait`: start the agent, wait for it, and run the gate right away.
+
+    An attended run keeps its character — the agent writes into this terminal
+    and can be stepped into. What changed is who holds the end: the user used to
+    have to type `agency ingest` afterwards, and forgetting left the run
+    `running` forever — no findings, no numbers, and a worktree too.
+
+    A chain member goes the other way (`dialect`): nobody can step into it, so
+    its output is read as a stream and turned into progress instead.
     """
     out.say(f"  {out.bold('launching ' + launch[0] + '…')}  "
             f"{out.dim('Ctrl-C stops the run')}\n")
     try:
-        result = runs.attend(project, run, launch, wt)
+        result = runs.attend(project, run, launch, wt,
+                             dialect=dialect, chain=chain,
+                             on_event=_progress if dialect else None)
     except KeyboardInterrupt:
-        # Přerušení není pád. Běh se zavírá jako opuštěný — a protože tenhle
-        # proces na rozdíl od `--launch` pořád žije, uklidí i worktree, na který
-        # by jinak musel uživatel přijít sám.
+        # An interruption is not a crash. The run closes as abandoned — and
+        # because this process, unlike `--launch`, is still alive, it also
+        # cleans up the worktree the user would otherwise have to find alone.
         info = runs.abandon(project, run, "stopped with Ctrl-C while the agent was running")
         out.say()
         out.note(f"stopped — {run.id[:10]} closed as abandoned"
@@ -1103,25 +1286,53 @@ def _wait_for_agent(project, run, launch: list[str], wt: Path, wt_owned: bool) -
     code = result["exitCode"]
     out.say()
     out.say(f"  {out.dim('agent finished')}  exit {code}  {out.dim('·')}  "
-            f"{_duration(result['wallClockSeconds'])}")
+            f"{_duration(result['wallClockSeconds'])}"
+            + (f"  {out.dim('·')}  {result['turns']} turns" if result.get("turns") else "")
+            + (f"  {out.dim('·')}  ${result['usd']:.2f}" if result.get("usd") else ""))
 
     # Co agent stihl zapsat, projde branou i po nenulovém konci. Zahodit hotové
     # nálezy kvůli chybě na konci sezení by byla ztráta, ne přísnost.
-    if code == 0 or run.findings_path.is_file() or (run.dir / "findings.raw.json").is_file():
-        _ingest_report(run, ingest.ingest(project, run))
+    gated = ingest.ingest(project, run)
+    _ingest_report(run, gated)
+
+    denied = (run.record().get("agent") or {}).get("denied") or {}
 
     if code != 0:
-        # Až po bráně: ta by z běhu bez findings.json udělala `no-findings`,
-        # což je tvrzení „díval se a nic nenašel“. Exit code říká něco jiného.
+        # A non-zero exit outranks an empty output, because it EXPLAINS it: an
+        # agent that crashed wrote nothing for a reason already named. Whatever
+        # it did manage to write went through the gate above as always — the
+        # record just must not look successful.
         runs.failed(run, f"the agent exited with {code}")
         out.fail(f"the agent exited with {code} — the run is recorded as failed")
         if proc.which(launch[0]) is None:
             out.say(f"  {out.dim(launch[0] + ' is not on PATH; `agency doctor` checks that up front')}")
         out.say()
+    elif gated.get("noOutput"):
+        # Exit 0 and still nothing. Until 2026-09-02 the gate turned this into
+        # `no-findings` — the claim "it looked and found nothing" about an agent
+        # the system had refused every write. The chain then built on top of it.
+        runs.failed(run, "the agent wrote no findings.json")
+        out.fail("nothing was written — the run is recorded as failed, not as “no findings”")
+        out.say()
+
+    if denied.get("count"):
+        # Printed whichever way the run ended: a refused call means the run
+        # measured its own authorization, not the pack's method, and comparing
+        # it with another run would be comparing different things.
+        out.say(f"  {out.err(str(denied['count']) + ' tool calls were denied')}"
+                f"  {out.dim(', '.join(denied.get('tools') or []))}")
+        out.say(f"  {out.dim('The pack needs those — widen agent.allow, or check agent.unattended, in its configuration.')}")
+        out.say()
+    elif gated.get("noOutput") and code == 0:
+        out.say(f"  {out.dim('The agent finished cleanly and still wrote nothing — RUN_DIR/agent.md has what it said.')}")
+        out.say()
 
     if wt_owned:
         print(f"  {out.dim('Cleanup:')}  agency cleanup --run {run.id[:8]}\n")
-    return 0 if code == 0 else 1
+    # Prázdný běh je pro řetěz totéž co spadlý: další člen by soudil nálezy,
+    # které nevznikly. Návratový kód to musí říct, jinak se `cmd_chain` nemá
+    # o co zastavit.
+    return 0 if (code == 0 and not gated.get("noOutput")) else 1
 
 
 def cmd_cleanup(args) -> int:
@@ -1204,6 +1415,16 @@ def cmd_validate(args) -> int:
     if not run:
         raise SystemExit("No run found.")
 
+    if getattr(args, "fix", False):
+        # Records already on disk that no longer match their own contract.
+        # `validate` is otherwise a read, and stays one — this is an explicit
+        # request, not a repair that happens behind the user's back.
+        removed = runs.repair_record(run)
+        if removed:
+            out.done(f"removed keys run.v1 does not know: {', '.join(removed)}")
+        else:
+            out.note("nothing to repair in the record")
+
     findings = run.findings()
     errors: list[dict] = []
     record_errors: list[dict] = []
@@ -1215,9 +1436,10 @@ def cmd_validate(args) -> int:
             for e in v.iter_errors(f):
                 errors.append({"index": i, "id": f.get("id"),
                                "path": "/".join(str(p) for p in e.path), "message": e.message})
-        # A záznam běhu proti run.v1. Do 1. 9. 2026 ho nekontroloval nikdo —
-        # a stihl se se svým vlastním kontraktem rozejít na třech místech,
-        # aniž by to cokoli poznalo. Kontrakt, který se neověřuje, není kontrakt.
+        # And the run record against run.v1. Until 2026-09-01 nobody checked it,
+        # and it had managed to drift from its own contract in three places
+        # without anything noticing. A contract that is not verified is not a
+        # contract.
         rv = jsonschema.Draft202012Validator(read_json(bundled("schemas", "run.v1.json")))
         for e in rv.iter_errors(run.record()):
             record_errors.append({"path": "/".join(str(p) for p in e.path) or "(root)",
@@ -1229,8 +1451,8 @@ def cmd_validate(args) -> int:
                 if key not in f:
                     errors.append({"index": i, "id": f.get("id"), "path": key, "message": "missing"})
 
-    # Kotva se ověřuje proti pracovní kopii — nález, který nejde umístit, je
-    # nález, který za měsíc nikdo nedohledá.
+    # An anchor is checked against the working copy — a finding that cannot be
+    # placed is a finding nobody will find again in a month.
     resolved = []
     for f in findings:
         a = f.get("anchor") or {}
@@ -1241,9 +1463,10 @@ def cmd_validate(args) -> int:
                          "resolvedLine": r.line, "via": r.via, "note": r.note,
                          "drift": anchor.drift(project.root, a)})
 
-    # `validate` je ČTENÍ. Stav běhu mění `ingest` — kdyby ho psaly obě cesty,
-    # nešlo by z run recordu poznat, jestli nálezy prošly bránou, nebo jestli
-    # je někdo jen zkontroloval.
+    # `validate` is a READ. The run's status is changed by `ingest` — if both
+    # paths wrote it, there would be no telling from the record whether the
+    # findings went through the gate or whether somebody merely checked them.
+    # (`--fix` above is the one exception, and it is asked for explicitly.)
     data = {"run": run.id, "findings": len(findings), "errors": errors,
             "recordErrors": record_errors, "anchors": resolved}
 
@@ -1319,6 +1542,10 @@ def _emit_json(data: dict) -> int:
 def _ingest_report(run, data: dict) -> None:
     """Výstup brány. Tiskne ho `agency ingest` i `agency run --wait` — týž běh
     má vypadat stejně, ať branou prošel hned, nebo o hodinu později."""
+    if data.get("noOutput"):
+        print(f"\n  run {out.bold(run.id)}\n")
+        print(f"  {out.err('  ×')} the agent wrote no findings.json")
+        return
     c = data["counts"]
     print(f"\n  run {out.bold(run.id)}\n")
     print(f"  {c['raw']:3} findings written by the pack")
@@ -1356,7 +1583,10 @@ def cmd_ingest(args) -> int:
 
     data = ingest.ingest(project, run, min_score=args.min_score)
     _emit(args, data, lambda: _ingest_report(run, data))
-    return 0
+    # Ruční brána nad během, po kterém nic nezbylo, nemá co uzavřít. Vrátit 0
+    # by znamenalo tvrdit, že běh je hotový — a skript, který na to čeká, by
+    # šel dál.
+    return 1 if data.get("noOutput") else 0
 
 
 # ---------------------------------------------------------------- knowledge
@@ -2233,10 +2463,14 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--model", help="model for every step (overrides the hire and the configuration)")
     s.add_argument("--provider", help="runner for every step — a chain runs on one provider")
     s.add_argument("--force", action="store_true", help="a draft or an already reviewed commit too")
+    s.add_argument("--keep-worktree", action="store_true",
+                   help="do not remove the team's worktree after a successful chain")
     s.set_defaults(fn=cmd_chain)
 
     s = sub.add_parser("validate", parents=[common], help="check findings.json against the contract and the anchors against the code")
     s.add_argument("--run", help="run id (default: the latest)")
+    s.add_argument("--fix", action="store_true",
+                   help="drop keys from the record that run.v1 does not know")
     s.set_defaults(fn=cmd_validate)
 
     # Jedny dveře ke grafu. `--repo` míří na worktree běhu, když se agent ptá

@@ -20,11 +20,16 @@ import pytest
 from agency import cli, metrics, proc, runs
 from agency.util import write_json
 
+#: Skutečná `proc.attend`, uložená před tím, než ji conftest nahradí pojistkou.
+#: Dva testy dole zkoumají ji samotnou — jak sestaví argv a co udělá s chybějící
+#: binárkou — a ty ji potřebují zpátky.
+real_attend = proc.attend
+
 
 def agent(monkeypatch, code: int = 0, leaves=None):
     """Agent, ze kterého je vidět jen to podstatné: co po sobě nechal a jak
     skončil. Skutečné spuštění je jediná věc, kterou test pustit nemůže."""
-    def fake(args, cwd=None):
+    def fake(args, cwd=None, env=None):
         if leaves is not None:
             leaves()
         return code
@@ -33,6 +38,11 @@ def agent(monkeypatch, code: int = 0, leaves=None):
 
 def wait(project, run, wt_owned: bool = False) -> int:
     return cli._wait_for_agent(project, run, ["claude", "prompt"], project.root, wt_owned)
+
+
+# Agent, který nezapsal nic, je od 2. 9. 2026 `failed`, ne `no-findings` — brána
+# za něj prázdné pole nevyrábí. Testy, které zkoumají chování po PÁDU, proto
+# musí nechat `findings.json` na místě, jinak by měřily tuhle novou větev.
 
 
 def nothing_written(run) -> None:
@@ -139,7 +149,7 @@ def test_preruseni_je_opusteny_beh_a_uklidi_po_sobe(project, make_run, monkeypat
     write_json(run.dir / "context.json", {"worktree": str(wt), "worktreeOwned": True})
     monkeypatch.setattr(runs, "remove_worktree", lambda project, path: None)
 
-    def interrupted(args, cwd=None):
+    def interrupted(args, cwd=None, env=None):
         raise KeyboardInterrupt
     monkeypatch.setattr(proc, "attend", interrupted)
 
@@ -161,7 +171,11 @@ def test_binarka_se_hleda_pres_which(monkeypatch):
     instalaci, ne odvozeno."""
     seen: list = []
     monkeypatch.setattr(proc, "which", lambda tool: r"C:\npm\codex.CMD")
-    monkeypatch.setattr(subprocess, "call", lambda args, cwd=None: seen.append(args) or 0)
+    monkeypatch.setattr(subprocess, "call",
+                        lambda args, cwd=None, env=None: seen.append(args) or 0)
+    # Přes skutečnou funkci, ne přes pojistku z conftestu: tenhle test zkoumá
+    # právě to, co pojistka jinak zakazuje — jak se sestaví spouštěcí příkaz.
+    monkeypatch.setattr(proc, "attend", real_attend)
 
     assert proc.attend(["codex", "--model", "gpt"], cwd="/tmp") == 0
     assert seen[0] == [r"C:\npm\codex.CMD", "--model", "gpt"]
@@ -172,9 +186,10 @@ def test_chybejici_binarka_neni_pad(monkeypatch):
     v shellu — jádro z toho nedělá výjimku, kterou by musel chytat volající."""
     monkeypatch.setattr(proc, "which", lambda tool: None)
 
-    def missing(args, cwd=None):
+    def missing(args, cwd=None, env=None):
         raise FileNotFoundError(2, "nenalezeno")
     monkeypatch.setattr(subprocess, "call", missing)
+    monkeypatch.setattr(proc, "attend", real_attend)
 
     assert proc.attend(["neni-tam"]) == 127
 

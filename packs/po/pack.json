@@ -3,18 +3,37 @@
   "version": "0.1.0",
   "title": "Product owner",
   "description": "Holds the roadmap against what is actually being built. Reads the commitments you load into it, walks the open issues and the draft items on the board, and decides what gets built now — writing tickets and drafts for what does, and cutting, with a reason, what does not. Everything it posts is signed as an agent.",
-
   "requires": {
-    "tools": ["git", "gh"],
-    "optionalTools": ["code-review-graph"],
-    "provider": ["claude", "codex"]
+    "tools": [
+      "git",
+      "gh"
+    ],
+    "optionalTools": [
+      "code-review-graph"
+    ],
+    "provider": [
+      "claude",
+      "codex"
+    ]
   },
-
   "run": {
     "target": "workspace",
     "worktree": false,
     "graph": false,
     "backlog": true,
+    "needs": [
+      "agency triage",
+      "agency note",
+      "agency findings",
+      "git",
+      "gh issue view",
+      "gh issue list",
+      "gh issue create",
+      "gh issue edit",
+      "gh issue comment",
+      "gh project",
+      "gh api"
+    ],
     "prompt": {
       "accepts": true,
       "required": false,
@@ -22,30 +41,61 @@
       "placeholder": "e.g. should the referral programme go into this cycle?"
     }
   },
-
   "installs": [
-    { "from": "skill/SKILL.md", "to": ".claude/skills/agency-po/SKILL.md" },
-    { "from": "skill/references/backlog.md", "to": ".claude/skills/agency-po/references/backlog.md" }
+    {
+      "from": "skill/SKILL.md",
+      "to": ".claude/skills/agency-po/SKILL.md"
+    },
+    {
+      "from": "skill/references/backlog.md",
+      "to": ".claude/skills/agency-po/references/backlog.md"
+    }
   ],
-
   "config": {
     "file": ".agency/po.json",
     "template": "config.template.json",
-    "required": ["repo.slug", "roadmap.file"],
-    "files": ["roadmap.file"]
+    "required": [
+      "repo.slug",
+      "roadmap.file"
+    ],
+    "files": [
+      "roadmap.file"
+    ]
   },
-
   "outputs": {
     "findings": "finding.v1",
     "run": "run.v1"
   },
-
   "dimensions": [
-    { "id": "scope", "title": "Work in flight that no commitment covers", "projectSpecific": false },
-    { "id": "readiness", "title": "Is this actually ready to be built", "projectSpecific": false },
-    { "id": "backlog", "title": "The queue itself — duplicates, ghosts, stale items", "projectSpecific": false },
-    { "id": "roadmap-drift", "title": "What the roadmap says against what is happening", "projectSpecific": false },
-    { "id": "sequencing", "title": "Order and dependencies inside the cycle", "projectSpecific": true },
-    { "id": "value", "title": "Whether the outcome is measurable at all", "projectSpecific": true }
+    {
+      "id": "scope",
+      "title": "Work in flight that no commitment covers",
+      "projectSpecific": false
+    },
+    {
+      "id": "readiness",
+      "title": "Is this actually ready to be built",
+      "projectSpecific": false
+    },
+    {
+      "id": "backlog",
+      "title": "The queue itself — duplicates, ghosts, stale items",
+      "projectSpecific": false
+    },
+    {
+      "id": "roadmap-drift",
+      "title": "What the roadmap says against what is happening",
+      "projectSpecific": false
+    },
+    {
+      "id": "sequencing",
+      "title": "Order and dependencies inside the cycle",
+      "projectSpecific": true
+    },
+    {
+      "id": "value",
+      "title": "Whether the outcome is measurable at all",
+      "projectSpecific": true
+    }
   ]
 }

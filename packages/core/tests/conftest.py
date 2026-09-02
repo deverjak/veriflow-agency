@@ -17,7 +17,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from agency import config, runs  # noqa: E402
+from agency import config, proc, runs  # noqa: E402
 from agency.util import ulid, write_json  # noqa: E402
 
 
@@ -26,6 +26,33 @@ def git(cwd: Path, *args: str) -> str:
                        encoding="utf-8", errors="replace")
     assert r.returncode == 0, f"git {' '.join(args)}\n{r.stderr}"
     return r.stdout.strip()
+
+
+@pytest.fixture(autouse=True)
+def never_launch_an_agent(monkeypatch, request):
+    """No test may start a real AI runner. Ever.
+
+    This is a safety net, not tidiness. `agency run --wait` and `agency chain`
+    end at `proc.attend` / `proc.stream`, which is to say at `claude` on whatever
+    machine is running the tests. A test that forgets to substitute the agent
+    does not fail — it launches a real session, waits for it, and hangs the
+    suite until somebody notices. That happened twice: once while `test_chain.py`
+    was being written, and again when the chain switched from `attend` to
+    `stream` and only the first of the two was guarded.
+
+    Guarding one function was the mistake, so this guards both, and it lives in
+    `conftest.py` rather than in one test file. A test that means to run an agent
+    substitutes its own; the default is a failure that says what is missing.
+    """
+    def refuse(name):
+        def fail(args, *a, **kw):
+            raise AssertionError(
+                f"a test tried to launch a real agent through proc.{name}: "
+                f"{args[0]} — substitute it (monkeypatch proc.{name}) instead")
+        return fail
+
+    for name in ("attend", "stream"):
+        monkeypatch.setattr(proc, name, refuse(name))
 
 
 @pytest.fixture

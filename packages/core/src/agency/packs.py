@@ -39,6 +39,15 @@ RUN_DEFAULTS: dict = {
     # build starts from the open tickets, and fetching them is deterministic —
     # so it belongs to the preparation, not to the first minutes of a session.
     "backlog": False,
+    # What the method calls. Authorization belongs to the pack, not the user:
+    # the pack knows it writes into RUN_DIR, decides with `agency triage` and
+    # asks the graph — a user should not have to infer that from behaviour.
+    # Empty = the method only reads and writes into RUN_DIR (`editsGrant`), it
+    # calls no commands.
+    #
+    # A project may WIDEN the list (`agent.allow` in the pack's config), never
+    # narrow it: narrowing would turn a run into a silent half of its method.
+    "needs": [],
     "prompt": {
         # Bere pack zadání textem? Když ne, `--prompt` se u něj odmítne.
         "accepts": False,
@@ -87,6 +96,7 @@ class Pack:
         prompt.update(policy.get("prompt") or {})
         policy["prompt"] = prompt
         policy["graph"] = graph_policy(policy.get("graph"))
+        policy["needs"] = [str(x).strip() for x in (policy.get("needs") or []) if str(x).strip()]
         return policy
 
     @property

@@ -192,6 +192,23 @@ Hindsight adaptér byl 1. 9. 2026 postavený (`edbf924`, 19 souborů, 846 řádk
 
 ---
 
+## Fáze 8 — neattended běh: řetěz, který doběhne s výstupem
+
+> [`unattended.md`](unattended.md). Vzniklo 2. 9. 2026 z prvního reálného řetězu: členové v `claude -p` nesmějí nic zapsat, brána to zapíše jako `no-findings`, orchestrátor to nevidí a workspace pack soudí checkoutnutou větev místo `--pr`.
+
+- [ ] **Krok 1** — autorizace v provideru jako data (`editsGrant`, `allow…`, `bypassArgs`), `run.needs` v manifestu packu, `agent.allow` v projektu; bypass jen opt-in
+- [ ] **Krok 2** — chybějící `findings.json` je `failed: no-output`, ne `[]`; `--wait` vrací ≠ 0; řetěz se zastaví
+- [ ] **Krok 4** — cíl řetězu se řeší jednou, jeden worktree pro všechny členy, stejný `target` v záznamech
+- [ ] **Krok 5** — handoff celý (strop v bajtech), prompt při 0 nálezech, `AGENCY_RUN` guard proti vnořeným běhům
+- [ ] **Krok 3** — `proc.stream` + `events.py`, průběh v terminálu, `agent.jsonl` / `agent.md`, `agent.turns/denied`, `cost.usd`; `run.v1` rozšířit napřed
+- [ ] **Krok 6** — `trigger.attended` a `cost.credential` z faktů, zpráva řetězu, `validate --fix`
+- [ ] **Krok 7** — extension: `failed` krok, otevřít summary/handoff/agent.md
+- [ ] **Krok 8** — přejímka: sedm podmínek nad `main-panel` PR #479, všechny najednou
+
+**Hotovo, když:** projde Krok 8. Ne dřív — dnešní opravy byly každá ověřená tím, že se agent spustil, a žádná tím, že něco zapsal.
+
+---
+
 ## Odloženo — čeká na spouštěč
 
 | co | odkud | spouštěč |
@@ -214,5 +231,6 @@ Hindsight adaptér byl 1. 9. 2026 postavený (`edbf924`, 19 souborů, 846 řádk
 | 5 — `findings/` ledger | shared-memory Krok 3 | ~1–2 dny | 1, 3, 4 |
 | 6 — knowledge pages | shared-memory Krok 4 | ~1 den | 5 |
 | 7 — lexikální ranker | shared-memory Krok 5 | ~2 h | 5 |
+| 8 — neattended běh | [`unattended.md`](unattended.md) Kroky 1–8 | ~3 dny | 1 (chain je hotový) |
 
 Fáze 0–3 jsou **~2 dny** a uzavírají graf. Fáze 0–6 jsou **~6 dní** a dají paměť, která patří projektu a čte ji každý provider. Fáze 7 je dvě hodiny nad hotovým bundlem a nepřidává závislost — verze s démonem přidávala a byla proto zamítnuta.

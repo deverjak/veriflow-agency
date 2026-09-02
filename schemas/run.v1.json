@@ -273,7 +273,7 @@
             "subscription",
             "api-key"
           ],
-          "description": "Musí odpovídat trigger.attended — viz pravidlo výše."
+          "description": "Which credential paid for the run. Derived from the runner's environment (an API key in it means api-key, otherwise the subscription that the interactive login left behind), never from trigger.attended: `claude -p` is unattended and still runs on the subscription, so deriving it from attendedness produced a number that was simply wrong."
         },
         "inputTokens": {
           "type": [
@@ -286,6 +286,13 @@
             "integer",
             "null"
           ]
+        },
+        "usd": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "What the runner itself reported the run cost. An estimate on a subscription rather than an invoice — recorded because the relative cost of two models over the same target is the comparison this tool exists to make, and refused as a budget ceiling for the same reason."
         },
         "dimensions": {
           "type": [
@@ -395,6 +402,48 @@
             "null"
           ],
           "description": "How the agent process ended. Only a run started with `agency run --wait` has one: `--launch` replaces this process and leaves nobody to catch it, and a command copied into another terminal is not watched at all. Non-zero means the run failed even if findings.json was written — status says failed and the findings stay."
+        },
+        "authorized": {
+          "enum": [
+            "grant",
+            "bypass",
+            "ask"
+          ],
+          "description": "What the agent was allowed to do. `grant` is the default — write into the working directory and the handed-over memory directory, plus the commands the pack's method declares in run.needs. `bypass` is a project opt-in that turns the checks off entirely. `ask` grants nothing: an attended agent asks, an unattended one is refused and finds nothing it can record. Written because \"the run found nothing\" and \"the run was not allowed to write anything\" are indistinguishable afterwards without it."
+        },
+        "sessionId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The runner's own id for the session, when it reports one. Lets a run be replayed in the provider's tooling — `claude --resume <id>` — which is the only way to see what the agent actually did after the terminal is gone."
+        },
+        "turns": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "How many turns the agent took. Only a streamed unattended run has one; attended runs inherit the terminal and nothing counts for them."
+        },
+        "denied": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "Tool calls the permission model refused. A non-zero count means the run is not a measurement of the method — it is a measurement of its authorization, and comparing it against another run would be comparing different things.",
+          "additionalProperties": false,
+          "properties": {
+            "count": {
+              "type": "integer"
+            },
+            "tools": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Distinct tool names that were refused, e.g. Write, Bash."
+            }
+          }
         }
       }
     },

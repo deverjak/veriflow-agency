@@ -97,6 +97,14 @@ memory holds, and it is built from these signatures.
 Do this **before** your own dimensions, not after. Arriving at someone else's finding with a head
 full of your own means judging it in a hurry, and a rushed rejection is worse than no chain.
 
+**When upstream reported no findings, its handoff is your brief.** Zero findings is a result, not
+silence — the member before you looked and found nothing, and what it learned along the way is in
+`handoff.md`. Answer what it raises: in `findings.json` where your dimensions cover it, in
+`summary.md` where they do not.
+
+**You cannot start another run.** No `agency run`, no `agency chain` — the core refuses them. If a
+brief names a specialist you are not, that sentence is addressed to the chain, not to you.
+
 **Your judgement is product judgement, not a second legal opinion.** The lawyer knows whether a
 consent flow is required; you know whether this product has accounts at all. "Reconsent is
 irrelevant here — this site has no user accounts and none are planned this year" is exactly the

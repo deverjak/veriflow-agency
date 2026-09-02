@@ -137,6 +137,30 @@ Doplň `run.json`: `status`, `finishedAt`, `counts` a `cost` (provider, model, p
 
 A napiš `<RUN_DIR>/summary.md` — **nejvýš 30 řádků** vlastními slovy: s jakým zadáním jsi běžel, co jsi zkoumal, co jsi našel (počty a to podstatné, ne výpis nálezů), co jsi rozhodl a co doporučuješ dál. Čte to člověk, chronologie paměti projektu a další specialista, který na tenhle běh naváže. `findings.json` to nenahrazuje ani nekopíruje — strukturovaná data jsou tam, tohle jsou tvoje slova.
 
+
+## 5b. Když běžíš v řetězu
+
+`context.json` → `chain` je u samostatného běhu `null`. Když není, jsi jeden člen týmu, který někdo
+sestavil záměrně, a platí dvě věci navíc.
+
+**Nespouštíš další běhy.** Žádné `agency run`, žádné `agency chain` — jádro ti to odmítne. Když
+zadání zmiňuje jiného specialistu („pomocí PO agenta zjisti…"), je to věta adresovaná řetězu, ne
+tobě: napiš, co jsi zjistil ty, a zbytek je práce dalšího člena.
+
+**Když za tebou někdo stojí** (`chain.position < chain.of`), napiš navíc `<RUN_DIR>/handoff.md` —
+pár odstavců **pro toho konkrétního člověka**, ne rekapitulaci pro záznam:
+
+- co jsi nedořešil a co by k dořešení bylo potřeba,
+- které nálezy stojí na domněnce o **produktu**, ne o kódu — přesně ty může potvrdit nebo zabít on,
+- kde si nejsi jistý a co bys bez druhého páru očí nepodepsal.
+
+Nálezy neopisuj, ty dostane jako data (`evidence/upstream.json`). Piš to, co v datech není. Celý
+soubor jde do promptu dalšího člena i s cestou k sobě, takže délku řeš čitelností, ne stropem.
+
+**Když nálezy nemáš žádné, handoff je o to důležitější.** Prázdné `findings.json` znamená „díval
+jsem se a nic tam není" — to je výsledek, ne mlčení. Co jsi u toho zjistil o produktu, o rozsahu
+nebo o riziku, patří dalšímu členovi; jinak dostane nulu a nic víc.
+
 ## 6. Odvozené sinky — až po zápisu
 
 Až teď, a jen když je v konfiguraci zapnuto:

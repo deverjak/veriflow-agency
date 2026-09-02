@@ -63,11 +63,12 @@ def specialist(project, monkeypatch, *, findings=1, handoff: str | None = None,
     v promptu, ale fake ho v `proc.attend` nedostane. Zapisuje to, na čem stojí
     předání: nálezy a `handoff.md`.
     """
-    seen = {"steps": 0, "argv": []}
+    seen = {"steps": 0, "argv": [], "env": []}
 
-    def fake(argv, cwd=None):
+    def work(argv, cwd=None, env=None):
         seen["steps"] += 1
         seen["argv"].append(list(argv))
+        seen["env"].append(dict(env or {}))
         run = next(r for r in runs.load_runs(project)
                    if r.record().get("status") == "running")
         write_json(run.findings_path,
@@ -80,24 +81,36 @@ def specialist(project, monkeypatch, *, findings=1, handoff: str | None = None,
             return 1
         return code
 
-    monkeypatch.setattr(proc, "attend", fake)
+    def fake_stream(argv, cwd=None, env=None, on_line=None, timeout=None):
+        # Člen řetězu jede neattended, takže jádro čte proud událostí místo
+        # terminálu. Fake mluví tímtéž jazykem — jinak by testy zamykaly cestu,
+        # kterou skutečný řetěz nepoužívá.
+        rc = work(argv, cwd=cwd, env=env)
+        if on_line:
+            on_line('{"type":"system","subtype":"init","session_id":"test-session"}')
+            on_line('{"type":"result","subtype":"success","is_error":false,'
+                    '"num_turns":3,"total_cost_usd":0.01,"session_id":"test-session",'
+                    '"result":"Hotovo.","permission_denials":[]}')
+        return rc
+
+    monkeypatch.setattr(proc, "attend", work)
+    monkeypatch.setattr(proc, "stream", fake_stream)
     return seen
 
 
-@pytest.fixture(autouse=True)
-def never_launch_for_real(monkeypatch):
+def test_pojistka_hlida_obe_cesty_ke_skutecnemu_agentovi():
     """Pojistka, ne kosmetika.
 
-    `cmd_chain` končí u `proc.attend`, tedy u skutečné binárky. Test, který
-    zapomene podstrčit agenta, by spustil `claude` na stroji, který testy pouští
-    — jednou se to při psaní tohohle souboru stalo. Výchozí stav je proto pád
-    s vysvětlením; `specialist()` ho přebije.
+    Pojistka bydlí v `conftest.py` a hlídá `proc.attend` i `proc.stream`.
+    Původně stála tady a hlídala jen `attend` — a přesně to se vymstilo ve chvíli,
+    kdy řetěz přešel na `stream`: testy začaly pouštět skutečného `claude` a
+    čekat na něj. Tenhle prázdný test drží důvod pohromadě s místem, kde se to
+    stalo.
     """
-    def refuse(argv, cwd=None):
-        raise AssertionError(
-            f"test se pokusil spustit skutečného agenta: {argv[0]} — "
-            "chybí volání specialist()")
-    monkeypatch.setattr(proc, "attend", refuse)
+    with pytest.raises(AssertionError, match="real agent"):
+        proc.attend(["claude", "-p"])
+    with pytest.raises(AssertionError, match="real agent"):
+        proc.stream(["claude", "-p"])
 
 
 @pytest.fixture
@@ -243,11 +256,13 @@ def test_prvni_clen_nedostane_upstream(team, monkeypatch, capsys):
 def test_mlceni_agenta_se_nenahrazuje(team, monkeypatch, capsys):
     """Když člen nenechá ani handoff, ani summary, prompt se opře o počty.
     Vymyslet za něj vzkaz by bylo tvrzení, za které se nikdo nepodepsal."""
-    def fake(argv, cwd=None):
+    def fake(argv, cwd=None, env=None, on_line=None, timeout=None):
         run = next(r for r in runs.load_runs(team) if r.record().get("status") == "running")
         write_json(run.findings_path, [make_finding(team, run.id)])
         return 0
-    monkeypatch.setattr(proc, "attend", fake)
+    # Člen řetězu jde přes `stream`, ne přes `attend` — pojistka z conftestu na
+    # to upozorní hlášením, ne desetiminutovým čekáním na skutečného agenta.
+    monkeypatch.setattr(proc, "stream", fake)
 
     cli.cmd_chain(args(team, "legal", "po"))
     capsys.readouterr()
@@ -451,17 +466,37 @@ def test_status_json_nese_cely_blok(team, monkeypatch, capsys):
 
 # ------------------------------------------------------------------ jednotky
 
-def test_handoff_se_zkrati_a_rekne_o_tom(project, make_run):
-    """Vykopávací věta má být k přečtení, ne k prolistování — a že se krátilo,
-    se nesmí zamlčet."""
+def test_handoff_jde_dal_cely(project, make_run):
+    """Strop je v bajtech a velkorysý, protože handoff není vykopávací věta,
+    ale zadání.
+
+    Předchozí strop 40 řádků vypadal rozumně a nebyl: první skutečný handoff měl
+    120 řádků a jeho jediná adresná sekce — „doporučení pro PO agenta" — byla
+    dole, za řezem. Další člen dostal technickou rekapitulaci a `… (80 more
+    lines in the file)` bez cesty k souboru.
+    """
     run = make_run()
     (run.dir / "handoff.md").write_text("\n".join(f"řádek {i}" for i in range(120)),
                                         encoding="utf-8")
-    text, source = chain.handoff_text(run)
+    text, source, where = chain.handoff_text(run)
 
     assert source == "handoff.md"
-    assert text.count("\n") == chain.HANDOFF_LINES
+    assert "řádek 119" in text, "adresná část bývá na konci"
+    assert where.endswith("handoff.md"), "cesta k souboru jde do promptu vždycky"
+
+
+def test_opravdu_velky_handoff_se_zkrati_a_rekne_o_tom(project, make_run):
+    """Strop pořád existuje — jen je tam kvůli velikosti promptu, ne kvůli
+    čitelnosti. A když se řeže, musí být vidět, kam se pro zbytek jít podívat.
+    """
+    run = make_run()
+    (run.dir / "handoff.md").write_text("\n".join("x" * 200 for _ in range(200)),
+                                        encoding="utf-8")
+    text, _, where = chain.handoff_text(run)
+
+    assert len(text.encode("utf-8")) <= chain.HANDOFF_BYTES + 200
     assert "more lines in the file" in text
+    assert where.endswith("handoff.md")
 
 
 def test_prazdny_handoff_se_chova_jako_zadny(project, make_run):
@@ -469,7 +504,7 @@ def test_prazdny_handoff_se_chova_jako_zadny(project, make_run):
     (run.dir / "handoff.md").write_text("   \n\n", encoding="utf-8")
     (run.dir / "summary.md").write_text("Shrnutí.", encoding="utf-8")
 
-    text, source = chain.handoff_text(run)
+    text, source, _ = chain.handoff_text(run)
     assert (text, source) == ("Shrnutí.", "summary.md")
 
 

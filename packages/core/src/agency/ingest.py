@@ -1,19 +1,19 @@
-"""Brána mezi tím, co napsal agent, a tím, co se stane nálezem.
+"""The gate between what the agent wrote and what becomes a finding.
 
-Agent zapíše `findings.json` a skončí. Do té chvíle je to text, ne data.
-Tenhle soubor z něj dělá kandidáty — a hlavně ODMÍTÁ.
+The agent writes `findings.json` and exits. Until that moment it is text, not
+data. This file turns it into candidates — and, more importantly, REFUSES.
 
-Tři důvody, proč je brána deterministická a ne další LLM krok:
+Three reasons the gate is deterministic and not another LLM step:
 
-  1. Zvýšený objem nálezů se nesmí propsat do zvýšeného odpadu. Odpad se pozná
-     bez modelu: nález, který ukazuje na soubor, co na tom commitu neexistuje,
-     je halucinace, ne názor.
-  2. Model, který hlídá model, je dvakrát dražší a jednou tak spolehlivý.
-  3. Zahození musí být přezkoumatelné. Proto se nic nemaže — vyřazené nálezy
-     jdou do `gated.json` i s důvodem a číslo skončí v run recordu.
+  1. More findings must not mean more waste. Waste is recognisable without a
+     model: a finding pointing at a file that does not exist at that commit is
+     a hallucination, not an opinion.
+  2. A model watching a model costs twice as much and is half as reliable.
+  3. Discarding has to be reviewable. So nothing is deleted — rejected findings
+     go to `gated.json` with their reason, and the count lands in the run record.
 
-Brána nekontroluje kvalitu textu. Na to je `score` od packu a triage od
-člověka. Kontroluje, jestli nález vůbec MŮŽE být pravdivý.
+The gate does not judge the quality of the text. That is what the pack's `score`
+and a human's triage are for. It checks whether a finding CAN be true at all.
 """
 
 from __future__ import annotations
@@ -25,8 +25,8 @@ from .config import Project
 from .runs import Run, load_runs, now
 from .util import bundled, read_json, write_json
 
-# Důvody vyřazení. Stejně jako u zamítnutí je to enum, ne volný text — jinak
-# se nedá spočítat, čím pack nejčastěji plýtvá.
+# Why a finding was dropped. Like a rejection reason this is an enum and not
+# free text — otherwise there is no counting what a pack wastes the most on.
 GATE_REASONS = {
     "schema": "does not match finding.v1",
     "phantom-file": "the file does not exist at the analysed commit",
@@ -36,7 +36,7 @@ GATE_REASONS = {
 
 
 def _schema_errors(findings: list[dict]) -> dict[int, list[str]]:
-    """Chyby kontraktu po indexech. Bez jsonschema jen povinná pole."""
+    """Contract errors by index. Without jsonschema, required fields only."""
     errs: dict[int, list[str]] = {}
     try:
         import jsonschema
@@ -58,11 +58,12 @@ def _schema_errors(findings: list[dict]) -> dict[int, list[str]]:
 
 
 def _exists_at_commit(root: Path, commit: str, path: str) -> tuple[bool, int | None]:
-    """Byl ten soubor na tom commitu, a kolik měl řádků?
+    """Was that file at that commit, and how many lines did it have?
 
-    Vrací `(True, None)`, když commit v klonu není — nedostupnost commitu není
-    důkaz, že nález lže. Squash-merge se smazanou větví je na GitHubu default,
-    a zahodit kvůli tomu poctivý nález by byla horší chyba než ho pustit dál.
+    Returns `(True, None)` when the commit is not in the clone — an unreachable
+    commit is no proof the finding lies. A squash merge with the branch deleted
+    is GitHub's default, and dropping an honest finding over it would be a worse
+    mistake than letting it through.
     """
     if not commit or not proc.commit_exists(root, commit):
         return True, None
@@ -73,7 +74,7 @@ def _exists_at_commit(root: Path, commit: str, path: str) -> tuple[bool, int | N
 
 
 def gate(project: Project, run: Run, findings: list[dict], min_score: int | None) -> tuple[list[dict], list[dict]]:
-    """Rozdělí nálezy na ty, co projdou, a na vyřazené i s důvodem."""
+    """Splits findings into those that pass and those dropped, with a reason."""
     kept: list[dict] = []
     dropped: list[dict] = []
     errs = _schema_errors(findings)
@@ -110,9 +111,10 @@ def gate(project: Project, run: Run, findings: list[dict], min_score: int | None
 
 
 def earlier_findings(project: Project, run: Run) -> list[dict]:
-    """Nálezy ze starších běhů — proti nim se deduplikuje.
+    """Findings from older runs — what deduplication compares against.
 
-    Jen kandidáti a přijaté; duplicitu duplicity nemá smysl hlásit.
+    Candidates and accepted ones only; reporting a duplicate of a duplicate
+    tells nobody anything.
     """
     pool: list[dict] = []
     for r in load_runs(project):
@@ -125,19 +127,34 @@ def earlier_findings(project: Project, run: Run) -> list[dict]:
 
 
 def ingest(project: Project, run: Run, min_score: int | None = None) -> dict:
-    """Celá brána: kontrakt → existence → práh → dedup → zápis.
+    """The whole gate: contract → existence → threshold → dedup → write.
 
-    Idempotentní. Druhé spuštění nad týmž během dá tentýž výsledek, protože se
-    vždycky vychází z `findings.raw.json`, když existuje.
+    Idempotent. A second run over the same run gives the same result, because it
+    always starts from `findings.raw.json` when that exists.
+
+    **Writes nothing when the agent wrote nothing.** An empty array made up by
+    the gate looks identical, on disk and in the record, to an empty array a
+    specialist wrote — except the first says "I could not" and the second says
+    "I looked and there is nothing there". On 2026-09-02 that difference cost
+    two real findings: every write by the agent inside `claude -p` was refused,
+    the gate filled in `[]` for it, and the chain moved on to a member judging
+    findings that had never existed.
     """
     raw_path = run.dir / "findings.raw.json"
     if raw_path.is_file():
         findings = read_json(raw_path, default=[])
+    elif not run.findings_path.is_file():
+        # Neither `findings.json` nor `findings.raw.json`. There is nothing to
+        # put through the gate and, more to the point, nothing to claim — the
+        # caller turns this into `failed: no-output`.
+        return {"run": run.id, "noOutput": True, "raw": 0, "kept": 0,
+                "duplicates": [], "dropped": [], "counts": None, "bundle": None}
     else:
         findings = run.findings()
         if findings:
-            # Původní výstup agenta se schovává stranou, aby šlo bránu pustit
-            # znovu s jinými pravidly a neztratit, co pack skutečně napsal.
+            # The agent's original output is kept aside so the gate can be
+            # re-run with different rules without losing what the pack actually
+            # wrote.
             write_json(raw_path, findings)
 
     raw_count = len(findings)
@@ -170,12 +187,13 @@ def ingest(project: Project, run: Run, min_score: int | None = None) -> dict:
         "kept": len([f for f in kept if f.get("state") != "duplicate"]),
     }
     rec["gatedBy"] = by_reason or None
-    # Shrnutí běhu je kontrakt packu (`RUN_DIR/summary.md`). Brána ho nečte ani
-    # nedopisuje — jen zaznamená, že existuje. Konzument je člověk, chronologie
-    # paměti a další specialista v řetězu.
-    # `handoff.md` je totéž o krok adresněji — zpráva dalšímu členovi řetězu.
-    # Zaznamenává se i u samostatného běhu: pack neví, jestli za ním někdo
-    # stojí, a napsat ho zbytečně je levnější než ho nemít, až bude potřeba.
+    # The run's summary is the pack's contract (`RUN_DIR/summary.md`). The gate
+    # neither reads nor writes it — it only records that it exists. Its readers
+    # are a person, the memory's chronology and the next specialist in a chain.
+    # `handoff.md` is the same thing one step more addressed — a message to the
+    # next chain member. It is recorded for a standalone run too: a pack cannot
+    # know whether anyone stands behind it, and writing one needlessly is
+    # cheaper than not having it the day it is needed.
     rec["outputs"] = {"summary": (run.dir / "summary.md").is_file(),
                       "handoff": (run.dir / "handoff.md").is_file()}
     rec["status"] = "ok" if kept else ("no-findings" if raw_count == 0 else "gated-out")
@@ -189,10 +207,11 @@ def ingest(project: Project, run: Run, min_score: int | None = None) -> dict:
         "duplicates": dups,
         "dropped": [{k: v for k, v in d.items() if k != "finding"} for d in dropped],
         "counts": rec["counts"],
-        # Ledger se obnovuje až po bráně, protože do paměti projektu patří to,
-        # co branou prošlo — ne to, co pack napsal. Zapisuje se po uložení
-        # záznamu: kdyby zápis bundlu spadl, výsledek brány je už bezpečně na
-        # disku a `agency knowledge --rebuild` bundle dožene.
+        # The ledger is rebuilt after the gate, because what belongs in the
+        # project's memory is what passed the gate — not what the pack wrote.
+        # It is written after the record is saved: if writing the bundle failed,
+        # the gate's result is already safely on disk and
+        # `agency knowledge --rebuild` catches the bundle up.
         "bundle": _bundle(project),
     }
 

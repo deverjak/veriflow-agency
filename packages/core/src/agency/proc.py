@@ -58,24 +58,82 @@ def which(tool: str) -> str | None:
     return shutil.which(tool)
 
 
-def attend(args: Sequence[str], cwd: str | Path | None = None) -> int:
+def attend(args: Sequence[str], cwd: str | Path | None = None,
+           env: dict[str, str] | None = None) -> int:
     """Spustit a počkat — s terminálem, ne s rourou. Vrací exit code.
 
-    `run()` sbírá výstup, protože ho volající čte. Agent je opak: mluví
-    s uživatelem a čeká na odpověď. Roura by z attended běhu udělala
-    neattended, který zamrzne na první otázce, kterou nemá kdo přečíst — proto
-    si tenhle proces stdio nechává zdědit.
+    `run()` collects output because its caller reads it. An agent is the
+    opposite: it talks to the user and waits for an answer. A pipe would turn an
+    attended run into an unattended one that freezes on the first question
+    nobody is there to read — which is why this process lets stdio be inherited.
 
-    Binárku hledá `which`, i když by ji CreateProcess našlo samo: umí si totiž
-    domyslet jen `.exe`. `codex` je na Windows `codex.CMD` a bez rozvinutí
-    PATHEXT skončí jako FileNotFoundError. Ověřeno, ne odhad.
+    The binary goes through `which` even though CreateProcess would find it:
+    CreateProcess only fills in `.exe`. On Windows `codex` is really `codex.CMD`
+    and without expanding PATHEXT it ends as FileNotFoundError. Verified, not
+    guessed.
     """
     exe = which(args[0]) or args[0]
     try:
-        return subprocess.call([exe, *args[1:]], cwd=str(cwd) if cwd else None)
+        return subprocess.call([exe, *args[1:]], cwd=str(cwd) if cwd else None,
+                               env={**os.environ, **(env or {})})
     except OSError:
-        # Týž kód jako u `run()`: shell hlásí nespustitelný příkaz 127.
+        # The same code as `run()` uses: a shell reports an unrunnable command
+        # as 127.
         return 127
+
+
+def stream(args: Sequence[str], cwd: str | Path | None = None,
+           env: dict[str, str] | None = None,
+           on_line=None, timeout: float | None = None) -> int:
+    """Spustit, číst řádky, jak přicházejí, a vrátit exit code.
+
+    The difference from `attend()` is who the audience is. `attend` gives the
+    agent a terminal, because a person is talking to it. Here nobody is — it is
+    a chain member — so the core takes its output and turns it into progress
+    that means something (`events.py`). Without this an unattended run is mute:
+    the user sees `launching claude…` and then ten minutes of nothing, whether
+    the agent is working or being refused one write after another.
+
+    `stdin=DEVNULL` on purpose. A pipe with no data makes `claude` wait three
+    seconds and warn ("no stdin data received in 3s") — probed, not assumed. An
+    empty input is a statement; an open pipe is not.
+
+    Stderr is inherited. A runner's error message belongs to the user
+    immediately, not after someone translates it.
+    """
+    exe = which(args[0]) or args[0]
+    try:
+        p = subprocess.Popen(
+            [exe, *args[1:]], cwd=str(cwd) if cwd else None,
+            env={**os.environ, "PYTHONIOENCODING": "utf-8", **(env or {})},
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            text=True, encoding="utf-8", errors="replace", bufsize=1)
+    except OSError:
+        return 127
+
+    try:
+        for line in p.stdout:  # type: ignore[union-attr]
+            line = line.rstrip("\r\n")
+            if line and on_line:
+                on_line(line)
+        return p.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        # The ceiling is time, not money: on a subscription the cost is an
+        # estimate, whereas "the agent has been sitting there for two hours" is
+        # a fact an orchestrator should act on.
+        p.kill()
+        p.wait()
+        return 124
+    except KeyboardInterrupt:
+        # Ctrl-C in a terminal goes to the whole group, but the child need not
+        # act on it — and an orphaned `claude` would keep running and keep
+        # holding the worktree.
+        p.kill()
+        p.wait()
+        raise
+    finally:
+        if p.stdout:
+            p.stdout.close()
 
 
 # ---------------------------------------------------------------- git
