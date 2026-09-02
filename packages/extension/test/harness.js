@@ -901,7 +901,8 @@ checkAsync('tým s recenzentem se musí zeptat, který PR', async () => {
     { label: 'Reviewer · sonnet', hire: state.snapshot.hires[0] },
     { label: 'Product owner · sonnet', hire: state.snapshot.hires[1] },
     { label: '#479', pr: { number: 479, reviewed: false } },
-    'zjisti, jestli to dává produktový smysl',
+    'projdi PR technicky',
+    'dává to produktový smysl?',
   ]);
 
   await review.pickAndChain('C:/projekt', { appendLine() {} });
@@ -911,6 +912,68 @@ checkAsync('tým s recenzentem se musí zeptat, který PR', async () => {
   assert.strictEqual(sent.length, 1);
   assert.ok(sent[0].includes('--pr 479'), `vybraný PR musí být v příkazu: ${sent[0]}`);
   assert.ok(sent[0].includes('chain review-graph@claude po@claude'));
+});
+
+checkAsync('tým se ptá na zadání po členech, ne jedno pro všechny', async () => {
+  // Jedno pole pro celý řetěz vyrobilo přesně to, co muselo: uživatel napsal
+  // „udělej review a pomocí PO agenta zjisti, jestli to dává smysl", recenzent
+  // tu druhou půlku přečetl jako svoji a odpověděl na ni. Věta adresovaná
+  // někomu jinému není kontext, je to matoucí instrukce.
+  const review = require(path.join(SRC, 'review.js'));
+  Object.assign(state.snapshot, {
+    probe: { ok: true }, cwd: 'C:/projekt',
+    packs: [RG_PACK, PO_PACK],
+    hires: [
+      HIRE({ id: 'review-graph@claude', pack: 'review-graph', display: 'Reviewer · sonnet' }),
+      HIRE({ id: 'po@claude', pack: 'po', display: 'Product owner · sonnet' }),
+    ],
+  });
+
+  const { asked, sent } = chainAskedAbout([
+    { label: 'Reviewer · sonnet', hire: state.snapshot.hires[0] },
+    { label: 'Product owner · sonnet', hire: state.snapshot.hires[1] },
+    { label: '#479', pr: { number: 479, reviewed: false } },
+    'projdi PR technicky',
+    'dává to produktový smysl?',
+  ]);
+
+  await review.pickAndChain('C:/projekt', { appendLine() {} });
+
+  // Každý člen má svou otázku, a je z ní poznat, komu je určená.
+  assert.ok(asked.some((t) => /Reviewer · sonnet — what is its part\?/.test(t)));
+  assert.ok(asked.some((t) => /Product owner · sonnet — what is its part\?/.test(t)));
+
+  assert.ok(sent[0].includes('--focus "review-graph@claude:projdi PR technicky"'), sent[0]);
+  assert.ok(sent[0].includes('--focus "po@claude:dává to produktový smysl?"'), sent[0]);
+  assert.ok(!/\s--prompt\s/.test(sent[0]),
+    'společné zadání by se rozdělením mělo nahradit, ne doplnit');
+});
+
+checkAsync('člen bez zadání ho prostě nedostane', async () => {
+  // Prázdné pole je legitimní odpověď: recenzent umí celý PR sám a zadání jen
+  // mění pořadí a hloubku, ne pravidla.
+  const review = require(path.join(SRC, 'review.js'));
+  Object.assign(state.snapshot, {
+    probe: { ok: true }, cwd: 'C:/projekt',
+    packs: [RG_PACK, PO_PACK],
+    hires: [
+      HIRE({ id: 'review-graph@claude', pack: 'review-graph', display: 'Reviewer · sonnet' }),
+      HIRE({ id: 'po@claude', pack: 'po', display: 'Product owner · sonnet' }),
+    ],
+  });
+
+  const { sent } = chainAskedAbout([
+    { label: 'Reviewer · sonnet', hire: state.snapshot.hires[0] },
+    { label: 'Product owner · sonnet', hire: state.snapshot.hires[1] },
+    { label: '#479', pr: { number: 479, reviewed: false } },
+    '',
+    'jen PO má co řešit',
+  ]);
+
+  await review.pickAndChain('C:/projekt', { appendLine() {} });
+
+  assert.ok(!sent[0].includes('review-graph@claude:'), sent[0]);
+  assert.ok(sent[0].includes('--focus "po@claude:jen PO má co řešit"'), sent[0]);
 });
 
 checkAsync('tým jen nad projektem se na PR neptá', async () => {
@@ -929,7 +992,8 @@ checkAsync('tým jen nad projektem se na PR neptá', async () => {
   const { asked, sent } = chainAskedAbout([
     { label: 'Product owner · sonnet', hire: state.snapshot.hires[0] },
     { label: 'QA engineer · sonnet', hire: state.snapshot.hires[1] },
-    'co má tým řešit',
+    'co má řešit PO',
+    'co má zkoušet QA',
   ]);
 
   await review.pickAndChain('C:/projekt', { appendLine() {} });
@@ -956,6 +1020,7 @@ checkAsync('už zrecenzovaný PR tým nezastaví hned na prvním kroku', async (
     { label: 'Reviewer · sonnet', hire: state.snapshot.hires[0] },
     { label: 'Product owner · sonnet', hire: state.snapshot.hires[1] },
     { label: '#474', pr: { number: 474, reviewed: true } },
+    '',
     '',
   ]);
 

@@ -2,7 +2,7 @@
   "name": "veriflow-agency",
   "displayName": "Agency",
   "description": "Specialists you hire into your repository. Pull request reviews with evidence-backed findings, triage right next to the code, and measurable precision.",
-  "version": "0.3.3",
+  "version": "0.4.0",
   "publisher": "veriflow",
   "license": "UNLICENSED",
   "private": true,

@@ -120,7 +120,7 @@ async function pickHires(candidates, { title, canMultiSelect = true } = {}) {
  * Vrací `{prompt, scenario}`, nebo null, když uživatel odešel. Trvalé zadání
  * z konfigurace se tady needituje — to je `agency brief`, a platí i bez editoru.
  */
-async function askBrief(pack) {
+async function askBrief(pack, who) {
   const info = packInfo(pack) || {};
   const policy = (info.run && info.run.prompt) || {};
   const saved = (info.brief && info.brief.scenarios) || [];
@@ -137,7 +137,7 @@ async function askBrief(pack) {
       { label: '$(edit) Write a new brief…', fresh: true },
     ];
     const pick = await vscode.window.showQuickPick(items, {
-      title: policy.label || 'What should this run focus on?',
+      title: who ? `${who} — what is its part?` : (policy.label || 'What should this run focus on?'),
       placeHolder: standing
         ? `The standing brief always applies: ${String(standing).slice(0, 90)}`
         : 'Saved scenarios live in the pack configuration',
@@ -148,7 +148,10 @@ async function askBrief(pack) {
   }
 
   const typed = await vscode.window.showInputBox({
-    title: policy.label || 'What should this run focus on?',
+    // V řetězu se ptáme po členech, takže titulek musí říct, KOMU. Jedno pole
+    // pro všechny je přesně ta chyba, kvůli které recenzent odpovídal na
+    // otázky psané product ownerovi.
+    title: who ? `${who} — what is its part?` : (policy.label || 'What should this run focus on?'),
     placeHolder: policy.placeholder || 'e.g. the checkout flow as a logged-out user',
     prompt: standing
       ? `The standing brief from the configuration applies on top of this: ${String(standing).slice(0, 120)}`
@@ -353,6 +356,17 @@ function launch(data, log) {
  * `agency chain …` a orchestruje pořád CLI. Hranice „jádro rozhoduje, klient
  * zobrazuje" se tím nemění, jen se posouvá o úroveň výš.
  */
+/** Text uloženého scénáře. `--focus` bere volný text, takže se scénář
+ *  rozbalí tady — v řetězu je zadání per člen a chain-wide `--scenario` by ho
+ *  poslal všem, což je právě ta chyba, kterou `--focus` řeší. */
+function scenarioText(pack, name) {
+  if (!name) return null;
+  const saved = ((packInfo(pack) || {}).brief || {}).scenarios || [];
+  const hit = saved.find((s) => s.name === name);
+  return (hit && hit.text) || null;
+}
+
+
 async function pickAndChain(cwd, log) {
   const candidates = (state.snapshot.hires || []).filter((h) => {
     const p = packInfo(h.pack);
@@ -430,16 +444,24 @@ async function pickAndChain(cwd, log) {
     if (!pr) return null;
   }
 
-  const brief = await askBrief(order[0].pack);
-  if (brief === null) return null;
+  // Zadání po členech, ne jedno pro všechny. Společný text mluví ke dvěma
+  // lidem („udělej review a pomocí PO agenta zjisti…") a ten, komu druhá půlka
+  // není určená, na ni stejně odpoví — viděno na prvním reálném řetězu.
+  // Prázdné pole je legitimní: člen pak nedostane zadání žádné.
+  const focus = [];
+  for (const h of order) {
+    const brief = await askBrief(h.pack, h.display || h.id);
+    if (brief === null) return null;               // Esc nebo chybějící povinné zadání
+    const text = brief.prompt || scenarioText(h.pack, brief.scenario);
+    if (text) focus.push(`${h.id}:${text}`);
+  }
 
   const args = ['chain', ...order.map((h) => h.id)];
   if (pr) args.push('--pr', String(pr.number));
   // Už zrecenzovaný commit by řetěz zastavil hned na prvním kroku. Uživatel ho
   // právě vybral ze seznamu, kde je označený — je to volba, ne omyl.
   if (pr && pr.reviewed) args.push('--force');
-  if (brief.scenario) args.push('--scenario', brief.scenario);
-  else if (brief.prompt) args.push('--prompt', brief.prompt);
+  for (const f of focus) args.push('--focus', f);
 
   const name = `Agency · team · ${order.map((h) => h.label || h.id).join(' → ')}`;
   const term = vscode.window.createTerminal({ name, cwd });
