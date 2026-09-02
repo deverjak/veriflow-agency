@@ -27,8 +27,8 @@ from . import proc
 from .util import read_json, write_json
 
 # An empty `promptFlag` means a positional argument — both claude and codex.
-FIELDS = ("title", "bin", "modelFlag", "dirFlag", "promptFlag", "extraArgs",
-          "models", "defaultModel")
+FIELDS = ("title", "bin", "modelFlag", "dirFlag", "promptFlag", "promptSeparator",
+          "extraArgs", "models", "defaultModel")
 
 BUILTIN: dict[str, dict] = {
     "claude": {
@@ -40,6 +40,13 @@ BUILTIN: dict[str, dict] = {
         # working directory on every single run.
         "dirFlag": "--add-dir",
         "promptFlag": None,
+        # `--add-dir <directories...>` je VARIADICKÝ: bez tohohle oddělovače
+        # spolkne poziční prompt jako druhý adresář a agent naběhne s prázdným
+        # zadáním. Ověřeno na claude 2.1.258:
+        #   claude -p --add-dir DIR "text"     → Error: Input must be provided…
+        #   claude -p --add-dir DIR -- "text"  → odpoví
+        # Nebylo to vidět, protože běh doběhl „úspěšně" bez nálezů.
+        "promptSeparator": "--",
         "extraArgs": [],
         "models": ["opus", "sonnet", "haiku"],
         "defaultModel": None,
@@ -50,6 +57,9 @@ BUILTIN: dict[str, dict] = {
         "modelFlag": "--model",
         "dirFlag": None,
         "promptFlag": None,
+        # Nic variadického před promptem není, takže oddělovač není potřeba —
+        # a neověřený `--` u cizího parseru je riziko, ne opatrnost.
+        "promptSeparator": None,
         "extraArgs": [],
         "models": [],
         "defaultModel": None,
@@ -78,6 +88,9 @@ def load() -> dict[str, dict]:
     for pid, over in custom().items():
         base = merged.get(pid) or {"title": pid, "bin": pid, "modelFlag": "--model",
                                    "dirFlag": None, "promptFlag": None,
+                                   # Výchozí `None`, protože cizí runner nemusí
+                                   # `--` znát. Kdo ho potřebuje, nastaví si ho.
+                                   "promptSeparator": None,
                                    "extraArgs": [], "models": [], "defaultModel": None}
         base.update({k: v for k, v in over.items() if k in FIELDS})
         merged[pid] = base

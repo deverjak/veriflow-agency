@@ -242,6 +242,51 @@ def test_bez_hire_rozhoduje_konfigurace(project):
     assert argv[-1] == "P"
 
 
+def test_prompt_je_chraneny_pred_variadickym_add_dir(project):
+    """Nejdražší chyba, jakou tenhle soubor hlídá.
+
+    `claude --add-dir <directories...>` je VARIADICKÝ. Bez oddělovače si vezme
+    poziční prompt jako druhý adresář a agent naběhne s prázdným zadáním —
+    interaktivní session, která čeká na vstup, co nikdy nepřijde. Ověřeno na
+    claude 2.1.258:
+
+        claude -p --add-dir DIR "text"     → Error: Input must be provided…
+        claude -p --add-dir DIR -- "text"  → odpoví
+
+    Zrádné je, že se to netvářilo jako chyba: běh doběhl, brána nenašla
+    `findings.json` a zapsala `no-findings` — tedy „díval se a nic nenašel".
+    Několik běhů takhle tiše shořelo, než si toho někdo všiml.
+    """
+    argv, _ = runs.launch_argv({"agent": {"provider": "claude"}}, "/run", "P")
+
+    assert argv[-1] == "P", "prompt musí zůstat poslední"
+    assert argv[-2] == "--", "bez oddělovače ho --add-dir spolkne"
+    assert argv.index("--") > argv.index("--add-dir")
+
+
+def test_oddelovac_se_nepridava_naslepo(project):
+    """Codex nic variadického před promptem nemá a `--` u cizího parseru je
+    riziko, ne opatrnost. Přidává se jen tam, kde je ověřeně potřeba."""
+    codex = hires.Hire(id="x", pack="review-graph", provider="codex")
+    argv, _ = runs.launch_argv({}, "/run", "P", hire=codex)
+
+    assert argv[-1] == "P"
+    assert "--" not in argv
+
+
+def test_oddelovac_odpada_kdyz_ma_provider_promptFlag(project, monkeypatch):
+    """S pojmenovaným přepínačem prompt poziční není, takže ho nemá co spolknout."""
+    monkeypatch.setitem(providers.BUILTIN, "flagged", {
+        "title": "Flagged", "bin": "flagged", "modelFlag": None, "dirFlag": None,
+        "promptFlag": "--prompt", "promptSeparator": "--", "extraArgs": [],
+        "models": [], "defaultModel": None})
+    hire = hires.Hire(id="x", pack="review-graph", provider="flagged")
+
+    argv, _ = runs.launch_argv({}, "/run", "P", hire=hire)
+
+    assert argv == ["flagged", "--prompt", "P"]
+
+
 def test_dodatecne_argumenty_patri_svemu_providerovi(project):
     """`extraArgs` jsou psané pro jednoho providera. Druhému by mohly nedávat
     smysl — nebo být rovnou chyba."""

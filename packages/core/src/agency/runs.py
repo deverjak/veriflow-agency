@@ -326,6 +326,12 @@ def launch_argv(cfg: dict, run_dir: str, prompt: str,
     if spec.get("promptFlag"):
         argv += [spec["promptFlag"], prompt]
     else:
+        # Poziční prompt musí být chráněný před variadickou volbou před ním.
+        # `claude --add-dir <directories...>` si ho jinak vezme jako druhý
+        # adresář a agent naběhne s prázdným zadáním — což vypadá jako běh,
+        # co „nic nenašel", ne jako chyba. Viz `providers.promptSeparator`.
+        if spec.get("promptSeparator"):
+            argv.append(spec["promptSeparator"])
         argv.append(prompt)
     return argv, {"provider": name, "model": m, "bin": argv[0],
                   "hire": hire.id if hire else None}
