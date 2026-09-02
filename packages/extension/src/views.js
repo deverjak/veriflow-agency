@@ -381,18 +381,13 @@ class ToolsTree extends Tree {
           .filter(Boolean).join(' · '),
         iconId: h.available ? 'person' : 'person',
         color: h.available ? 'charts.green' : 'charts.orange',
-        contextValue: h.implicit ? 'agencyHire.implicit' : 'agencyHire',
+        contextValue: 'agencyHire',
         collapsed: true,
         children,
         tooltip: `**${h.display}**  \`${h.id}\`\n\n${p.description || ''}\n\n---\n\n`
           + `- runner: \`${h.provider}\`${h.model ? ` · model \`${h.model}\`` : ''}\n`
           + `- method: \`${h.pack}\` — configuration, brief and findings are shared with `
           + 'every specialist hired for it\n'
-          + (h.implicit
-            ? '- this one comes from the method configuration, not from the roster — it '
-            + 'is what ran here before specialists could be hired per runner. Hiring a '
-            + 'second one turns it into a roster entry of its own.\n'
-            : '')
           + `\n\`agency run ${h.id}\``,
       }));
     }

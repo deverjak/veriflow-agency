@@ -710,26 +710,25 @@ check('uzel stromu nese jméno, ne objekt', () => {
     'konfigurace patří metodě, takže se předává jméno packu, ne pracovníka');
 });
 
-check('odvozený pracovník se nedá propustit', () => {
+check('každý pracovník jde propustit', () => {
+  // Do 1. 9. 2026 tu byl „odvozený" pracovník, kterému koš chyběl: nebyl zápis
+  // v rosteru, tak nebylo co smazat. V panelu to byl řádek, který vypadá jako
+  // ostatní a chová se jinak — a po propuštění posledního skutečného se navíc
+  // vracel sám. Roster teď obsahuje jen skutečné pracovníky, takže na každého
+  // platí totéž.
   Object.assign(state.snapshot, {
     probe: { ok: true },
     packs: [RG_PACK],
-    hires: [HIRE({ implicit: true })],
+    hires: [HIRE()],
   });
   const row = new views.ToolsTree().roots()[0];
-  assert.strictEqual(row.item.contextValue, 'agencyHire.implicit',
-    'za odvozeným pracovníkem není zápis v rosteru, takže Propustit nesmí jít nabídnout');
-  assert.ok(row.item.tooltip.value.includes('method configuration'),
-    'musí být vidět, odkud se ten pracovník vzal');
+  assert.strictEqual(row.item.contextValue, 'agencyHire');
 
-  // Kontrakt s package.json: ostatní akce na něj platí, propuštění ne.
   const menus = require(path.join(SRC, '..', 'package.json'))
     .contributes.menus['view/item/context'];
-  const dismiss = menus.find((m) => m.command === 'agency.hire.remove');
-  assert.strictEqual(dismiss.when, 'viewItem == agencyHire');
-  for (const cmd of ['agency.hire.run', 'agency.pack.brief']) {
+  for (const cmd of ['agency.hire.remove', 'agency.hire.run', 'agency.pack.brief']) {
     assert.strictEqual(menus.find((m) => m.command === cmd && /agencyHire/.test(m.when)).when,
-      'viewItem =~ /^agencyHire/', `${cmd} má platit i na odvozeného pracovníka`);
+      'viewItem == agencyHire', `${cmd} má platit na každého pracovníka`);
   }
 });
 

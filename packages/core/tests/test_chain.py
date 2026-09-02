@@ -31,9 +31,17 @@ from conftest import make_finding
 # ------------------------------------------------------------------ pomůcky
 
 def install(project, *names: str) -> None:
+    """Instalace tak, jak ji dělá `agency add` — včetně zápisu pracovníka.
+
+    Samotné `packs.apply` nechá projekt s metodou, na které nikdo nedělá.
+    Od zrušení odvozených pracovníků (1. 9. 2026) to znamená prázdný roster,
+    takže by chain neměl koho spustit a fixture by testovala něco jiného než
+    skutečný projekt.
+    """
     for n in names:
         pack = packs.load(n)
         packs.apply(pack, project, packs.plan(pack, project))
+        hires.ensure_default(project, n, project.pack_config(n) or {})
 
 
 def args(project, *members, **over) -> SimpleNamespace:

@@ -117,65 +117,80 @@ def test_projekt_bez_rosteru_bezi_jako_driv(project):
     assert pack == "review-graph" and hire is None
 
 
-def test_starsi_instalace_ma_pracovnika_i_bez_zapisu(project):
+def test_starsi_instalace_se_hlasi_jako_bez_pracovnika(project):
     """Pack nainstalovaný dřív, než roster existoval, zápis v `hires.json` nemá.
-    Číst to jako „nikdo tu není" by bylo dvakrát špatně: ta metoda tu běhala,
-    a panel by uživatele hnal najmout někoho, koho už má."""
+
+    Do 1. 9. 2026 si takový pack vyrobil „odvozeného" pracovníka. Vypadal jako
+    ostatní, ale nešel propustit — a po propuštění posledního skutečného se
+    vracel sám. Zamýšlená vlastnost se tvářila jako chyba, takže je pryč:
+    roster říká pravdu a `agency doctor` na ten stav upozorní.
+    """
     packs.apply(packs.load("qa"), project, packs.plan(packs.load("qa"), project))
     project.save_installed({"version": 1, "packs": {"qa": {"ref": "qa@0.1.0"}}})
-    assert hires.load(project) == [], "nic se nesmí zapsat"
+
+    assert hires.roster(project) == [], "žádní vymyšlení pracovníci"
+    assert not (project.agency_dir / "hires.json").exists(), "čtení nemá vedlejší efekt"
+
+    # A hlavně: běh se tím nerozbije. `resolve` vrátí None a spuštění se vezme
+    # z konfigurace packu, přesně jako před rosterem.
+    pack, hire = hires.resolve(project, "qa")
+    assert pack == "qa" and hire is None
+
+
+def test_doctor_osireleho_packa_najde_a_poradi(project, capsys):
+    """Jediný zbylý případ po zrušení odvozených pracovníků — a musí se dozvědět
+    sám, ne až když si někdo všimne, že v panelu něco chybí."""
+    packs.apply(packs.load("qa"), project, packs.plan(packs.load("qa"), project))
+    project.save_installed({"version": 1, "packs": {"qa": {"ref": "qa@0.1.0"}}})
+
+    cli.cmd_doctor(SimpleNamespace(repo=str(project.root), json=False))
+    printed = capsys.readouterr().out
+
+    assert "installed with nobody hired" in printed
+    assert "agency hire qa" in printed
+
+
+def test_instalace_pracovnika_zapise(project):
+    """Proč odvozený pracovník už není potřeba: `agency add` roster vyplní sám,
+    takže projekt nikdy nemá pack bez někoho, kdo na něm dělá."""
+    qa = packs.load("qa")
+    packs.apply(qa, project, packs.plan(qa, project))
+    hires.ensure_default(project, "qa", project.pack_config("qa") or {})
 
     crew = hires.roster(project)
-
     assert [h.id for h in crew] == ["qa@claude"]
-    assert crew[0].implicit is True
-    assert crew[0].model == (project.pack_config("qa") or {})["agent"]["model"]
-    # Čtení nesmí mít vedlejší efekt.
-    assert not (project.agency_dir / "hires.json").exists()
-
-    pack, hire = hires.resolve(project, "qa")
-    assert pack == "qa" and hire.id == "qa@claude"
+    assert (project.agency_dir / "hires.json").is_file(), "je to skutečný zápis"
 
 
 def test_najmuti_druheho_nesmi_smazat_prvniho(project):
-    """Nejzrádnější místo celého odvozeného pracovníka: existuje jen tam, kde
-    žádný zapsaný není — takže bez zapsání předchůdce by ho přidání kolegy
-    smazalo. Přijít o pracovníka, kterého jsi měl, je opak toho, co „najmi
-    dalšího" znamená."""
-    project.save_installed({"version": 1, "packs": {"review-graph": {"ref": "review-graph@0.1.0"}}})
-    assert [h.implicit for h in hires.roster(project)] == [True]
+    """Původně to hlídalo zapsání odvozeného předchůdce. Vlastnost zůstává —
+    přidání kolegy nesmí sáhnout na toho, kdo tu už je — jen je teď triviální,
+    protože oba jsou od začátku skuteční."""
+    packs.apply(packs.load("review-graph"), project,
+                packs.plan(packs.load("review-graph"), project))
+    hires.ensure_default(project, "review-graph", project.pack_config("review-graph") or {})
 
     hires.add(project, "review-graph", provider="codex")
 
     crew = hires.roster(project)
     assert [h.id for h in crew] == ["review-graph@claude", "review-graph@codex"]
-    assert [h.implicit for h in crew] == [False, False], "oba už jsou zapsaní"
     # Pořadí drží: `agency run review-graph` pouští pořád téhož jako dřív.
     assert hires.resolve(project, "review-graph")[1].id == "review-graph@claude"
 
 
-def test_zapsani_predchudce_neni_duplicita(project):
-    """Najmout znovu přesně toho, kdo tu už je, je omyl — a má se to říct."""
-    project.save_installed({"version": 1, "packs": {"review-graph": {"ref": "review-graph@0.1.0"}}})
-    cfg = project.pack_config("review-graph") or {}
-    cfg["agent"] = {"provider": "claude", "model": "sonnet"}
-    write_json(project.pack_config_path("review-graph"), cfg)
+def test_propusteni_posledniho_pracovnika_ho_nevrati(project):
+    """Tohle byla ta nejhorší past odvozeného pracovníka: propustíš posledního,
+    a roster ti ho vyrobí znovu — tentokrát bez možnosti propustit. Řádek
+    zmizel a hned se vrátil jinak."""
+    packs.apply(packs.load("qa"), project, packs.plan(packs.load("qa"), project))
+    hires.ensure_default(project, "qa", project.pack_config("qa") or {})
+    assert len(hires.roster(project)) == 1
 
-    with pytest.raises(SystemExit) as e:
-        hires.add(project, "review-graph", provider="claude", model="sonnet")
-    assert "already runs" in str(e.value)
-    # A po odmítnutí zůstane roster tím, čím byl — jen zapsaný.
-    assert [h.id for h in hires.roster(project)] == ["review-graph@claude"]
+    hires.remove(project, "qa@claude")
 
-
-def test_odvozeneho_pracovnika_nejde_vyhodit(project):
-    """Není co smazat — a „takový hire tu není" by lhalo o tom, co je v seznamu."""
-    project.save_installed({"version": 1, "packs": {"review-graph": {"ref": "review-graph@0.1.0"}}})
-
-    with pytest.raises(SystemExit) as e:
-        cli.cmd_fire(SimpleNamespace(repo=str(project.root), json=True,
-                                     hire="review-graph@claude"))
-    assert "default worker" in str(e.value)
+    assert hires.roster(project) == [], "propuštěný pracovník se nevrací"
+    # Metoda zůstává nainstalovaná a dá se na ni najmout někdo nový.
+    assert packs.installed_ref(project, "qa") == "qa@0.1.0"
 
 
 def test_vyhozeni_nechava_metodu_i_behy(project, make_run):
@@ -490,20 +505,20 @@ def test_roster_bez_jedineho_runneru_je_fatalni(project, monkeypatch, capsys):
     assert rows["agent"]["ok"] is False and rows["agent"]["fatal"] is True
 
 
-def test_odvozeny_pracovnik_dojde_i_ke_klientovi(project, capsys):
-    """Panel u starší instalace nesmí tvrdit „nikdo nenajatý" o metodě, která
-    tu běhá — a runner s modelem si musí vzít z její konfigurace."""
+def test_pracovnik_dojde_ke_klientovi_i_s_modelem(project, capsys):
+    """Panel musí dostat runner i model — „Reviewer · sonnet" je to jediné, co
+    odliší dva pracovníky téže metody."""
     cfg = project.pack_config("review-graph") or {}
     cfg["agent"] = {"provider": "claude", "model": "sonnet"}
     write_json(project.pack_config_path("review-graph"), cfg)
     project.save_installed({"version": 1, "packs": {"review-graph": {"ref": "review-graph@0.1.0"}}})
+    hires.ensure_default(project, "review-graph", cfg)
 
     cli.cmd_packs(SimpleNamespace(repo=str(project.root), json=True))
     data = {p["name"]: p for p in __import__("json").loads(capsys.readouterr().out)}
 
     rg = data["review-graph"]["hires"]
     assert [h["id"] for h in rg] == ["review-graph@claude"]
-    assert rg[0]["implicit"] is True
     assert rg[0]["display"] == "Reviewer · sonnet"
 
 

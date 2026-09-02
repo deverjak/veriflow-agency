@@ -2,7 +2,7 @@
   "name": "veriflow-agency",
   "displayName": "Agency",
   "description": "Specialists you hire into your repository. Pull request reviews with evidence-backed findings, triage right next to the code, and measurable precision.",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "publisher": "veriflow",
   "license": "UNLICENSED",
   "private": true,
@@ -527,17 +527,17 @@
         {
           "command": "agency.hire.run",
           "group": "inline@1",
-          "when": "viewItem =~ /^agencyHire/"
+          "when": "viewItem == agencyHire"
         },
         {
           "command": "agency.hire.add",
           "group": "1_hire@1",
-          "when": "viewItem =~ /^agencyHire/"
+          "when": "viewItem == agencyHire"
         },
         {
           "command": "agency.pack.brief",
           "group": "1_hire@2",
-          "when": "viewItem =~ /^agencyHire/"
+          "when": "viewItem == agencyHire"
         },
         {
           "command": "agency.hire.remove",

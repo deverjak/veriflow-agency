@@ -543,13 +543,6 @@ function activate(context) {
   reg('agency.hire.remove', async (arg) => {
     const id = hireIdOf(arg);
     if (!id) return;
-    const h = (state.snapshot.hires || []).find((x) => x.id === id);
-    if (h && h.implicit) {
-      vscode.window.showWarningMessage(
-        `Agency: ${id} is the default worker of the ${h.pack} method, taken from its `
-        + 'configuration — there is no roster entry to dismiss.');
-      return;
-    }
     const yes = await vscode.window.showWarningMessage(
       `Dismiss ${id}?`,
       { modal: true, detail: 'The method, its configuration and every past run stay. '

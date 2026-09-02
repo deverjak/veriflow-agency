@@ -47,9 +47,6 @@ class Hire:
     model: str | None = None
     title: str | None = None
     createdAt: str | None = None
-    # Not in the file — derived from a pack that is installed with nobody on it.
-    # See `roster()`.
-    implicit: bool = False
 
     @property
     def label(self) -> str:
@@ -74,7 +71,7 @@ class Hire:
     def as_dict(self) -> dict:
         return {"id": self.id, "pack": self.pack, "provider": self.provider,
                 "model": self.model, "title": self.title, "createdAt": self.createdAt,
-                "label": self.label, "implicit": self.implicit}
+                "label": self.label}
 
 
 def _path(project: Project):
@@ -98,56 +95,27 @@ def save(project: Project, entries: list[Hire]) -> None:
     write_json(_path(project), {
         "version": 1,
         "hires": [{k: v for k, v in h.as_dict().items()
-                   if k not in ("label", "implicit")} for h in entries],
+                   if k != "label"} for h in entries],
     })
 
 
 def roster(project: Project) -> list[Hire]:
-    """Who works here — including the worker a project has without knowing it.
+    """Who works here. Every entry is a real one — there are no derived workers.
 
-    A pack installed before the roster existed has no entry, and reading that as
-    "nobody hired" would be wrong twice over: the project HAS been running that
-    method, and the panel would push the user to hire someone they already have.
+    Do 1. 9. 2026 tady vznikal „odvozený" pracovník: nainstalovaný pack bez
+    zápisu v rosteru si ho dopočítal z konfigurace. Mělo to obsloužit projekt
+    založený dřív, než roster existoval, a vyrobilo to řádek, který vypadá jako
+    ostatní a chová se jinak — nejde propustit, protože není co smazat, a po
+    propuštění posledního skutečného pracovníka se **vrátil sám**. Nikdo tomu
+    nerozuměl a zamýšlená vlastnost se tvářila jako chyba.
 
-    So an installed pack with no entry of its own contributes one derived from
-    its `agent` block. Nothing is written — a read must not have side effects,
-    and the day the user hires anyone for that pack the stored entry takes over.
-    An implicit worker exists only where there are no stored ones for that pack,
-    so the two never mix.
+    Instalace dneska zapíše pracovníka sama (`ensure_default`), takže nedosažený
+    případ zůstal jediný: pack nainstalovaný starou verzí. Ten se teď hlásí
+    poctivě jako „nainstalováno, nikdo na tom nedělá" — `agency doctor` na to
+    upozorní a `agency hire <pack>` to spraví. Běhu to nevadí: `resolve` vrátí
+    `None` a spouštění se vezme z konfigurace, přesně jako dřív.
     """
-    stored = load(project)
-    have = {h.pack for h in stored}
-    out = list(stored)
-    for name in sorted((project.installed().get("packs") or {})):
-        if name in have:
-            continue
-        agent = ((project.pack_config(name) or {}).get("agent")) or {}
-        provider = agent.get("provider") or "claude"
-        out.append(Hire(id=f"{name}@{provider}", pack=name, provider=provider,
-                        model=agent.get("model"), implicit=True))
-    return out
-
-
-def materialize(project: Project, pack: str) -> Hire | None:
-    """Write down the worker a pack has been running on all along.
-
-    Called before anyone new is hired for that pack. Without it, hiring a
-    SECOND runner would make the first one vanish: an implicit worker exists
-    only where there are no stored ones, so the act of adding a colleague would
-    delete the incumbent. Losing the worker you already had is the opposite of
-    what "hire another one" means.
-    """
-    if for_pack(project, pack):
-        return None
-    for h in roster(project):
-        if h.pack == pack and h.implicit:
-            h.implicit = False
-            h.createdAt = _now()
-            entries = load(project)
-            entries.append(h)
-            save(project, entries)
-            return h
-    return None
+    return load(project)
 
 
 def get(project: Project, hire_id: str) -> Hire | None:
@@ -184,10 +152,6 @@ def suggest_id(pack: str, provider: str, model: str | None, taken: set[str]) -> 
 def add(project: Project, pack: str, provider: str = "claude",
         model: str | None = None, hire_id: str | None = None,
         title: str | None = None) -> Hire:
-    # The incumbent gets written down before a colleague joins — otherwise it
-    # would be deleted by the very act of hiring one.
-    materialize(project, pack)
-
     entries = load(project)
     taken = {h.id for h in entries}
 
@@ -240,9 +204,6 @@ def ensure_default(project: Project, pack: str, cfg: dict | None = None) -> Hire
     """
     if for_pack(project, pack):
         return None
-    written = materialize(project, pack)
-    if written:
-        return written
     agent = (cfg or {}).get("agent") or {}
     return add(project, pack, provider=agent.get("provider") or "claude",
                model=agent.get("model"))

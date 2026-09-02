@@ -288,15 +288,6 @@ def cmd_fire(args) -> int:
     project = _project(args)
     gone = hires.remove(project, args.hire)
     if not gone:
-        # An implicit worker is the pack's own configuration wearing a name —
-        # there is no roster entry to delete. Saying "no such hire" would be a
-        # lie about something the user can see in the list.
-        for h in hires.roster(project):
-            if h.id == args.hire and h.implicit:
-                raise SystemExit(
-                    f"“{args.hire}” is not a roster entry — it is the default worker of "
-                    f"the {h.pack} method, taken from its configuration.\n"
-                    f"Remove the method itself, or hire someone explicitly first.")
         known = ", ".join(h.id for h in hires.roster(project)) or "(nobody)"
         raise SystemExit(f"There is no hire “{args.hire}” here. Hired: {known}")
 
@@ -455,6 +446,19 @@ def cmd_doctor(args) -> int:
         for bad in pg["broken"]:
             detail += f"\n{' ' * 29}{bad['path']}: {bad['error']}"
         check("pack pages", not pg["broken"], detail, fatal=False)
+
+    # Pack nainstalovaný verzí, která roster ještě nezapisovala. Dřív si takový
+    # pack vyrobil „odvozeného" pracovníka a tvářil se, že je všechno v pořádku —
+    # jenže ten pracovník nešel propustit a po propuštění posledního skutečného
+    # se vracel sám. Teď se to řekne nahlas, protože spravit to jde jedním
+    # příkazem.
+    orphaned = [n for n in sorted((project.installed().get("packs") or {}))
+                if not hires.for_pack(project, n)]
+    if orphaned:
+        check("roster", False,
+              f"{', '.join(orphaned)} installed with nobody hired — "
+              f"`agency hire {orphaned[0]}` writes the worker down. Runs still work: "
+              f"they fall back to the pack configuration.", fatal=False)
 
     for p in packs.available():
         ref = packs.installed_ref(project, p.name)
