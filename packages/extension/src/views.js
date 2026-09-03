@@ -121,7 +121,8 @@ class OverviewTree extends Tree {
       tooltip: packs.length
         ? 'A pack is a skill in `.claude/skills/agency-<name>/` — written for this project, '
         + 'not installed into it. Click to see what each one does and run one.'
-        : 'No pack found. A pack is a skill directory with a `pack.json` next to its `SKILL.md`.',
+        : 'No pack found. A pack is a skill directory with a `pack.json` next to its '
+        + '`SKILL.md`. Click — writing the first one is itself a run.',
     }));
 
     const last = (s.runs || [])[0];
@@ -184,7 +185,10 @@ function packChildren(p) {
     iconId: target === 'workspace' ? 'browser' : 'git-pull-request',
     tooltip: target === 'workspace'
       ? 'It runs over the working copy, including uncommitted work. No throwaway worktree, '
-      + 'so the source is **read only**: everything the run produces goes into the run directory.'
+      + 'so what it may write is whatever its own `SKILL.md` allows — for almost every pack '
+      + 'that means the run directory and its own knowledge pages, and the source stays read '
+      + 'only. A pack that writes source (the author writes `.claude/skills/`) leaves it '
+      + 'uncommitted, for the diff to be read like any other change.'
       : 'It runs over a pull request in a throwaway worktree on its head commit. Your '
       + 'branch and your work in progress stay untouched.',
   }));

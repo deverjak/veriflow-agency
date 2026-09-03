@@ -417,6 +417,52 @@ function activate(context) {
     if (d) setTimeout(() => refresh(), 2000);
   });
 
+  // Writing a new specialist is a run like any other — `agency run author`.
+  // It is NOT a form: if this collected a name, dimensions and a sink and
+  // wrote pack.json itself, the extension would be configuring the project
+  // again, which is exactly what agency-v1 §5 deleted. All that is decided
+  // here is the two things a run needs anyway — the assignment and the
+  // runner — and the rest happens in the terminal, where the agent can ask.
+  reg('agency.pack.create', async () => {
+    if (!state.snapshot.probe.ok) return showNotReady();
+
+    const author = (state.snapshot.packs || []).find((x) => x.name === review.AUTHOR_PACK);
+    if (!author) {
+      vscode.window.showWarningMessage(
+        `Agency: this project has no “${review.AUTHOR_PACK}” pack, and nothing here installs `
+        + 'one. Copy `packs/author/` from the agency repository to '
+        + `\`.claude/skills/agency-${review.AUTHOR_PACK}/\` and reload.`);
+      return;
+    }
+
+    // Asked here rather than through review.askPrompt, whose wording is
+    // about focusing a run — this one describes a specialist that does not
+    // exist yet, which is a different question.
+    const what = await vscode.window.showInputBox({
+      title: 'What should the new specialist do?',
+      placeHolder: 'e.g. watch our database migrations for anything that cannot be rolled back',
+      prompt: 'A description is enough — it reads the repository itself and asks you about '
+        + 'the rest in the terminal.',
+      ignoreFocusOut: true,
+    });
+    if (what === undefined) return;               // Esc = walked away
+    if (!what.trim()) {
+      vscode.window.showWarningMessage(
+        'Agency: without a description there is nothing to write — the run was not started.');
+      return;
+    }
+
+    // Writing a SKILL.md decides what that specialist finds for months, on a
+    // task run once. That is the one place where picking the runner up front
+    // is worth a click.
+    const pm = await pickProviderModel();
+    if (!pm) return;
+
+    const d = await review.runEach(state.snapshot.cwd, [author],
+      { prompt: what.trim(), provider: pm.provider, model: pm.model }, log);
+    if (d) setTimeout(() => refresh(), 2000);
+  });
+
   // --- presets — a saved provider/model, run the same way a pack itself is.
   reg('agency.preset.run', async (arg) => {
     if (!state.snapshot.probe.ok) return showNotReady();

@@ -1,0 +1,23 @@
+{
+  "name": "author",
+  "title": "Pack author",
+  "description": "Writes a new specialist for this project. Reads the repository to learn what it is and what it already has, asks you only what the repository cannot answer, agrees the dimensions with you, and writes `.claude/skills/agency-<name>/`. What it leaves behind is uncommitted source in your working tree — git is the review, and the first real run is yours to start.",
+  "requires": ["git"],
+  "target": "workspace",
+  "worktree": false,
+  "graph": false,
+  "prompt": "required",
+  "needs": [
+    "agency packs", "agency doctor", "agency knowledge", "agency findings",
+    "git", "rg",
+    "gh repo view", "gh issue list", "gh project list", "gh label list"
+  ],
+  "dimensions": [
+    { "id": "subject", "title": "What the specialist judges — and what it must not" },
+    { "id": "facts", "title": "The project facts the skill has to carry, because there is no config" },
+    { "id": "dimensions", "title": "Its questions — each one able to come back false" },
+    { "id": "evidence", "title": "What counts as proof here, and what the gate would drop" },
+    { "id": "sink", "title": "Where a finding goes when it passes — or that it rests in the memory" },
+    { "id": "boundaries", "title": "What it may never do, and what stays outside `needs`" }
+  ]
+}

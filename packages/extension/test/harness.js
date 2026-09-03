@@ -1024,6 +1024,75 @@ check('no leftover roster, provider-registry or Playwright-config commands remai
   }
 });
 
+check('Write a new specialist sits on the Specialists view title', () => {
+  const pkg = require(path.join(SRC, '..', 'package.json'));
+  const create = pkg.contributes.menus['view/title']
+    .find((m) => m.command === 'agency.pack.create');
+  assert.ok(create, 'missing agency.pack.create on a view title');
+  assert.strictEqual(create.when, 'view == agency.tools');
+
+  // Writing a specialist is a real thing to want from the palette too — it
+  // is not a row action that needs a selection first.
+  const hidden = (pkg.contributes.menus.commandPalette || [])
+    .find((m) => m.command === 'agency.pack.create' && m.when === 'false');
+  assert.ok(!hidden, 'agency.pack.create should stay in the command palette');
+});
+
+check('the author pack the client names is the one the repository ships', () => {
+  // `AUTHOR_PACK` is the single hard-coded pack name in the extension —
+  // unavoidable, because a run that writes a specialist cannot be started
+  // from a row that does not exist yet. Renaming the reference pack without
+  // this line would leave the button pointing at nothing, and the only
+  // symptom would be a warning nobody expects.
+  const review = require(path.join(SRC, 'review.js'));
+  const manifest = require(path.join(SRC, '..', '..', '..', 'packs', 'author', 'pack.json'));
+  assert.strictEqual(manifest.name, review.AUTHOR_PACK);
+  assert.strictEqual(manifest.prompt, 'required',
+    'the author cannot write a specialist nobody described');
+  assert.strictEqual(manifest.target, 'workspace');
+  assert.ok(!manifest.sink,
+    'the author writes source, not findings — a sink would have nothing to send');
+});
+
+checkAsync('writing a specialist asks the description and the runner, then runs the author', async () => {
+  const review = require(path.join(SRC, 'review.js'));
+  const AUTHOR_PACK = {
+    name: 'author', title: 'Pack author', skill: 'agency-author',
+    description: 'Writes a new specialist for this project.',
+    dimensions: [{ id: 'subject', title: 'What the specialist judges' }],
+    requires: ['git'],
+    run: { target: 'workspace', worktree: false, graph: null, prompt: 'required', needs: [] },
+    minScore: 70,
+  };
+  Object.assign(state.snapshot, { probe: { ok: true }, cwd: 'C:/project', packs: [AUTHOR_PACK] });
+
+  const cli = require(path.join(SRC, 'cli.js'));
+  const prepared = [];
+  cli.run = async (cwd, pack, opts) => {
+    prepared.push({ pack, opts });
+    return {
+      ok: true,
+      data: {
+        runId: '01M1CGN9HAMBKK63SASPP2EYWJ', worktree: 'C:/project',
+        agent: { provider: 'claude', model: 'opus' },
+        target: { ref: 'main' }, launch: ['claude', 'go'],
+      },
+    };
+  };
+
+  // The pack declares no `needsUnattended`, so nothing may ask about
+  // supervision — an authoring run touches nobody outside the repository.
+  await review.runEach('C:/project', [AUTHOR_PACK],
+    { prompt: 'watch our migrations', provider: 'claude', model: 'opus' }, { appendLine() {} });
+
+  assert.strictEqual(prepared.length, 1);
+  assert.strictEqual(prepared[0].pack, 'author');
+  assert.strictEqual(prepared[0].opts.prompt, 'watch our migrations');
+  assert.strictEqual(prepared[0].opts.provider, 'claude');
+  assert.strictEqual(prepared[0].opts.model, 'opus',
+    'the model picked for writing a SKILL.md has to reach the run, not be dropped here');
+});
+
 (async () => {
   for (const [name, fn] of pending) {
     try { await fn(); console.log(`  ok   ${name}`); }

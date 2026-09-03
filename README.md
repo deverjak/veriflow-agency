@@ -11,7 +11,7 @@ which board, which staging URL, which law applies — is written into the skill
 as fact, the same way the code itself is project-specific. A second project
 gets a **copy** of the pack and rewrites its facts, not a shared parameter.
 
-## The workflows — five over `main-panel`, one over `kvesteros-platform`
+## The workflows — five over `main-panel`, one over `kvesteros-platform`, one that writes the next
 
 This is the whole product. `agency` runs specialists against one project;
 what each one finds goes through a gate (evidence required, no duplicates)
@@ -108,6 +108,35 @@ knowledge. `needs` names `WebSearch` and `WebFetch` by tool name: an
 unsupervised run has nobody to approve a fetch, and a founder pack that
 cannot read the web is a memoir.
 
+**W7 — Write a specialist this project does not have yet**
+
+```
+agency run author --prompt "watch our database migrations for anything that cannot be rolled back"
+```
+
+A pack is source in the repository, so writing one is a code-writing task
+and an agent does it. It reads the project — stack, CI, docs, whether `gh`
+sees a board, what the existing packs already cover — then asks, in the
+terminal, only what the repository could not answer, agrees the dimensions
+out loud, and writes `.claude/skills/agency-<name>/`. What it leaves behind
+is **uncommitted source in the working tree**: git is the review, and the
+first real run is yours to start (`agency run` refuses to start inside an
+agent, so it cannot try its own pack).
+
+It writes no findings, and `no-findings` in the panel is the correct
+outcome — a run that produced a directory was not looking for anything. The
+value is not the JSON, which any template could emit; it is the **Project
+facts** section and the dimensions. A dimension is one question whose answer
+can come back false, about something a finding can point a line number at:
+"Performance" is not one, "queries on a request path with no index behind
+them" is. `packs/author/references/dimensions.md` is the argument, with the
+rewrites.
+
+In the extension it is **Write a new specialist…** on the Specialists view,
+which asks for the description and for which runner writes it — the one
+task worth choosing a model for by hand, since a `SKILL.md` decides what
+that specialist finds for months.
+
 ### Memory anyone can read
 
 `.agency/knowledge/` is a **committed** directory of markdown: a ledger of
@@ -142,7 +171,8 @@ veriflow-agency/                     this repository
                                      Knows nothing about any target project.
   packages/extension/                VIEWER — runs, findings next to the line, read-only.
                                      Talks only to `agency … --json`.
-  packs/                             EXAMPLES — reference copies of main-panel's and kvesteros-platform's packs, for the next project.
+  packs/                             EXAMPLES — reference copies of main-panel's and kvesteros-platform's packs, for the next project;
+                                     `author/` is the exception: generic, copied unchanged, and it writes the others.
                                      Not bundled, not installed.
 
 <target-project>/
@@ -273,6 +303,18 @@ instance, has the board's field names and constants written into it — copy
 it and change the constants). Run `agency doctor` in the target project;
 it reports what is still missing.
 
+The one pack worth copying **unchanged** is `packs/author` — it is the only
+generic one, because its subject is this system rather than any project:
+
+```
+cp -r packs/author <target-project>/.claude/skills/agency-author
+```
+
+After that, `agency run author --prompt "…"` writes the project's own
+specialists in place, and there is nothing left to copy by hand. This is
+also why the extension knows one pack by name: a run that writes a
+specialist cannot be started from a row that does not exist yet.
+
 ### Contracts
 
 The only places two of these three things touch. Nothing else is shared.
@@ -345,7 +387,7 @@ what happened and shows it, it does not decide.
 |---|---|
 | `packages/core/` | the runner and CLI (Python, `uv`) |
 | `packages/extension/` | the VS Code extension (plain JS, no build step) |
-| `packs/` | reference copies of packs living in `main-panel` and `kvesteros-platform`, for the next project to copy |
+| `packs/` | reference copies of packs living in `main-panel` and `kvesteros-platform`, for the next project to copy — plus `author/`, the generic one that writes the rest |
 | `schemas/` | `run.v1`, `finding.v1` — the contract across the boundary |
 | `docs/` | decisions and plans, including what changed in them and why |
 

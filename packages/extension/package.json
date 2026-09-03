@@ -96,7 +96,7 @@
       {
         "view": "agency.tools",
         "when": "agency.ready",
-        "contents": "No specialist found in this project.\n\nA pack is a skill directory — `pack.json` next to `SKILL.md`, under `.claude/skills/agency-<name>/`. Nothing here installs one; it is written for this project and committed with it."
+        "contents": "No specialist found in this project.\n\nA pack is a skill directory — `pack.json` next to `SKILL.md`, under `.claude/skills/agency-<name>/`. Nothing here installs one; it is written for this project and committed with it.\n\nWriting one is a code-writing task, so an agent does it: describe what the specialist should do, and it reads the repository, asks you the rest in the terminal and writes the directory for you to review.\n\n[Write a new specialist](command:agency.pack.create)\n\nThat needs the `author` pack itself — copy `packs/author/` from the agency repository into `.claude/skills/agency-author/` once."
       }
     ],
     "configuration": {
@@ -210,6 +210,12 @@
         "title": "Run this specialist…",
         "category": "Agency",
         "icon": "$(play)"
+      },
+      {
+        "command": "agency.pack.create",
+        "title": "Write a new specialist…",
+        "category": "Agency",
+        "icon": "$(person-add)"
       },
       {
         "command": "agency.view.tools.focus",
@@ -378,8 +384,13 @@
           "when": "view == agency.runs"
         },
         {
-          "command": "agency.preset.add",
+          "command": "agency.pack.create",
           "group": "navigation@1",
+          "when": "view == agency.tools"
+        },
+        {
+          "command": "agency.preset.add",
+          "group": "navigation@2",
           "when": "view == agency.tools"
         }
       ],

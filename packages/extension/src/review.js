@@ -29,6 +29,13 @@ const state = require('./state.js');
 
 const STATE_ICON = { open: '$(git-pull-request)', merged: '$(git-merge)' };
 
+// The one pack this client knows by name. It has to: "write me a new
+// specialist" is a run over a pack that does not exist yet, so there is
+// nothing on a row to start it from. Everything after the name is ordinary
+// — it is discovered through `agency packs` like the rest, and a project
+// without it simply does not offer the command.
+const AUTHOR_PACK = 'author';
+
 function items(prs) {
   const open = prs.filter((p) => p.state === 'open');
   const merged = prs.filter((p) => p.state === 'merged');
@@ -486,5 +493,5 @@ function quote(arg) {
 module.exports = {
   pickAndRun, pickAndChain, runOverWorkspace, askPrompt, runEach, pickPacks,
   askSupervision, runUnsupervised,
-  workspacePacks, reviewPacks, items, launch,
+  workspacePacks, reviewPacks, items, launch, AUTHOR_PACK,
 };
