@@ -247,9 +247,26 @@ Kroky 1, 2 a 4 jsou na sobě nezávislé a jsou to dohromady čtyři hodiny. Kro
 - [x] **Krok 4** — extension jako viewer: pryč formuláře, roster, brief, launch-argv; spuštění = `agency run …` do terminálu; `package.json` 0.6.0, harness přepsaný od nuly (37/37), VSIX zabalený a nainstalovaný
 - [x] **Krok 5** — čtyři packy pro main-panel z původních agentů: PO se `scripts/backlog.py` (živě ověřeno proti reálnému `main-panel` — snapshot 225 issues, 63 draftů) a seedem `decisions.md`, QA se stagingem a personami, právník s Project facts, recenzent; všechny anglicky; `packs/` v tomhle repu je teď kopie těch čtyř adresářů
 - [x] **Krok 6** — README z `agency --help`, product-brief pravidlo 5 a tabulka pojmů, řádek do README obou původních agentů
-- [ ] **Krok 7** — přejímka: pět workflow reálně nad main-panelem (W2 = sedm podmínek Fáze 8 Kroku 8) — **čeká na vědomé spuštění**, protože jde o reálné zápisy na GitHub a reálné běhy agentů, ne o něco, co má smysl pouštět bez dohledu
+- [~] **Krok 7** — přejímka: 4 z 5 workflow reálně nad main-panelem, 3. 9. 2026. **W1** (review PR #478) hotovo — jeden příkaz, `agent.denied == 0`. **W2** (řetěz review-graph→po PR #478) hotovo — obě čísla `denied: 0`, reálné issues #488/#489 založené a podepsané. **W3** (grooming) hotovo — `evidence/backlog.json` s issues i milníky, `decisions.md` s novými řádky, jeden nový nález (chybějící `--milestone` v `backlog.py`) správně vyřazený branou jako `phantom-file`, protože vlastní anchor packu leží pod gitignorovaným `.claude/`. **W4** (QA na stagingu) hotovo — nová (ne regresní) chyba nalezena a dvakrát reprodukována Playwright specem: karta předplatného po naplánovaném zrušení účtu dál tvrdí `Aktivní` a nabízí `Zrušit předplatné`; substance je v `pages/qa/coverage.md`, ale záznam běhu a spec zmizely z `main-panel/.agency/runs/` beze stopy v kódu, který by to vysvětlil (viz níže). **W5** (právní review) **nedoběhlo** — uživatel dvakrát zavřel terminál s běžícím agentem (`exitReason: "the terminal was closed before the agent finished"`); oba běhy zahozeny (`agency cleanup --discard`), nic se nenašlo k triage.
+  - **Nevysvětlená ztráta dat:** adresář běhu `01M1K6GWE3PZQC1RZYVQEKTDPH` (W4) zmizel celý — `run.json`, `evidence/`, `specs/*.spec.ts` — někdy mezi dokončením W4 a prvním zásahem do W5, dřív než proběhl jakýkoli `--discard`. V `runs.py`/`cli.py` není žádná cesta, která by běh jiného packu mazala automaticky; nejpravděpodobnější vysvětlení je vedlejší efekt zavření terminálu mimo `agency`, ne bug v něm — ale nebylo to dovyšetřeno, protože nález sám přežil v `coverage.md`. Stojí za bližší pohled, než se tomu bude znovu věřit naslepo.
 
-**Hotovo, když:** projde Krok 7 — všech pět workflow z jedné řádky, bez sáhnutí do jediného JSONu. Kroky 0–6 hotové 2. 9. 2026.
+**Hotovo, když:** projde Krok 7 — všech pět workflow z jedné řádky, bez sáhnutí do jediného JSONu. Kroky 0–6 hotové 2. 9. 2026. W5 zbývá doběhnout; jinak čtyři z pěti prošly reálně a beze stopy po staré konfiguraci.
+
+---
+
+## Fáze 11 — GitHub Project je pravda (~1,5 dne)
+
+> [`findings-ownership.md`](findings-ownership.md). Vzniklo 3. 9. 2026 z přejímky: v1 má dva vlastníky pravdy (`export.py` říká „run record", PO pack říká „board"), `agency export` nikdy neběžel, a adresář běhu W4 zmizel i s nálezem, který přežil jen náhodou. Nově: **board je stav, lokál je brána a stopa** (`trail.jsonl`, append-only, commitovaná), lokál nikdy nečte board kvůli sobě. K tomu presety spuštění v extension (runner × model, bez registru) a `cleanup --all`.
+
+- [ ] **Krok 1** — stopa + schéma + brána: `trail.jsonl`, `runs.dispatch`, `held`/`sent`, `pack.sink`
+- [ ] **Krok 2** — CLI: `triage accept|reject` (bez `defer`), `findings` ze stopy, `status.providers`, `cleanup --all`, `export` pryč
+- [ ] **Krok 3** — paměť: `index.md` jako stopa (bez *Open*), bundle nemaže, co je ve stopě; precision jen `hire:*`
+- [ ] **Krok 4** — pack: `backlog.py draft --finding`, `sink` ve čtyřech `pack.json`, `SKILL.md` ×4, kopie v `packs/`
+- [ ] **Krok 5** — extension 0.7.0: Findings bez rozhodovacích tlačítek, presety (`agency.presets`), Clear all
+- [ ] **Krok 6** — docs: README, product-brief pravidlo 2
+- [ ] **Krok 7** — přejímka (uživatel): draft na boardu → povýšit online → druhý běh nic nepošle, `git status` čistý; Clear all → stopa zůstala
+
+**Hotovo, když:** projde Krok 7 (§8 plánu).
 
 ---
 
