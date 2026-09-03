@@ -406,16 +406,36 @@ function activate(context) {
     vscode.commands.executeCommand('agency.tools.focus'));
 
   // One specialist, started from its own row in the Specialists view.
-  reg('agency.pack.run', async (arg) => {
+  //
+  // Two arrows, one path. The second one differs by a single option, so it
+  // must not be a second way to start a run — a copy would be a second place
+  // where the target is picked and the model is decided, and the run record
+  // would end up lying about one of them.
+  const runOne = async (arg, extra = {}) => {
     if (!state.snapshot.probe.ok) return showNotReady();
     const name = packNameOf(arg);
     const p = (state.snapshot.packs || []).find((x) => x.name === name);
     if (!p) return;
     const d = (p.run && p.run.target === 'workspace')
-      ? await review.runOverWorkspace(state.snapshot.cwd, p, log)
-      : await runOneOverPr(p);
+      ? await review.runOverWorkspace(state.snapshot.cwd, p, log, extra)
+      : await runOneOverPr(p, extra);
     if (d) setTimeout(() => refresh(), 2000);
-  });
+  };
+
+  reg('agency.pack.run', (arg) => runOne(arg));
+
+  // The same run with the runner's own permission prompt turned off —
+  // `--bypass`, which the core translates into that runner's shape
+  // (`--dangerously-skip-permissions` for Claude Code,
+  // `--dangerously-bypass-approvals-and-sandbox` for Codex).
+  //
+  // It exists because `needs` describes what a method does, and a method that
+  // reads a whole project does not have a short command list: the CEO pack
+  // asked about fifty times in one run. The answer to that is either a
+  // manifest nobody can keep honest, or a run the user consciously starts
+  // unguarded. This is the second one — its own arrow, never the row's
+  // default click, and it says so on every surface it appears on.
+  reg('agency.pack.runBypass', (arg) => runOne(arg, { bypass: true }));
 
   // Writing a new specialist is a run like any other — `agency run author`.
   // It is NOT a form: if this collected a name, dimensions and a sink and

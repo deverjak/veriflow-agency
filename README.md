@@ -254,6 +254,16 @@ is authorized to write into its own worktree and `.agency/`, plus whatever
 its pack's `needs` names; `--bypass` turns that check off entirely, for a
 sandbox that will not otherwise let the agent run its own binary.
 
+In the extension that is the **second arrow** on a specialist's row: ▶ runs
+it authorized as usual, ▶▶ runs exactly the same thing with `--bypass` —
+`--dangerously-skip-permissions` for Claude Code,
+`--dangerously-bypass-approvals-and-sandbox` for Codex. It is a separate
+icon rather than a checkbox on the first one, because a method that reads a
+whole project has no short `needs` list (a strategy pack asked about fifty
+separate commands in a single run), and the honest answer to that is either
+a manifest nobody can keep true or a run you knowingly start unguarded. The
+run record says which it was: `agent.authorized` is `grant` or `bypass`.
+
 ### A pack — `pack.json`
 
 ```json

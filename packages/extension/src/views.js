@@ -245,7 +245,10 @@ class ToolsTree extends Tree {
         ...packChildren(p),
       ],
       tooltip: `**${p.title || p.name}**\n\n${p.description || ''}\n\n---\n\n`
-        + `\`agency run ${p.name}\` — or the ▶ on this row.`,
+        + `\`agency run ${p.name}\` — or the ▶ on this row.\n\n`
+        + '▶▶ is the same run with the runner’s permission checks turned off '
+        + `(\`agency run ${p.name} --bypass\`). Nothing asks before it acts — for a `
+        + 'method that reads the whole project and would otherwise ask fifty times.',
     }));
   }
 }

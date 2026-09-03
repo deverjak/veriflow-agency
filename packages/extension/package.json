@@ -2,7 +2,7 @@
   "name": "veriflow-agency",
   "displayName": "Agency",
   "description": "Specialists for this repository. Pull request reviews with evidence-backed findings, triage right next to the code, and measurable precision.",
-  "version": "0.7.2",
+  "version": "0.7.3",
   "publisher": "veriflow",
   "license": "UNLICENSED",
   "private": true,
@@ -212,6 +212,12 @@
         "icon": "$(play)"
       },
       {
+        "command": "agency.pack.runBypass",
+        "title": "Run this specialist without permission prompts…",
+        "category": "Agency",
+        "icon": "$(run-all)"
+      },
+      {
         "command": "agency.pack.create",
         "title": "Write a new specialist…",
         "category": "Agency",
@@ -320,6 +326,10 @@
           "when": "false"
         },
         {
+          "command": "agency.pack.runBypass",
+          "when": "false"
+        },
+        {
           "command": "agency.run.discard",
           "when": "false"
         },
@@ -418,6 +428,11 @@
         {
           "command": "agency.pack.run",
           "group": "inline@1",
+          "when": "viewItem == agencyPack"
+        },
+        {
+          "command": "agency.pack.runBypass",
+          "group": "inline@2",
           "when": "viewItem == agencyPack"
         },
         {

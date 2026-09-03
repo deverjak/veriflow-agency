@@ -201,16 +201,22 @@ function runUnsupervised(cwd, pack, opts, log) {
   if (opts.model) args.push('--model', opts.model);
   if (opts.since) args.push('--since', opts.since);
   if (opts.prompt) args.push('--prompt', opts.prompt);
+  // Unsupervised and unguarded are two different things, and both of them
+  // are the user's choice. Dropping this here would silently give the
+  // second arrow the first arrow's authorization.
+  if (opts.bypass) args.push('--bypass');
 
   const term = vscode.window.createTerminal({
-    name: `Agency · ${pack.title || pack.name} · unsupervised`, cwd });
+    name: `Agency · ${pack.title || pack.name} · unsupervised`
+      + (opts.bypass ? ' · bypass' : ''), cwd });
   term.show(true);
   term.sendText([cli.bin(), ...args].map(quote).join(' '));
 
   if (log) log.appendLine(`[run] unsupervised: ${args.join(' ')}`);
   vscode.window.showInformationMessage(
     `Agency: ${pack.title || pack.name} is running unsupervised — it will not ask before `
-    + 'it acts, and the gate runs by itself when it finishes.');
+    + 'it acts, and the gate runs by itself when it finishes.'
+    + (opts.bypass ? ' Its runner has no permission checks left either.' : ''));
   return { pack: pack.name, unattended: true };
 }
 
@@ -381,7 +387,9 @@ function launch(data, pack, log) {
   const target = data.target || {};
   const what = target.pr ? `PR #${target.pr}` : (target.ref || 'session');
   const who = agent.provider ? (agent.model ? `${agent.provider}/${agent.model}` : agent.provider) : '';
-  const name = `Agency · ${what}` + (pack ? ` · ${pack.title || pack.name}` : '') + (who ? ` · ${who}` : '');
+  const bypassed = agent.authorized === 'bypass';
+  const name = `Agency · ${what}` + (pack ? ` · ${pack.title || pack.name}` : '')
+    + (who ? ` · ${who}` : '') + (bypassed ? ' · bypass' : '');
   const term = vscode.window.createTerminal({ name, cwd: data.worktree });
   term.show(true);
   term.sendText(data.launch.map(quote).join(' '));
@@ -393,6 +401,10 @@ function launch(data, pack, log) {
   }
   vscode.window.showInformationMessage(
     `Agency: run ${String(data.runId).slice(0, 10)} is ready — it is running in the terminal. `
+    + (bypassed
+      ? 'It starts with no permission checks at all, so it will not stop to ask you about '
+        + 'anything. '
+      : '')
     + 'When it finishes, run “Agency: Process run output”.');
   return data;
 }

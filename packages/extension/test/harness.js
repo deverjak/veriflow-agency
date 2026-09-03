@@ -974,6 +974,66 @@ check('the pack row offers "run" inline, not only in the context menu', () => {
   assert.ok(run.group.startsWith('inline'), 'an action only in the right-click menu is one nobody finds');
 });
 
+check('the pack row offers a second arrow that runs without permission prompts', () => {
+  // Two arrows, because `needs` cannot describe a method that reads a whole
+  // project: the CEO pack asked about fifty things in one run. The second
+  // one has to be its own icon rather than a question on the first — a
+  // dialog nobody reads is not a decision, and a default nobody chose is
+  // worse. Neither belongs in the palette, where there is no row to read
+  // them off.
+  const pkg = require(path.join(SRC, '..', 'package.json'));
+  const ctx = pkg.contributes.menus['view/item/context'];
+  const bypass = ctx.find((m) => m.command === 'agency.pack.runBypass');
+  assert.ok(bypass, 'missing agency.pack.runBypass in the context menu');
+  assert.strictEqual(bypass.when, 'viewItem == agencyPack');
+  assert.ok(bypass.group.startsWith('inline'), 'the bypass arrow has to sit on the row');
+
+  const run = ctx.find((m) => m.command === 'agency.pack.run');
+  assert.ok(run.group < bypass.group,
+    'the guarded run stays first — the unguarded one is never the nearer click');
+
+  const decl = pkg.contributes.commands.find((c) => c.command === 'agency.pack.runBypass');
+  assert.ok(decl && decl.icon && decl.icon !== '$(play)',
+    'two identical icons on one row is one button the user cannot tell apart');
+  assert.ok(/permission/i.test(decl.title),
+    `the title has to say what it turns off, got ${decl && decl.title}`);
+
+  const palette = pkg.contributes.menus.commandPalette;
+  assert.ok(palette.some((m) => m.command === 'agency.pack.runBypass' && m.when === 'false'),
+    'without a row to run it on, the palette entry would have no pack');
+});
+
+checkAsync('the second arrow reaches cli.run as --bypass, the first one does not', async () => {
+  const review = require(path.join(SRC, 'review.js'));
+  const cli = require(path.join(SRC, 'cli.js'));
+  Object.assign(state.snapshot, { probe: { ok: true }, cwd: 'C:/project', packs: [QA_PACK] });
+
+  const guarded = supervisionHarness(['try cancelling a booking']);
+  await review.runOverWorkspace('C:/project', QA_PACK, { appendLine() {} });
+  assert.ok(!guarded.prepared[0].opts.bypass, 'the ordinary arrow stays authorized as ever');
+
+  const unguarded = supervisionHarness(['try cancelling a booking']);
+  await review.runOverWorkspace('C:/project', QA_PACK, { appendLine() {} }, { bypass: true });
+  assert.strictEqual(unguarded.prepared[0].opts.bypass, true);
+});
+
+checkAsync('an unsupervised run carries the bypass into its own command', async () => {
+  // The unsupervised path assembles its argv here instead of taking the
+  // CLI's prepared one, so it is the one place where the flag can silently
+  // go missing — and the run would then look unguarded while it still asks.
+  const review = require(path.join(SRC, 'review.js'));
+  Object.assign(state.snapshot, { probe: { ok: true }, cwd: 'C:/project', packs: [PO_TRUSTED] });
+
+  const { sent } = supervisionHarness([
+    'what should PO look at', { unattended: true },
+  ]);
+  await review.runOverWorkspace('C:/project', PO_TRUSTED, { appendLine() {} },
+    { bypass: true });
+
+  assert.strictEqual(sent.length, 1);
+  assert.ok(sent[0].includes('--bypass'), sent[0]);
+});
+
 check('accept/defer/rejectPick/decision.apply are no longer contributed', () => {
   const pkg = require(path.join(SRC, '..', 'package.json'));
   const ids = pkg.contributes.commands.map((c) => c.command);
