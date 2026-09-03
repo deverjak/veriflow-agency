@@ -24,6 +24,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from . import anchor
 from . import packs
 from . import runs as _runs
 from .config import Project
@@ -291,17 +292,11 @@ def _is_human(by: str | None) -> bool:
 
 
 #: How much scrutiny a finding has had so far. Not the same as `verified`, on
-#: purpose: `verified` confirms a CLAIM, `trust` is a measure of review. A
-#: rejected finding is `human-reviewed` AND `status: deprecated` at once — a
-#: human looked at it and the claim did not hold. As one field, one of those
-#: two sentences could not be written.
+#: purpose: `verified` confirms a CLAIM, `trust` is a measure of review — and
+#: they are orthogonal to `outcome` (where the finding stands in the
+#: pipeline): a rejected finding can still be `human-reviewed`, one going to
+#: the board can still be `unverified`.
 TIERS = ("unverified", "machine-confirmed", "human-reviewed")
-
-#: State of the claim. `deferred` is not `draft` — a deferred finding still
-#: holds, only nothing is being done about it right now. `sent` (dispatched
-#: to the board) is the same "still holds" as `accepted` was.
-STATUS_BY_DECISION = {"accepted": "stable", "sent": "stable",
-                      "deferred": "stable", "rejected": "deprecated"}
 
 
 def _concept(members: list[dict], origin: dict) -> dict:
@@ -327,8 +322,14 @@ def _concept(members: list[dict], origin: dict) -> dict:
 
     verified = [{"by": m["by"], "at": m["at"], "how": "independent-duplicate"}
                 for m in confirmations]
-    verified += [{"by": _runs.normalize_by(e.get("by")), "at": e.get("at"), "how": "accepted"}
-                 for e in peers if e.get("state") == "accepted"]
+    verified += [{"by": _runs.normalize_by(e.get("by")), "at": e.get("at"), "how": "sent"}
+                 for e in peers if e.get("state") == "sent"]
+
+    # `state` on the finding itself IS the outcome now — candidate, held,
+    # sent or rejected. No separate "status" derived from a decision.
+    outcome = f.get("state") or "candidate"
+    ref = (f.get("sinks") or {}).get("githubProjectItem") or (decision.get("ref") if decision else None)
+    url = decision.get("url") if decision else None
 
     return {
         "id": f.get("id"),
@@ -337,12 +338,15 @@ def _concept(members: list[dict], origin: dict) -> dict:
         "pack": origin["pack"],
         "dimension": f.get("dimension"),
         "severity": f.get("severity"),
-        "status": STATUS_BY_DECISION.get(decision["state"], "draft") if decision else "draft",
+        "outcome": outcome,
+        "ref": ref,
+        "url": url,
         "trust": trust,
         "generated": {"by": origin["by"], "at": origin["at"]},
         "verified": verified,
         "decision": ({"state": decision["state"], "reason": decision.get("reason"),
-                      "by": _runs.normalize_by(decision.get("by")), "at": decision.get("at")}
+                      "by": _runs.normalize_by(decision.get("by")), "at": decision.get("at"),
+                      "ref": decision.get("ref"), "url": decision.get("url")}
                      if decision else None),
         "anchor": {"file": a.get("file"), "line": a.get("line"),
                    "commit": a.get("commit"), "symbol": sym},
@@ -353,14 +357,53 @@ def _concept(members: list[dict], origin: dict) -> dict:
                    "how": "found" if m is origin else "found again", "note": None}
                   for m in members]
                  + [{"by": _runs.normalize_by(e.get("by")), "at": e.get("at"),
-                     "run": None, "how": e["state"], "note": e.get("reason")}
+                     "run": None, "how": e["state"], "note": e.get("reason"),
+                     "ref": e.get("ref"), "url": e.get("url")}
                     for e in events],
         "occurrences": len(members),
+        "trailOnly": False,
+    }
+
+
+def _trail_concept(row: dict) -> dict:
+    """A concept for a finding whose own run is gone — everything the trail
+    still remembers (id, outcome, where it went) and nothing it never
+    carried (body, evidence). Only `sent`/`rejected` rows reach here —
+    `candidate`/`held`/`duplicate` are never terminal and `gated-out` is
+    noise the gate caught, not a finding worth its own page."""
+    a = row.get("anchor") or {}
+    sym = a.get("symbol")
+    sym = sym.get("name") if isinstance(sym, dict) else sym
+    outcome = row.get("state")
+    by = _runs.normalize_by(row.get("by"))
+    return {
+        "id": row.get("id"),
+        "title": row.get("title") or row.get("id"),
+        "body": "",
+        "pack": row.get("pack") or "unknown",
+        "dimension": row.get("dimension"),
+        "severity": row.get("severity"),
+        "outcome": outcome,
+        "ref": row.get("ref"),
+        "url": row.get("url"),
+        "trust": "unverified",
+        "generated": {"by": by, "at": row.get("at")},
+        "verified": [],
+        "decision": {"state": outcome, "reason": row.get("reason"), "by": by,
+                     "at": row.get("at"), "ref": row.get("ref"), "url": row.get("url")},
+        "anchor": {"file": a.get("file"), "line": a.get("line"),
+                   "commit": a.get("commit"), "symbol": sym},
+        "sources": [],
+        "trail": [{"by": by, "at": row.get("at"), "run": None, "how": outcome,
+                   "note": row.get("reason"), "ref": row.get("ref"), "url": row.get("url")}],
+        "occurrences": 1,
+        "trailOnly": True,
     }
 
 
 def ledger(project: Project) -> list[dict]:
-    """Findings across runs, with duplicates folded into families.
+    """Findings across runs, with duplicates folded into families — plus
+    whatever the trail remembers for a finding whose own run is gone.
 
     A duplicate is not another finding, it is a second worker at the same
     finding — and that is exactly what turns it into `verified`. If it had
@@ -378,21 +421,34 @@ def ledger(project: Project) -> list[dict]:
         members.sort(key=lambda m: m["run"].id)
         origin = next((m for m in members if m["finding"].get("id") == rid), members[0])
         out.append(_concept(members, origin))
+
+    live_ids = set(by_id)
+    for fid, row in _runs.read_trail(project).items():
+        if fid in live_ids or row.get("state") not in ("sent", "rejected"):
+            continue
+        out.append(_trail_concept(row))
+
     return sorted(out, key=lambda c: c["id"] or "", reverse=True)
 
 
 # ------------------------------------------------------------------ bundle
 
-#: Groups in the overview. Rejected ones are deliberately not dropped: "this
-#: was already rejected as by-design" is the most valuable sentence a later
-#: run can be handed, and an overview that dropped it would hide the sentence
-#: from anyone looking.
+#: Groups in the overview, in this order. Rejected ones are deliberately not
+#: dropped: "this was already rejected as by-design" is the most valuable
+#: sentence a later run can be handed, and an overview that dropped it would
+#: hide the sentence from anyone looking. No board state (a `Stav` column, a
+#: closed issue, a milestone) is shown here, or read from anywhere to build
+#: this file — the board is live and this file is not.
 GROUPS = (
-    ("open", "Open — nobody has decided yet"),
-    ("accepted", "Accepted"),
-    ("deferred", "Deferred"),
-    ("rejected", "Rejected — do not report these again"),
+    ("held", "Waiting in a chain"),
+    ("candidate", "No board here"),
+    ("sent", "Trail — what went to the board"),
+    ("rejected", "Do not report again"),
 )
+
+#: How many gated-out rows the overview keeps — information, not a queue.
+#: The rest is still in `trail.jsonl`, for dedup, just not listed here.
+GATED_OUT_LIMIT = 20
 
 
 def _frontmatter(front: dict) -> str:
@@ -452,20 +508,25 @@ def _finding_md(c: dict) -> str:
     front = {
         "type": "Finding",
         "title": c["title"],
-        "status": c["status"],
+        "outcome": c["outcome"],
         "trust": c["trust"],
         "tags": [t for t in (f"pack/{c['pack']}",
                              f"dimension/{c['dimension']}" if c["dimension"] else None,
                              f"severity/{c['severity']}" if c["severity"] else None) if t],
         "generated": c["generated"],
         "verified": c["verified"],
-        "decision": c["decision"],
+        "ref": c["ref"],
+        "url": c["url"],
         "anchor": c["anchor"],
         "occurrences": c["occurrences"] if c["occurrences"] > 1 else None,
         "sources": c["sources"],
     }
 
-    body = [c["body"].strip()]
+    body = []
+    if c.get("trailOnly"):
+        body.append("_The run directory is no longer present; this is the trail record._")
+    if c["body"]:
+        body.append(c["body"].strip())
     where = _where(c["anchor"])
     if where:
         # The link goes from `.agency/knowledge/findings/` to the project
@@ -479,48 +540,89 @@ def _finding_md(c: dict) -> str:
         run = f" — [run {t['run'][:8]}](../../runs/{t['run']}/)" if t.get("run") else ""
         when = f" · {t['at'][:10]}" if t.get("at") else ""
         note = f" — {t['note']}" if t.get("note") else ""
-        trail.append(f"- {t['how']} by `{t['by']}`{run}{note}{when}")
+        ref = f" → {t['ref']}" if t.get("ref") else ""
+        trail.append(f"- {t['how']} by `{t['by']}`{run}{note}{ref}{when}")
     body.append("\n".join(trail))
 
     return _frontmatter(front) + "\n\n" + "\n\n".join(x for x in body if x) + "\n"
 
 
 def _index_md(project: Project, concepts: list[dict]) -> str:
-    by_state: dict[str, list[dict]] = {}
+    by_outcome: dict[str, list[dict]] = {}
     for c in concepts:
-        state = (c["decision"] or {}).get("state") or "open"
-        by_state.setdefault(state, []).append(c)
+        by_outcome.setdefault(c["outcome"] or "candidate", []).append(c)
 
     confirmed = len([c for c in concepts if c["trust"] != "unverified"])
     tally = " · ".join([f"**{len(concepts)} finding{'' if len(concepts) == 1 else 's'}**"]
-                       + [f"{len(by_state[s])} {s}" for s, _ in GROUPS if by_state.get(s)]
+                       + [f"{len(by_outcome[s])} {s}" for s, _ in GROUPS if by_outcome.get(s)]
                        + ([f"{confirmed} reviewed by a second reader"] if confirmed else []))
 
     lines = [
         "# What this project knows",
         "",
-        "Generated from `.agency/runs/` — `agency ingest` refreshes it after every "
-        "run and `agency knowledge --rebuild` rewrites it from scratch. Edits here "
-        "are overwritten; the truth is in the run directories.",
+        "Generated from `.agency/runs/` and the committed trail — `agency "
+        "ingest` refreshes it after every run and `agency knowledge --rebuild` "
+        "rewrites it from scratch. Edits here are overwritten; the truth is in "
+        "the run directories and in `trail.jsonl`.",
         "",
         tally + " · [run log](log.md)",
         "",
     ]
 
-    for state, heading in GROUPS:
-        group = by_state.get(state)
+    for outcome, heading in GROUPS:
+        group = by_outcome.get(outcome)
+        if outcome == "rejected" and group:
+            # A rejection anchored to code nobody can find any more is not
+            # worth reading again — it stays in the trail for dedup, just
+            # not in the overview.
+            group = [c for c in group if anchor.drift(project.root, c["anchor"]) != "deleted"]
         if not group:
             continue
-        lines += [f"## {heading}", "",
-                  "| finding | severity | where | found by | reviewed |",
-                  "|---|---|---|---|---|"]
-        for c in group:
-            reason = (c["decision"] or {}).get("reason")
-            reviewed = c["trust"] + (f" · {reason}" if reason else "")
-            lines.append(
-                f"| [{_cell(c['title'])}]({LEDGER}/{c['id']}.md) "
-                f"| {c['severity'] or ''} | `{_where(c['anchor'])}` "
-                f"| `{c['generated']['by']}` | {reviewed} |")
+        if outcome == "sent":
+            lines += [f"## {heading}", "",
+                      "| finding | severity | where | found by | board |",
+                      "|---|---|---|---|---|"]
+            for c in group:
+                board = (f"→ [{c['ref']}]({c['url']})" if c["ref"] and c["url"]
+                        else f"→ {c['ref']}" if c["ref"] else "")
+                lines.append(
+                    f"| [{_cell(c['title'])}]({LEDGER}/{c['id']}.md) "
+                    f"| {c['severity'] or ''} | `{_where(c['anchor'])}` "
+                    f"| `{c['generated']['by']}` | {board} |")
+        elif outcome == "rejected":
+            lines += [f"## {heading}", "",
+                      "| finding | severity | where | found by | reason |",
+                      "|---|---|---|---|---|"]
+            for c in group:
+                d = c["decision"] or {}
+                reason = (d.get("reason") or "") + (f" ({d['by']})" if d.get("by") else "")
+                lines.append(
+                    f"| [{_cell(c['title'])}]({LEDGER}/{c['id']}.md) "
+                    f"| {c['severity'] or ''} | `{_where(c['anchor'])}` "
+                    f"| `{c['generated']['by']}` | {reason} |")
+        else:
+            lines += [f"## {heading}", "",
+                      "| finding | severity | where | found by |",
+                      "|---|---|---|---|"]
+            for c in group:
+                lines.append(
+                    f"| [{_cell(c['title'])}]({LEDGER}/{c['id']}.md) "
+                    f"| {c['severity'] or ''} | `{_where(c['anchor'])}` "
+                    f"| `{c['generated']['by']}` |")
+        lines.append("")
+
+    gated = sorted((row for row in _runs.read_trail(project).values()
+                    if row.get("state") == "gated-out"),
+                   key=lambda r: r.get("at") or "", reverse=True)[:GATED_OUT_LIMIT]
+    if gated:
+        lines += ["## Gated out", "",
+                  "Dropped by the deterministic gate before it became a candidate — "
+                  "a mechanic, not a judgement on the claim. The newest "
+                  f"{GATED_OUT_LIMIT}; the rest is in `trail.jsonl`.", "",
+                  "| finding | reason | where |", "|---|---|---|"]
+        for row in gated:
+            lines.append(f"| {_cell(row.get('title'))} | {row.get('reason') or ''} "
+                        f"| `{_where(row.get('anchor') or {})}` |")
         lines.append("")
 
     by_pack = [(pack, pages(project, pack)) for pack in installed_packs(project)]
@@ -578,9 +680,11 @@ def _bundle_files(project: Project) -> dict[str, str]:
     would rewrite the whole bundle and `git diff` would stop answering what
     actually changed.
     """
-    if not _runs.load_runs(project):
-        return {}
     concepts = ledger(project)
+    if not concepts:
+        # Nothing in `.agency/runs/` and nothing in the trail either — a
+        # fresh project earns no bundle, not an empty one.
+        return {}
     files = {f"{LEDGER}/{c['id']}.md": _finding_md(c) for c in concepts}
     files["index.md"] = _index_md(project, concepts)
     files["log.md"] = _log_md(project)

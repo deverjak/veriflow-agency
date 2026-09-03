@@ -19,7 +19,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 
 from .config import Project
-from .runs import Run, decisions, load_runs
+from .runs import Run, decisions, load_runs, normalize_by
 
 DAY = 86400.0
 
@@ -40,22 +40,32 @@ def _ratio(hit: int, total: int) -> float | None:
 
 
 class Tally:
-    """Přijato / zamítnuto / odloženo pro jeden řez daty."""
+    """Přijato / zamítnuto / odloženo pro jeden řez daty.
+
+    Do precision se počítá jen rozhodnutí dalšího člena řetězu — `by`
+    začínající `hire:`. Rozhodnutí online na boardu se lokálně neukládá a
+    neexistuje; `human` v datech je historie z doby před stopou, a `chain`
+    je právě to, že nikdo nerozhodl. Ani jedno nemá být čitatelem precision.
+    """
 
     def __init__(self) -> None:
         self.accepted = self.rejected = self.deferred = self.undecided = 0
 
-    def add(self, state: str | None) -> None:
+    def add(self, state: str | None, by: str | None = None) -> None:
+        is_hire = bool(by) and by.startswith("hire:")
         # `sent` (dispatched to the board) counts the same as the older
         # `accepted` — both mean the finding held up.
-        if state in ("accepted", "sent"):
+        if state in ("accepted", "sent") and is_hire:
             self.accepted += 1
-        elif state == "rejected":
+        elif state == "rejected" and is_hire:
             self.rejected += 1
         elif state == "deferred":
             self.deferred += 1
-        else:
+        elif state is None:
             self.undecided += 1
+        # else: `sent`/`rejected` by something other than a chain member — a
+        # person, or `chain` dispatching what nobody judged. Terminal, but
+        # not a verdict this tool can grade.
 
     @property
     def decided(self) -> int:
@@ -113,6 +123,7 @@ def collect(project: Project, runs: list[Run] | None = None) -> dict:
     # inflate the number the whole tool is judged by.
     index: dict[str, dict] = {}
     verdicts: dict[str, str | None] = {}
+    verdict_by: dict[str, str | None] = {}
     for run in selected:
         dec = decisions(run)
         for f in run.findings():
@@ -120,20 +131,24 @@ def collect(project: Project, runs: list[Run] | None = None) -> dict:
             if not fid:
                 continue
             index[fid] = f
-            verdicts[fid] = (dec.get(fid) or {}).get("state")
+            d = dec.get(fid)
+            verdicts[fid] = d.get("state") if d else None
+            verdict_by[fid] = normalize_by(d.get("by")) if d else None
 
-    def origin_state(f: dict) -> str | None:
-        """The decision of the finding this one duplicates. Bounded so a
-        duplicateOf cycle in a hand-edited file cannot hang the metrics."""
+    def origin_state(f: dict) -> tuple[str | None, str | None]:
+        """The decision of the finding this one duplicates, and who made it.
+        Bounded so a duplicateOf cycle in a hand-edited file cannot hang the
+        metrics."""
         cur = f
         for _ in range(8):
             nxt = cur.get("duplicateOf")
             if not nxt or nxt not in index:
-                return None
+                return None, None
             cur = index[nxt]
             if cur.get("state") != "duplicate":
-                return verdicts.get(cur.get("id"))
-        return None
+                fid = cur.get("id")
+                return verdicts.get(fid), verdict_by.get(fid)
+        return None, None
 
     def origin_hire(f: dict) -> str | None:
         cur = f
@@ -175,21 +190,22 @@ def collect(project: Project, runs: list[Run] | None = None) -> dict:
                 who_first = origin_hire(f)
                 if who_first is not None:
                     agreement["crossHire" if who_first != hire else "sameHire"] += 1
-                inherited = origin_state(f)
+                inherited, inherited_by = origin_state(f)
                 if inherited is not None:
-                    by_model[model].add(inherited)
-                    by_provider[provider].add(inherited)
-                    by_hire[hire].add(inherited)
+                    by_model[model].add(inherited, inherited_by)
+                    by_provider[provider].add(inherited, inherited_by)
+                    by_hire[hire].add(inherited, inherited_by)
                 continue
             d = dec.get(f.get("id"))
             state = d["state"] if d else None
-            overall.add(state)
-            by_dimension[f.get("dimension") or "—"].add(state)
-            by_severity[f.get("severity") or "—"].add(state)
-            by_model[model].add(state)
-            by_provider[provider].add(state)
-            by_hire[hire].add(state)
-            by_pack[(rec.get("pack") or "—")].add(state)
+            by = normalize_by(d.get("by")) if d else None
+            overall.add(state, by)
+            by_dimension[f.get("dimension") or "—"].add(state, by)
+            by_severity[f.get("severity") or "—"].add(state, by)
+            by_model[model].add(state, by)
+            by_provider[provider].add(state, by)
+            by_hire[hire].add(state, by)
+            by_pack[(rec.get("pack") or "—")].add(state, by)
             if state == "rejected" and d.get("reason"):
                 reasons[d["reason"]] += 1
             if state is None:

@@ -16,6 +16,7 @@ other reader would.
 from __future__ import annotations
 
 from agency import ingest, knowledge, runs
+from agency.util import write_json
 
 from conftest import make_finding
 
@@ -49,7 +50,7 @@ def test_a_finding_is_a_readable_concept(project, make_run):
     text = finding_text(project, fid)
 
     assert 'type: "Finding"' in text
-    assert 'status: "draft"' in text, "nobody has decided on the finding"
+    assert 'outcome: "candidate"' in text, "nobody has decided on the finding"
     assert 'trust: "unverified"' in text
     assert 'by: "hire:review-graph@claude"' in text
     assert "getUser" in text, "a concept without the finding's body is only a heading"
@@ -112,15 +113,15 @@ def test_the_same_worker_twice_is_not_a_confirmation(project, make_run):
 def test_a_humans_decision_is_the_highest_tier(project, make_run):
     run = make_run(run_id=RUN_A, agent=CLAUDE)
     fid = run.findings()[0]["id"]
-    runs.append_decision(run, fid, "rejected", reason="by-design", by="human:kuba")
+    runs.reject(project, run, fid, "by-design", by="human:kuba")
 
     knowledge.bundle(project)
     text = finding_text(project, fid)
 
     assert 'trust: "human-reviewed"' in text
-    assert 'status: "deprecated"' in text, "the claim did not hold — and it carries that with it"
-    assert 'state: "rejected"' in text and 'reason: "by-design"' in text
-    assert 'by: "human:kuba"' in text
+    assert 'outcome: "rejected"' in text, "the claim did not hold — and it carries that with it"
+    assert "rejected by `human:kuba`" in text
+    assert "by-design" in text
 
 
 def test_a_packs_own_decision_does_not_confirm_its_finding(project, make_run):
@@ -128,12 +129,15 @@ def test_a_packs_own_decision_does_not_confirm_its_finding(project, make_run):
     this guard, `agency triage --by <its own hire>` alone would bump the tier."""
     run = make_run(run_id=RUN_A, agent=CLAUDE)
     fid = run.findings()[0]["id"]
+    fs = run.findings()
+    fs[0]["state"] = "sent"
+    write_json(run.findings_path, fs)
     runs.append_decision(run, fid, "sent", by="hire:review-graph@claude")
 
     c = knowledge.ledger(project)[0]
 
     assert c["trust"] == "unverified"
-    assert c["status"] == "stable", "the decision holds, nobody has reviewed it yet"
+    assert c["outcome"] == "sent", "the decision holds, nobody has reviewed it yet"
 
 
 def test_a_rejected_finding_stays_in_memory(project, make_run):
@@ -141,13 +145,12 @@ def test_a_rejected_finding_stays_in_memory(project, make_run):
     exists. If rejected findings were dropped from the overview, the next
     run would report them again — the ledger exists to stop that."""
     run = make_run(run_id=RUN_A, agent=CLAUDE)
-    runs.append_decision(run, run.findings()[0]["id"], "rejected",
-                         reason="by-design", by="human")
+    runs.reject(project, run, run.findings()[0]["id"], "by-design", by="human")
     knowledge.bundle(project)
 
     index = bundle_text(project, "index.md")
 
-    assert "Rejected — do not report these again" in index
+    assert "Do not report again" in index
     assert "by-design" in index
 
 
@@ -181,7 +184,34 @@ def test_the_bundle_can_be_discarded_and_rebuilt(project, make_run):
     assert bundle_text(project, f"{knowledge.LEDGER}/{run.findings()[0]['id']}.md") == before
 
 
-def test_a_discarded_run_disappears_from_the_ledger_too(project, make_run):
+def test_a_discarded_run_stays_in_the_ledger_through_the_trail(project, make_run):
+    """Losing `.agency/runs/<id>/` must not mean losing what it reported —
+    that is exactly why the trail is committed and append-only."""
+    import shutil
+
+    run = make_run(run_id=RUN_A, agent=CLAUDE)
+    fid = run.findings()[0]["id"]
+    finding = run.findings()[0]
+    runs.append_decision(run, fid, "sent", by="hire:review-graph@claude", ref="PVTI_X")
+    runs.append_trail(project, {
+        "id": fid, "runId": run.id, "pack": "review-graph", "state": "sent",
+        "title": finding["title"], "anchor": finding["anchor"], "severity": finding["severity"],
+        "by": "hire:review-graph@claude", "ref": "PVTI_X",
+    })
+    knowledge.bundle(project)
+    shutil.rmtree(run.dir)
+
+    result = knowledge.bundle(project)
+
+    assert f"{knowledge.LEDGER}/{fid}.md" not in result["removed"]
+    text = bundle_text(project, f"{knowledge.LEDGER}/{fid}.md")
+    assert "run directory is no longer present" in text
+    assert 'outcome: "sent"' in text
+
+
+def test_a_run_thats_actually_gone_and_unreported_is_removed(project, make_run):
+    """A candidate no sink ever reached, whose run then vanished, really is
+    gone — the trail only remembers what left something behind."""
     import shutil
 
     run = make_run(run_id=RUN_A, agent=CLAUDE)
