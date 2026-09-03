@@ -143,7 +143,7 @@ Zkráceně: **Claude Code ti dá odpověď. Agency ti dá záznam.**
 ## Šest pravidel produktu
 
 1. **Nález bez důkazu není nález.** Musí ukázat kde, čím to selže a co to dokládá. Dohad se zahazuje.
-2. **Nic ven bez souhlasu člověka.** Agent připravuje, člověk rozhoduje.
+2. **Draft v Inboxu je výstupní schránka brány, ne rozhodnutí člověka.** Co projde branou, jde samo na board jako draft — přes sink packu, bez čekání na schválení (D-0008: nepřijatý doklad patří do Project Draftů, ne do repozitáře). Povýšit draft na issue, nebo napsat komentář na existující ticket, pořád vyžaduje člověka — nebo podepsané rozhodnutí PO.
 3. **Neopakovat se.** Co už bylo nalezeno, se nehlásí znovu jako nové. Doplní se novým důkazem k původnímu nálezu.
 4. **Bez tebe se neběhá.** „Jsem u toho" je vlastnost systému, ne slib.
 5. **Jádro patří všem, pack patří projektu.** Sdílený je kontrakt, ne konfigurace.

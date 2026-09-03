@@ -14,8 +14,10 @@ gets a **copy** of the pack and rewrites its facts, not a shared parameter.
 ## The five workflows over `main-panel`
 
 This is the whole product. `agency` runs specialists against one project;
-what each one finds goes through a gate (evidence required, no duplicates),
-gets a decision from a human, and stays in the project's own memory.
+what each one finds goes through a gate (evidence required, no duplicates)
+and, when the pack has one, out through its own **sink** onto a board — no
+export step, no human in between. A finding with nowhere to go rests in the
+project's own committed memory instead.
 
 **W1 — Review a pull request**
 
@@ -26,16 +28,16 @@ agency run review-graph --pr 479
 Prepares a throwaway worktree on the PR's head commit, has the code graph
 compute blast radius, and gives you the command to launch the agent — in this
 terminal, or with `--wait` to launch and gate it in one step. When it is
-done:
+done, `agency ingest` runs the gate and sends what passes it straight to the
+board through the pack's `sink`:
 
 ```
-agency findings                     # what is waiting for a decision
-agency triage accept 01M1…          # or reject --reason by-design, or defer
-agency export --project 1           # accepted findings → GitHub Project drafts, once each
+agency findings                     # what happened to each one — sent, or why not
 ```
 
-The same thing in the editor: findings sit next to the line of code, with
-Accept / Reject / Defer buttons.
+The same thing in the editor: findings sit next to the line of code,
+**read-only** — each one showing its board reference, or that this pack has
+no board to send it to.
 
 **W2 — Review with a product judgment**
 
@@ -44,9 +46,11 @@ agency chain review-graph po --pr 479 --prompt "does this change make product se
 ```
 
 The reviewer runs first; the product owner gets its findings **as its
-brief** — decides each one (accept / reject with a reason / defer), answers
-the question, and writes what that means for the queue. A human sees a
-judged queue, not a raw one.
+brief** — judges each one (`agency triage accept <id>` sends it to the board
+right away, `agency triage reject <id> --reason …` remembers not to report it
+again), answers the question, and writes what that means for the queue.
+There is no `defer`: whatever neither member judges still reaches the board
+once the chain ends, never silently dropped.
 
 **W3 — Backlog grooming**
 
@@ -117,7 +121,7 @@ contract, not configuration.
 veriflow-agency/                     this repository
   packages/core/     → `agency`      RUNNER — run, record, gate, triage, dedup, memory, chain, providers.
                                      Knows nothing about any target project.
-  packages/extension/                VIEWER — runs, findings next to the line, triage by clicking.
+  packages/extension/                VIEWER — runs, findings next to the line, read-only.
                                      Talks only to `agency … --json`.
   packs/                             EXAMPLES — reference copies of main-panel's packs, for the next project.
                                      Not bundled, not installed.
@@ -152,19 +156,20 @@ Attended, on your own login, with evidence-backed findings that stay.
   chain       run specialists one after another, each judging what the previous one found
   validate    check findings.json against the contract and the anchors against the code
   graph       ask the code graph — one door for the core and the agent, JSON out
-  ingest      the gate: contract, existence, threshold, dedup — BEFORE a finding becomes a finding
+  ingest      the gate: contract, existence, threshold, dedup, dispatch — BEFORE a finding becomes a finding
   knowledge   what the project knows, as committed markdown — readable without Agency
   metrics     precision, dedup, queue age — by dimension, severity and provider
-  export      one-way push of decided findings into a GitHub Project
-  cleanup     close a run that is not coming back and remove its worktree
-  findings    findings and their decisions
-  triage      decide on a finding — an agent calls this too
+  cleanup     close a run that is not coming back and remove its worktree — `--all` for every finished one
+  findings    findings and where they went
+  triage      accept (send to the board) or reject a finding — an agent calls this too
   note        a note on a finding — free text, not a decision
   status      overview of the project's runs
 ```
 
-Sixteen commands. There is no `init`, `add`, `hire`, `fire`, `roster`,
-`providers`, `projects`, `config`, `brief`, or `backlog`. `agency run <pack>`
+Fifteen commands. There is no `init`, `add`, `hire`, `fire`, `roster`,
+`providers`, `projects`, `config`, `brief`, `backlog`, or `export` — a
+one-way push to a board is the pack's own `sink`, called by `ingest`, not a
+separate step. `agency run <pack>`
 prepares the run and prints the ready command; `--wait` launches the agent
 and runs the gate itself when it finishes; `--launch` hands this terminal
 over to the agent directly; `--json` only prepares, for the extension.
@@ -192,6 +197,7 @@ sandbox that will not otherwise let the agent run its own binary.
             "git", "gh issue view",
             "python .claude/skills/agency-po/scripts/backlog.py"],
   "minScore": 75,
+  "sink": "python .claude/skills/agency-po/scripts/backlog.py draft --finding {id} --run-dir {runDir}",
   "dimensions": [{ "id": "scope", "title": "Work in flight that no commitment covers" }, "…"]
 }
 ```
@@ -199,9 +205,11 @@ sandbox that will not otherwise let the agent run its own binary.
 Every key is read by the runner: `requires` feeds `doctor`; `target` /
 `worktree` / `graph` shape the run preparation; `prompt` (`required` |
 `optional` | `none`) validates `--prompt`; `needs` is the agent's allowlist;
-`minScore` is the gate's threshold; `dimensions` validates findings and
-labels the extension's tree. There is no version — a pack is versioned with
-the project's own git history, not separately.
+`minScore` is the gate's threshold; `sink` is where a gated finding goes —
+absent, it just rests as `candidate` in the committed knowledge, a project
+with no board; `dimensions` validates findings and labels the extension's
+tree. There is no version — a pack is versioned with the project's own git
+history, not separately.
 
 Facts about the project itself — which repository, which board fields,
 which staging URL, which law applies — go in `SKILL.md`, under a **Project
@@ -235,19 +243,39 @@ The only places two of these three things touch. Nothing else is shared.
 
 ```
 .agency/knowledge/
-  index.md            overview — what the project knows, who decided what
+  trail.jsonl         append-only: what a finding became and where it went,
+                      per line — the one thing that survives a discarded run
+  index.md            overview — what the project knows, sorted by outcome
   log.md               chronology: what each run looked at, in its own words
   findings/<id>.md    findings across runs, packs and specialists — generated
   pages/<pack>/       a specialist's own conclusions about this project
 ```
 
-`agency ingest` regenerates `findings/` from the run records after the gate;
-`agency knowledge --rebuild` rebuilds the whole bundle from `.agency/runs/`
-— the source of truth stays in the runs, and the bundle can always be thrown
-away and rebuilt. A page in `pages/<pack>/` is plain markdown with one
-convention: a `Last reviewed: <date>` line at the top, and a rule every
-pack's `SKILL.md` repeats — write conclusions, not a log; rewrite what
-stopped being true rather than adding to it.
+`agency ingest` regenerates `findings/` from the run records and the trail
+after the gate; `agency knowledge --rebuild` rebuilds the whole bundle —
+the source of truth stays in the runs and the trail, and the bundle can
+always be thrown away and rebuilt. Discarding a run (`agency cleanup
+--discard`, or **Discard all finished runs…** in the extension) never loses
+what it sent to a board or had rejected — the trail already has it, and
+`trail.jsonl` is never touched by cleanup. A page in `pages/<pack>/` is
+plain markdown with one convention: a `Last reviewed: <date>` line at the
+top, and a rule every pack's `SKILL.md` repeats — write conclusions, not a
+log; rewrite what stopped being true rather than adding to it.
+
+### The extension — a preset for which runner
+
+A pack's row in **Specialists** can carry saved presets: `provider` and
+`model` chosen ahead of time, so starting a run does not stop to ask (a real
+reason this exists: a subscription limit hit mid-team, and the next run
+needs a different provider). A preset is a VS Code setting
+(`agency.presets`, per workspace) spelling out `agency run <pack>
+--provider … --model …` in advance — the core knows nothing about it, and
+there is no `.agency/*.json` for it either.
+
+**Runs → Discard all finished runs…** clears every run whose terminal is
+gone in one step (`agency cleanup --all --discard`). Safe by construction:
+the committed trail keeps what any of them sent to a board or had rejected,
+so nothing that mattered is deleted with the record.
 
 ### Three rules the whole thing stands on
 
@@ -260,9 +288,11 @@ reviewed in a pull request.
 `finding.v1`. The extension does not know what language the core is
 written in.
 
-**A decision is an operation on storage, not a UI command.** A click in VS
-Code, `agency triage` in a terminal, and a call from an agent all go through
-the same path and write to the same append-only file.
+**A decision is an operation on storage, not a UI command.** `agency
+triage` — called by a chain member judging what an upstream one found, or
+typed by a person in a terminal — writes to the same append-only file an
+agent's own call does. VS Code no longer makes this call at all: it reads
+what happened and shows it, it does not decide.
 
 ## Structure
 

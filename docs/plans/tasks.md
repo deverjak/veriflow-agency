@@ -258,12 +258,12 @@ Kroky 1, 2 a 4 jsou na sobě nezávislé a jsou to dohromady čtyři hodiny. Kro
 
 > [`findings-ownership.md`](findings-ownership.md). Vzniklo 3. 9. 2026 z přejímky: v1 má dva vlastníky pravdy (`export.py` říká „run record", PO pack říká „board"), `agency export` nikdy neběžel, a adresář běhu W4 zmizel i s nálezem, který přežil jen náhodou. Nově: **board je stav, lokál je brána a stopa** (`trail.jsonl`, append-only, commitovaná), lokál nikdy nečte board kvůli sobě. K tomu presety spuštění v extension (runner × model, bez registru) a `cleanup --all`.
 
-- [ ] **Krok 1** — stopa + schéma + brána: `trail.jsonl`, `runs.dispatch`, `held`/`sent`, `pack.sink`
-- [ ] **Krok 2** — CLI: `triage accept|reject` (bez `defer`), `findings` ze stopy, `status.providers`, `cleanup --all`, `export` pryč
-- [ ] **Krok 3** — paměť: `index.md` jako stopa (bez *Open*), bundle nemaže, co je ve stopě; precision jen `hire:*`
-- [ ] **Krok 4** — pack: `backlog.py draft --finding`, `sink` ve čtyřech `pack.json`, `SKILL.md` ×4, kopie v `packs/`
-- [ ] **Krok 5** — extension 0.7.0: Findings bez rozhodovacích tlačítek, presety (`agency.presets`), Clear all
-- [ ] **Krok 6** — docs: README, product-brief pravidlo 2
+- [x] **Krok 1** — stopa + schéma + brána: `trail.jsonl`, `runs.dispatch`, `held`/`sent`, `pack.sink` — testy §4.10 (a)–(d) zelené
+- [x] **Krok 2** — CLI: `triage accept|reject` (bez `defer`), `findings` ze stopy, `status.providers`, `cleanup --all`, `export` pryč
+- [x] **Krok 3** — paměť: `index.md` jako stopa (bez *Open*), bundle nemaže, co je ve stopě; precision jen `hire:*`
+- [x] **Krok 4** — pack: `backlog.py draft --finding`, `sink` ve čtyřech `pack.json`, `SKILL.md` ×4, kopie v `packs/`; ověřeno `--dry-run` bez `gh`
+- [x] **Krok 5** — extension 0.7.0: Findings bez rozhodovacích tlačítek, presety (`agency.presets`), Clear all; VSIX zabalený a nainstalovaný
+- [x] **Krok 6** — docs: README (W1 bez `export`, presety, Clear all, `trail.jsonl`), product-brief pravidlo 2 (D-0008), tasks.md
 - [ ] **Krok 7** — přejímka (uživatel): draft na boardu → povýšit online → druhý běh nic nepošle, `git status` čistý; Clear all → stopa zůstala
 
 **Hotovo, když:** projde Krok 7 (§8 plánu).
