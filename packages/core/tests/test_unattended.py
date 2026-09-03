@@ -280,6 +280,29 @@ def test_a_consequential_command_joins_the_grant_only_inside_a_chain(
     assert "python scripts/backlog.py promote" in (captured.get("needs") or [])
 
 
+def test_unattended_turns_a_standalone_run_unsupervised(project, monkeypatch, capsys):
+    """The extension's "Unsupervised" choice, and the same thing typed by
+    hand. Without a flag, the only way to get a pack's consequential
+    commands granted was to wrap it in a chain — which is a different run,
+    with a different member judging it."""
+    install_pack(project, "po", {
+        "target": "workspace", "worktree": False, "prompt": "none",
+        "needs": ["git"], "needsUnattended": ["python scripts/backlog.py promote"],
+    })
+    captured = _capture_needs(monkeypatch)
+
+    code = cli.main(["run", "po", "--unattended", "--repo", str(project.root), "--json"])
+    data = json.loads(capsys.readouterr().out)
+
+    assert code == 0
+    assert "python scripts/backlog.py promote" in (captured.get("needs") or [])
+    assert captured.get("unattended") is True, "print mode: nobody is there to answer"
+    assert captured.get("stream") is True, "so the core reads events instead of a terminal"
+
+    run = runs.find_run(project, data["runId"])
+    assert run.record()["trigger"]["attended"] is False,         "the record has to say nobody was watching — the credential and the "        "precision numbers are read against it later"
+
+
 # ------------------------------------------------------------- event stream
 
 INIT = '{"type":"system","subtype":"init","session_id":"abc-123"}'

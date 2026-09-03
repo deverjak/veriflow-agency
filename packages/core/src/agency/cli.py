@@ -244,6 +244,13 @@ def cmd_run(args, chain: dict | None = None) -> int:
     pack = packs.load(args.pack, project)
     policy = pack.run_policy
     provider = getattr(args, "provider", None) or "claude"
+    # Unattended is not "who launched it", it is whether anybody could
+    # answer. A chain member never can — the orchestrator is blocked waiting
+    # for it. `--unattended` says the same about a standalone run on purpose,
+    # and both consequences follow together: the agent runs in print mode,
+    # and the pack's `needsUnattended` commands are granted up front, because
+    # there is nobody to ask about them.
+    unattended = chain is not None or bool(getattr(args, "unattended", False))
 
     # In --json mode progress output is suppressed, or it would mix with the
     # output and the extension would fail to parse it.
@@ -257,6 +264,10 @@ def cmd_run(args, chain: dict | None = None) -> int:
         return 1
 
     out.say(f"\n  {out.bold(pack.title)}  {out.dim(pack.name + '@' + provider)} → {project.name}\n")
+
+    if unattended and chain is None:
+        out.note("unsupervised — the pack's consequential commands are granted up "
+                 "front and nothing will stop to ask")
 
     prompt_text = (getattr(args, "prompt", None) or "").strip() or None
     if prompt_text and policy["prompt"] == "none":
@@ -315,8 +326,8 @@ def cmd_run(args, chain: dict | None = None) -> int:
 
     # A chain member runs unattended: the orchestrator is waiting for it to
     # end, so nobody can step into it. A standalone run stays attended even
-    # with `--wait`.
-    run = runs.start(project, pack.name, target, provider=provider, attended=chain is None)
+    # with `--wait` — unless `--unattended` said otherwise.
+    run = runs.start(project, pack.name, target, provider=provider, attended=not unattended)
     out.step(f"run {run.id}")
 
     wt = project.root
@@ -428,18 +439,17 @@ def cmd_run(args, chain: dict | None = None) -> int:
                  "members; do only your part and leave theirs to them"
                  if shared else "Prompt for this run")
         prompt += f" {label}: " + _one_line(prompt_text)
-    # `needsUnattended` joins in only when nobody could be asked anyway — a
-    # chain member. A standalone run stays interactive, so leaving them out
-    # here is what makes Claude Code's own permission prompt ask a person
-    # before a pack's consequential commands run, instead of granting them
-    # blind.
+    # `needsUnattended` joins in only when nobody could be asked anyway. A
+    # supervised run stays interactive, so leaving those commands out here is
+    # what makes Claude Code's own permission prompt ask a person before the
+    # pack's consequential ones run, instead of granting them blind.
     needs = list(policy.get("needs") or [])
-    if chain is not None:
+    if unattended:
         needs += policy.get("needsUnattended") or []
     launch, agent_info = runs.launch_argv(
         posix(project.agency_dir), prompt, provider=provider,
-        model=getattr(args, "model", None), unattended=chain is not None,
-        needs=needs, stream=chain is not None,
+        model=getattr(args, "model", None), unattended=unattended,
+        needs=needs, stream=unattended,
         bypass=bool(getattr(args, "bypass", False)))
     rec = run.record()
     rec["agent"] = agent_info
@@ -479,7 +489,7 @@ def cmd_run(args, chain: dict | None = None) -> int:
     out.say()
 
     if args.wait:
-        dialect = providers.streaming(agent_info["provider"])[1] if chain else None
+        dialect = providers.streaming(agent_info["provider"])[1] if unattended else None
         return _wait_for_agent(project, run, launch, wt, wt_owned,
                                dialect=dialect, chain=chain)
 
@@ -1342,6 +1352,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="which runner does the work (default: claude)")
     s.add_argument("--bypass", action="store_true",
                    help="no authorization checks at all — the worktree is throwaway, the machine is not")
+    s.add_argument("--unattended", action="store_true",
+                   help="run unsupervised: the pack's consequential commands (`needsUnattended`) "
+                        "are granted up front and nothing stops to ask. The agent runs in print "
+                        "mode, so pair it with --wait to watch it and gate the output in one go.")
     s.add_argument("--force", action="store_true", help="a draft or an already reviewed commit too")
     s.set_defaults(fn=cmd_run)
 

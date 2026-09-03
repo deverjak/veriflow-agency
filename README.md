@@ -174,6 +174,30 @@ prepares the run and prints the ready command; `--wait` launches the agent
 and runs the gate itself when it finishes; `--launch` hands this terminal
 over to the agent directly; `--json` only prepares, for the extension.
 
+### Supervised, or on its own
+
+A run is supervised by default: the agent sits in an interactive terminal,
+and anything its pack did **not** pre-authorize stops and asks the person
+watching. A pack lists those hold-backs in `pack.json` as `needsUnattended`
+— for the product owner, `backlog.py promote` and `decide`, the two that
+notify people or sign a disposition. Everything reversible (`snapshot`,
+`comment`, `draft`) stays in the ordinary `needs` grant.
+
+```
+agency run po --unattended --wait --prompt "…"
+```
+
+`--unattended` says nobody is going to be asked: `needsUnattended` joins the
+grant, the agent runs in print mode, and the core reads its event stream and
+prints progress rather than handing over the terminal. A chain member is
+always unattended for the same reason — the orchestrator is blocked waiting
+for it, so there is nobody there to answer. The run record says which it was
+(`trigger.attended`), because that is not something to reconstruct later.
+
+In the extension the same choice is a question: a pack that declares
+`needsUnattended` asks **Supervised** or **Unsupervised** when you start it,
+and any other pack is never asked, because for it the answer changes nothing.
+
 Providers are **two, and they are in code** — a table of `claude` and
 `codex` in `providers.py`: binary, flags, authorization shape, streaming
 dialect. A third runner is a row in that table, not a registry. Every run

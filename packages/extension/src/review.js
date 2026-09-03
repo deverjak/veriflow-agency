@@ -12,6 +12,12 @@
 // attended operation. If the extension launched it in the background, the
 // attended/unattended boundary would live only in your memory.
 //
+// Unsupervised is the one deliberate exception, and it is still visible: a
+// pack that declares `needsUnattended` asks which way this run goes, and
+// the unsupervised answer hands the whole thing to `agency run …
+// --unattended --wait` in a terminal you can watch. What changes is who
+// gets asked before it acts, not whether you can see it happen.
+//
 // The shape of the launch command belongs to the CLI. `agency run --json`
 // returns a ready `launch` argv and the extension only sends it to a
 // terminal — if it assembled it too, there would be a second place to set
@@ -128,6 +134,80 @@ async function askPrompt(pack, who) {
 }
 
 /**
+ * Supervised, or on its own? Asked ONLY for a pack that declares
+ * `needsUnattended` — for any other one the answer changes nothing, so the
+ * question would be pure noise.
+ *
+ * Supervised is the default and the safe one: the pack's consequential
+ * commands stay ungranted, so Claude Code stops and asks the person
+ * watching before it promotes a draft or signs a disposition. Unsupervised
+ * grants them up front — which also means print mode, because a run nobody
+ * is asked about is a run nobody can answer either.
+ *
+ * Returns a map of pack name → unattended, or null when the user walked away.
+ */
+async function askSupervision(packs) {
+  const answers = new Map();
+  for (const p of packs) {
+    if (!((p.run && p.run.needsUnattended) || []).length) continue;
+    const picked = await vscode.window.showQuickPick(
+      [
+        {
+          label: '$(eye) Supervised',
+          description: 'you approve each one',
+          detail: `You are asked before ${p.title || p.name} runs anything that leaves a `
+            + 'mark someone else sees — promoting a draft to an issue, signing a decision.',
+          unattended: false,
+        },
+        {
+          label: '$(rocket) Unsupervised',
+          description: 'complete trust',
+          detail: 'It acts on its own and nothing stops to ask. The run switches to print '
+            + 'mode, so you watch a stream of what it did instead of talking to it.',
+          unattended: true,
+        },
+      ],
+      {
+        title: `${p.title || p.name} — supervised, or on its own?`,
+        placeHolder: 'This specialist can act outward — promote a draft, sign a decision',
+        ignoreFocusOut: true,
+      });
+    if (!picked) return null;                     // Esc = walked away
+    answers.set(p.name, picked.unattended);
+  }
+  return answers;
+}
+
+/**
+ * An unsupervised run hands the whole thing to the CLI in one terminal
+ * command, the way a chain already does: `agency run … --unattended --wait`
+ * prints its own progress from the agent's event stream and runs the gate
+ * itself when it ends. Preparing it here and sending the bare `claude -p …`
+ * argv instead would put raw JSONL in front of the user.
+ */
+function runUnsupervised(cwd, pack, opts, log) {
+  const args = ['run', pack.name, '--unattended', '--wait'];
+  if (opts.pr) args.push('--pr', String(opts.pr));
+  if (opts.latestMerged) args.push('--latest-merged');
+  if (opts.force) args.push('--force');
+  if (opts.provider) args.push('--provider', opts.provider);
+  if (opts.model) args.push('--model', opts.model);
+  if (opts.since) args.push('--since', opts.since);
+  if (opts.prompt) args.push('--prompt', opts.prompt);
+
+  const term = vscode.window.createTerminal({
+    name: `Agency · ${pack.title || pack.name} · unsupervised`, cwd });
+  term.show(true);
+  term.sendText([cli.bin(), ...args].map(quote).join(' '));
+
+  if (log) log.appendLine(`[run] unsupervised: ${args.join(' ')}`);
+  vscode.window.showInformationMessage(
+    `Agency: ${pack.title || pack.name} is running unsupervised — it will not ask before `
+    + 'it acts, and the gate runs by itself when it finishes.');
+  return { pack: pack.name, unattended: true };
+}
+
+/**
  * Prepares one run per specialist and starts each in its own terminal.
  *
  * Preparation is SEQUENTIAL on purpose even though the runs themselves are
@@ -137,17 +217,25 @@ async function askPrompt(pack, who) {
  * side, which is the part that actually costs wall-clock time.
  */
 async function runEach(cwd, packs, opts, log) {
+  const supervision = await askSupervision(packs);
+  if (!supervision) return null;                  // Esc = walked away
+
   const started = [];
-  await vscode.window.withProgress(
+  for (const p of packs.filter((x) => supervision.get(x.name))) {
+    started.push(runUnsupervised(cwd, p, opts, log));
+  }
+
+  const supervised = packs.filter((x) => !supervision.get(x.name));
+  if (supervised.length) await vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.Notification,
-      title: packs.length > 1
-        ? `Agency: preparing ${packs.length} runs`
-        : `Agency: preparing a ${packs[0].title || packs[0].name} run`,
+      title: supervised.length > 1
+        ? `Agency: preparing ${supervised.length} runs`
+        : `Agency: preparing a ${supervised[0].title || supervised[0].name} run`,
       cancellable: false,
     },
     async (progress) => {
-      for (const p of packs) {
+      for (const p of supervised) {
         progress.report({ message: p.title || p.name });
         const result = await cli.run(cwd, p.name, opts);
         if (!result.ok) {
@@ -397,5 +485,6 @@ function quote(arg) {
 
 module.exports = {
   pickAndRun, pickAndChain, runOverWorkspace, askPrompt, runEach, pickPacks,
+  askSupervision, runUnsupervised,
   workspacePacks, reviewPacks, items, launch,
 };

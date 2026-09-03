@@ -166,6 +166,14 @@ const PO_PACK = {
   minScore: 75,
 };
 
+/** The PO pack as it really is since `needsUnattended`: two commands that
+ *  leave a mark other people see, held back from the blanket grant. */
+const PO_TRUSTED = {
+  ...PO_PACK,
+  run: { ...PO_PACK.run,
+    needsUnattended: ['python .claude/skills/agency-po/scripts/backlog.py promote'] },
+};
+
 let failed = 0;
 function check(name, fn) {
   try { fn(); console.log(`  ok   ${name}`); }
@@ -710,6 +718,103 @@ checkAsync('a generic run must ask which specialist', async () => {
 
   assert.strictEqual(asked[0], 'Which specialist should run the session?',
     'with two candidates and none chosen, asking is mandatory');
+});
+
+/**
+ * Same idea as `askedAbout`, but it also records what reached a terminal and
+ * what reached `cli.run` — an unsupervised run takes the first path and a
+ * supervised one the second, and the whole point is which.
+ */
+function supervisionHarness(answers) {
+  const vscode = require.cache.vscode.exports;
+  const cli = require(path.join(SRC, 'cli.js'));
+  const asked = [];
+  const sent = [];
+  const prepared = [];
+  const queue = [...answers];
+  cli.run = async (cwd, pack, opts) => {
+    prepared.push({ pack, opts });
+    return {
+      ok: true,
+      data: {
+        runId: '01M1CGN9HAMBKK63SASPP2EYWJ', worktree: 'C:/project',
+        agent: { provider: 'claude', model: 'sonnet' },
+        target: { ref: 'main' }, launch: ['claude', 'go'],
+      },
+    };
+  };
+  vscode.window.showQuickPick = async (items, opts) => {
+    asked.push((opts && opts.title) || '');
+    return queue.shift();
+  };
+  vscode.window.showInputBox = async (opts) => {
+    asked.push((opts && opts.title) || '');
+    return queue.shift();
+  };
+  vscode.window.createTerminal = () => ({
+    show() {}, dispose() {}, sendText(t) { sent.push(t); },
+  });
+  return { asked, sent, prepared };
+}
+
+checkAsync('a pack that cannot act outward is never asked about supervision', async () => {
+  // QA writes findings and nothing else. Asking "supervised?" there would be
+  // a question whose two answers do the same thing.
+  const review = require(path.join(SRC, 'review.js'));
+  Object.assign(state.snapshot, { probe: { ok: true }, cwd: 'C:/project', packs: [QA_PACK] });
+
+  const { asked, prepared } = supervisionHarness(['try cancelling a booking']);
+  await review.runOverWorkspace('C:/project', QA_PACK, { appendLine() {} });
+
+  assert.deepStrictEqual(asked, ['What should this run focus on?']);
+  assert.strictEqual(prepared.length, 1, 'it still runs, just without the question');
+});
+
+checkAsync('a pack that can promote is asked, and unsupervised goes to the CLI', async () => {
+  // The unsupervised path must NOT be the prepare-and-launch one: that would
+  // send a bare `claude -p --output-format stream-json` to the terminal and
+  // put raw JSONL in front of the user. `agency run … --unattended --wait`
+  // prints readable progress and gates the output itself.
+  const review = require(path.join(SRC, 'review.js'));
+  Object.assign(state.snapshot, { probe: { ok: true }, cwd: 'C:/project', packs: [PO_TRUSTED] });
+
+  const { asked, sent, prepared } = supervisionHarness([
+    'what should PO look at', { unattended: true },
+  ]);
+  await review.runOverWorkspace('C:/project', PO_TRUSTED, { appendLine() {} });
+
+  assert.ok(asked.some((t) => /supervised, or on its own/i.test(t)),
+    `the supervision question was never asked: ${JSON.stringify(asked)}`);
+  assert.strictEqual(prepared.length, 0, 'unsupervised does not go through --json prepare');
+  assert.strictEqual(sent.length, 1);
+  assert.ok(sent[0].includes('run po --unattended --wait'), sent[0]);
+  assert.ok(sent[0].includes('--prompt "what should PO look at"'), sent[0]);
+});
+
+checkAsync('supervised keeps the ordinary prepare-and-launch path', async () => {
+  const review = require(path.join(SRC, 'review.js'));
+  Object.assign(state.snapshot, { probe: { ok: true }, cwd: 'C:/project', packs: [PO_TRUSTED] });
+
+  const { sent, prepared } = supervisionHarness([
+    'what should PO look at', { unattended: false },
+  ]);
+  await review.runOverWorkspace('C:/project', PO_TRUSTED, { appendLine() {} });
+
+  assert.strictEqual(prepared.length, 1, 'supervised prepares through the CLI as always');
+  assert.ok(!(prepared[0].opts || {}).unattended, 'and never asks for the grant');
+  assert.deepStrictEqual(sent, ['claude go'], 'the launch argv from the CLI reaches the terminal');
+});
+
+checkAsync('walking away from the supervision question starts nothing', async () => {
+  const review = require(path.join(SRC, 'review.js'));
+  Object.assign(state.snapshot, { probe: { ok: true }, cwd: 'C:/project', packs: [PO_TRUSTED] });
+
+  const { sent, prepared } = supervisionHarness(['what should PO look at', undefined]);
+  const result = await review.runOverWorkspace('C:/project', PO_TRUSTED, { appendLine() {} });
+
+  assert.strictEqual(result, null);
+  assert.deepStrictEqual(sent, []);
+  assert.deepStrictEqual(prepared, []);
 });
 
 /** A team assembles a terminal command instead of starting a run directly —
