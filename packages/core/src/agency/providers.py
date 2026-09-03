@@ -190,6 +190,15 @@ def installed(provider_id: str) -> str | None:
     return proc.which(spec(provider_id).get("bin") or provider_id)
 
 
+def catalog() -> list[dict]:
+    """Providers and the models they offer, for a client choosing between
+    them before a run starts. No PATH check — `detected()` is for that,
+    inside `agency doctor`; a client offering a choice does not need it."""
+    return [{"id": pid, "title": s.get("title") or pid,
+             "models": s.get("models") or [], "defaultModel": s.get("defaultModel")}
+            for pid, s in sorted(BUILTIN.items())]
+
+
 def detected() -> list[dict]:
     rows = []
     for pid, s in sorted(BUILTIN.items()):

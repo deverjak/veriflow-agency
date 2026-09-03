@@ -21,6 +21,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from . import dedup, knowledge, proc
+from . import runs as _runs
 from .config import Project
 from .runs import Run, load_runs, now
 from .util import bundled, read_json, write_json
@@ -111,26 +112,63 @@ def gate(project: Project, run: Run, findings: list[dict], min_score: int | None
 
 
 def earlier_findings(project: Project, run: Run) -> list[dict]:
-    """Findings from older runs — what deduplication compares against.
+    """Findings from older runs, plus the trail — what deduplication compares
+    against.
 
-    Candidates and accepted ones only; reporting a duplicate of a duplicate
-    tells nobody anything.
+    A run still on disk contributes its live findings — `candidate`, `held`
+    or `sent`; reporting a duplicate of a duplicate tells nobody anything.
+    The trail adds what a run no longer on disk sent or had rejected, so
+    discarding a run's directory does not make it forget what it already
+    reported — that memory is exactly why the trail is committed.
     """
     pool: list[dict] = []
+    seen: set[str] = set()
     for r in load_runs(project):
         if r.id >= run.id:
             continue
         for f in r.findings():
-            if f.get("state") in (None, "candidate", "accepted", "published"):
+            if f.get("state") in (None, "candidate", "held", "sent"):
+                fid = f.get("id")
+                if fid:
+                    seen.add(fid)
                 pool.append(f)
+    for fid, row in _runs.read_trail(project).items():
+        if fid in seen or row.get("state") not in ("sent", "rejected"):
+            continue
+        pool.append({"id": fid, "fingerprint": row.get("fingerprint"),
+                     "title": row.get("title"), "anchor": row.get("anchor"),
+                     "state": row.get("state")})
     return pool
 
 
+def _held_upstream_runs(project: Project, chain: dict) -> list[Run]:
+    """Every upstream run reachable from this chain's own `upstream` list,
+    followed recursively through each of THEIR `upstream` too — the flat
+    list `agency chain` writes already carries the whole history, but a run
+    prepared some other way might not, so this does not assume it."""
+    seen: set[str] = set()
+    queue = list(chain.get("upstream") or [])
+    found: list[Run] = []
+    while queue:
+        rid = queue.pop()
+        if rid in seen:
+            continue
+        seen.add(rid)
+        r = _runs.find_run(project, rid)
+        if not r:
+            continue
+        found.append(r)
+        queue.extend((r.record().get("chain") or {}).get("upstream") or [])
+    return found
+
+
 def ingest(project: Project, run: Run, min_score: int | None = None) -> dict:
-    """The whole gate: contract → existence → threshold → dedup → write.
+    """The whole gate: contract → existence → threshold → dedup → chain
+    handoff → dispatch → write.
 
     Idempotent. A second run over the same run gives the same result, because it
-    always starts from `findings.raw.json` when that exists.
+    always starts from `findings.raw.json` when that exists, and a finding
+    already `sent` is not `candidate` any more so it is not dispatched twice.
 
     **Writes nothing when the agent wrote nothing.** An empty array made up by
     the gate looks identical, on disk and in the record, to an empty array a
@@ -174,11 +212,67 @@ def ingest(project: Project, run: Run, min_score: int | None = None) -> dict:
 
     dups = dedup.mark_duplicates(kept, earlier_findings(project, run))
 
+    rec = run.record()
+    chain = rec.get("chain") or {}
+    # A chain member is not the last one: what it found waits for the next
+    # specialist to judge, and dispatch is not this run's call to make.
+    last = not chain or chain.get("position", 1) >= chain.get("of", 1)
+
+    if not last:
+        for f in kept:
+            if f.get("state") == "candidate":
+                f["state"] = "held"
+
     write_json(run.findings_path, kept)
     if dropped:
         write_json(run.dir / "gated.json", dropped)
     elif (run.dir / "gated.json").is_file():
         (run.dir / "gated.json").unlink()
+
+    for d in dropped:
+        dropped_finding = d.get("finding") or {}
+        _runs.append_trail(project, {
+            "id": d.get("id"), "runId": run.id, "pack": rec.get("pack"),
+            "state": "gated-out", "title": d.get("title"),
+            "severity": dropped_finding.get("severity"),
+            "dimension": dropped_finding.get("dimension"), "fingerprint": None,
+            "anchor": dropped_finding.get("anchor"), "by": None,
+            "reason": d.get("reason"), "ref": None, "url": None,
+        })
+
+    sent = 0
+    dispatch_errors: list[dict] = []
+    if last:
+        own_by = f"hire:{_runs.worker_id(rec.get('pack') or 'unknown', (rec.get('agent') or {}).get('provider'))}"
+        for f in kept:
+            if f.get("state") != "candidate":
+                continue
+            result = _runs.dispatch(project, run, f, own_by)
+            if result.get("noSink"):
+                continue
+            if result["ok"]:
+                sent += 1
+            else:
+                dispatch_errors.append({"id": result["id"], "error": result["error"]})
+
+        # The chain ended without anyone judging one of its own findings —
+        # that is not a rejection, and holding it forever is not memory
+        # either. It goes to the board the same way, marked `chain` so
+        # nobody mistakes it for a specialist's endorsement.
+        for upstream_run in _held_upstream_runs(project, chain):
+            decided = _runs.decisions(upstream_run)
+            for f in upstream_run.findings():
+                if f.get("state") != "held" or f.get("id") in decided:
+                    continue
+                result = _runs.dispatch(project, upstream_run, f, _runs.CHAIN)
+                if result.get("noSink"):
+                    continue
+                if result["ok"]:
+                    sent += 1
+                else:
+                    dispatch_errors.append({"id": result["id"], "error": result["error"]})
+
+    held = len([f for f in kept if f.get("state") == "held"])
 
     by_reason: dict[str, int] = {}
     for d in dropped:
@@ -191,8 +285,12 @@ def ingest(project: Project, run: Run, min_score: int | None = None) -> dict:
         "belowScore": by_reason.get("below-score", 0),
         "duplicates": len(dups),
         "kept": len([f for f in kept if f.get("state") != "duplicate"]),
+        "sent": sent,
+        "held": held,
     }
     rec["gatedBy"] = by_reason or None
+    if dispatch_errors:
+        rec["dispatchErrors"] = dispatch_errors
     # The run's summary is the pack's contract (`RUN_DIR/summary.md`). The gate
     # neither reads nor writes it — it only records that it exists. Its readers
     # are a person, the memory's chronology and the next specialist in a chain.
@@ -210,8 +308,11 @@ def ingest(project: Project, run: Run, min_score: int | None = None) -> dict:
         "run": run.id,
         "raw": raw_count,
         "kept": rec["counts"]["kept"],
+        "sent": sent,
+        "held": held,
         "duplicates": dups,
         "dropped": [{k: v for k, v in d.items() if k != "finding"} for d in dropped],
+        "dispatchErrors": dispatch_errors,
         "counts": rec["counts"],
         # The ledger is rebuilt after the gate, because what belongs in the
         # project's memory is what passed the gate — not what the pack wrote.

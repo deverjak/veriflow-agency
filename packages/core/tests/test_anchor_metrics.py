@@ -94,8 +94,8 @@ def test_precision_se_pocita_jen_z_rozhodnutych(project, make_run):
     run = make_run(findings=[make_finding(project, "x") for _ in range(4)])
     ids = [f["id"] for f in run.findings()]
 
-    runs.append_decision(run, ids[0], "accepted", by="human")
-    runs.append_decision(run, ids[1], "accepted", by="human")
+    runs.append_decision(run, ids[0], "sent", by="human")
+    runs.append_decision(run, ids[1], "sent", by="human")
     runs.append_decision(run, ids[2], "rejected", reason="by-design", by="human")
     # ids[3] zůstane nerozhodnutý
 
@@ -122,7 +122,7 @@ def test_metriky_rozpadaji_podle_dimenze_a_modelu(project, make_run):
         make_finding(project, "x", dimension="reuse", title="Mrtvý kód zůstal ve větvi po refaktoru"),
     ])
     ids = [f["id"] for f in run.findings()]
-    runs.append_decision(run, ids[0], "accepted", by="human")
+    runs.append_decision(run, ids[0], "sent", by="human")
     runs.append_decision(run, ids[1], "rejected", reason="out-of-scope", by="human")
 
     r = metrics.collect(project)

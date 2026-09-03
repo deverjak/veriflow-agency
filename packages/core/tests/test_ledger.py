@@ -128,7 +128,7 @@ def test_a_packs_own_decision_does_not_confirm_its_finding(project, make_run):
     this guard, `agency triage --by <its own hire>` alone would bump the tier."""
     run = make_run(run_id=RUN_A, agent=CLAUDE)
     fid = run.findings()[0]["id"]
-    runs.append_decision(run, fid, "accepted", by="hire:review-graph@claude")
+    runs.append_decision(run, fid, "sent", by="hire:review-graph@claude")
 
     c = knowledge.ledger(project)[0]
 

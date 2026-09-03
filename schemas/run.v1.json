@@ -369,6 +369,16 @@
         "kept": {
           "type": "integer",
           "minimum": 0
+        },
+        "sent": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Dispatched to the pack's sink and now on the board."
+        },
+        "held": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Waiting for the next member of a chain to judge them."
         }
       }
     },
@@ -473,6 +483,19 @@
       "additionalProperties": {
         "type": "integer",
         "minimum": 0
+      }
+    },
+    "dispatchErrors": {
+      "type": "array",
+      "description": "Findings the gate kept but whose pack sink failed to send to the board — the finding stays `candidate`, and `agency ingest` retries it next time.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "error"],
+        "properties": {
+          "id": { "type": "string" },
+          "error": { "type": "string" }
+        }
       }
     },
     "worktree": {

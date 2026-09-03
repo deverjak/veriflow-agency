@@ -26,10 +26,10 @@ def test_identity_tells_a_specialist_from_a_person(project, make_run):
     run = make_run()
     fid = run.findings()[0]["id"]
 
-    runs.append_decision(run, fid, "accepted", by="hire:po@claude")
+    runs.append_decision(run, fid, "sent", by="hire:po@claude")
     assert runs.decisions(run)[fid]["by"] == "hire:po@claude"
 
-    runs.append_decision(run, fid, "deferred", by="human:kuba")
+    runs.append_decision(run, fid, "rejected", reason="by-design", by="human:kuba")
     assert runs.decisions(run)[fid]["by"] == "human:kuba"
 
 
@@ -42,7 +42,7 @@ def test_an_unknown_identity_shape_is_refused(project, make_run, bad):
     fid = run.findings()[0]["id"]
 
     with pytest.raises(SystemExit):
-        runs.append_decision(run, fid, "accepted", by=bad)
+        runs.append_decision(run, fid, "sent", by=bad)
 
 
 def test_an_old_write_reads_back_as_a_person(project, make_run):

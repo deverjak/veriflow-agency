@@ -81,6 +81,16 @@ class Pack:
     def requires(self) -> list[str]:
         return list(self.manifest.get("requires") or [])
 
+    @property
+    def sink(self) -> str | None:
+        """The command that sends one gated finding to this pack's board.
+
+        Absent on purpose for a project with no board: the finding then rests
+        as `candidate` in the committed knowledge instead — git as the channel.
+        """
+        v = str(self.manifest.get("sink") or "").strip()
+        return v or None
+
 
 def available(project: Project) -> list[Pack]:
     d = project.skills_dir

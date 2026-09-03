@@ -109,8 +109,8 @@
       "description": "Deterministic fingerprint for dedup across runs. Computed from the symbol and the normalized claim, NOT from the line number or the title — a title survives a corrected diagnosis, the content does not."
     },
     "state": {
-      "enum": ["candidate", "duplicate", "accepted", "published"],
-      "description": "Four states, not seven. A human's or an agent's decision lives separately, in decisions.jsonl — this is the finding's state in the pipeline."
+      "enum": ["candidate", "held", "sent", "rejected", "duplicate"],
+      "description": "Five states. `candidate` rests only where the pack has no sink; `held` waits for the next chain member; `sent` and `rejected` are terminal; a decision event in decisions.jsonl carries who and why."
     },
     "duplicateOf": { "type": ["string", "null"] },
     "sinks": {

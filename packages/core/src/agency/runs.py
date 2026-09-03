@@ -10,6 +10,8 @@ The split everything stands on:
         evidence/            code-review-graph output and the project's memory
 
     .agency/knowledge/       COMMITTED — derived memory, see knowledge.py
+        trail.jsonl          COMMITTED — append-only: what a finding became
+                             and where it went, once its own run is gone
 
 This file does the deterministic preparation, because it is testable.
 Judgement is the pack's job. Mixing the two makes neither verifiable.
@@ -21,7 +23,9 @@ import fnmatch
 import json
 import os
 import re
+import shlex
 import shutil
+import subprocess
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -31,9 +35,11 @@ from . import events, graph, proc, providers
 from .config import AGENCY_DIR, Project
 from .util import out, posix, read_json, ulid, write_json
 
-DECISION_STATES = ("accepted", "rejected", "deferred")
-# The same five values as the Reason field in the GitHub Project — so export
-# needs no mapping.
+#: `sent` and `rejected` only — both terminal. Read back, older data may still
+#: carry `accepted` or `deferred`; nothing writes them any more.
+DECISION_STATES = ("sent", "rejected")
+# The same five values as the Reason field in the GitHub Project — so the
+# pack's sink needs no mapping.
 REJECT_REASONS = (
     "not-reproducible", "by-design", "wrong-diagnosis",
     "duplicate-missed", "out-of-scope",
@@ -769,10 +775,62 @@ def write_context(run: Run, pack, target: dict, wt: Path,
     })
 
 
+# ---------------------------------------------------------------- trail
+
+#: Committed, append-only. One line per finding per state change that
+#: matters once a finding leaves its own run — `sent`, `rejected` or
+#: `gated-out`. `candidate`, `held` and `duplicate` never appear here: they
+#: are not terminal and the run directory they live in is still the truth.
+TRAIL = "trail.jsonl"
+
+
+def trail_path(project: Project) -> Path:
+    return project.agency_dir / "knowledge" / TRAIL
+
+
+def append_trail(project: Project, row: dict) -> dict:
+    row = {"at": now(), **row}
+    path = trail_path(project)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a", encoding="utf-8", newline="\n") as f:
+        f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    return row
+
+
+def read_trail(project: Project) -> dict[str, dict]:
+    """Every finding the trail remembers, by id — the last line for an id
+    wins, same replay rule as `decisions()`. A broken line is skipped, not
+    fatal: the trail is committed text, and a hand-merge conflict marker left
+    behind should not take the whole file down."""
+    path = trail_path(project)
+    out: dict[str, dict] = {}
+    if not path.is_file():
+        return out
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            fid = row.get("id")
+            if fid:
+                out[fid] = row
+    return out
+
+
 # ---------------------------------------------------------------- decisions
 
 #: A person. Optionally `human:<name>`, when a project has more than one.
 HUMAN = "human"
+
+#: The chain itself, deciding by NOT deciding: a chain that ends still sends
+#: whatever an upstream member left `held` and nobody judged. Not a hire and
+#: not a human — `metrics.py` counts precision only from `hire:*`, so a
+#: `chain` decision never inflates it, the same way a `human` one never did.
+CHAIN = "chain"
 
 #: Until 2026-09-01 the CLI wrote `cli` and the extension wrote `vscode`. Read
 #: back as a person — history is not rewritten, only interpreted.
@@ -792,7 +850,7 @@ def normalize_by(value: str | None) -> str | None:
 def validate_by(value: str | None) -> str:
     """The shape of an identity is checked on write, because trust tiers are computed from attribution."""
     v = normalize_by(value) or ""
-    if v == HUMAN or (v.startswith("human:") and v[len("human:"):].strip()):
+    if v == HUMAN or v == CHAIN or (v.startswith("human:") and v[len("human:"):].strip()):
         return v
     if v.startswith("hire:") and ID_RE.match(v[len("hire:"):]):
         return v
@@ -810,12 +868,16 @@ def worker_id(pack_name: str, provider: str | None = None) -> str:
 
 def append_decision(run: Run, finding_id: str, state: str,
                     reason: str | None = None, note: str | None = None,
-                    by: str = HUMAN) -> dict:
+                    by: str = HUMAN, ref: str | None = None,
+                    url: str | None = None) -> dict:
     """An append-only event.
 
     A decision is NOT a UI command. The extension and an agent both write here
     through the same path — if it were an editor command, an agent could not
     triage at all.
+
+    `ref`/`url` carry where a `sent` decision landed — the board item, from
+    the pack's sink. Absent for `rejected`, which never reaches a board.
     """
     if state not in DECISION_STATES:
         raise SystemExit(f"Unknown state “{state}”. Allowed: {', '.join(DECISION_STATES)}")
@@ -828,7 +890,8 @@ def append_decision(run: Run, finding_id: str, state: str,
         raise SystemExit(f"Unknown reason “{reason}”. Allowed: {', '.join(REJECT_REASONS)}")
 
     ev = {"kind": "decision", "findingId": finding_id, "state": state,
-          "reason": reason, "note": note, "by": validate_by(by), "at": now()}
+          "reason": reason, "note": note, "by": validate_by(by), "at": now(),
+          "ref": ref, "url": url}
     with open(run.decisions_path, "a", encoding="utf-8", newline="\n") as f:
         f.write(json.dumps(ev, ensure_ascii=False) + "\n")
     return ev
@@ -843,6 +906,96 @@ def append_note(run: Run, finding_id: str, text: str, by: str = HUMAN) -> dict:
           "by": validate_by(by), "at": now()}
     with open(run.decisions_path, "a", encoding="utf-8", newline="\n") as f:
         f.write(json.dumps(ev, ensure_ascii=False) + "\n")
+    return ev
+
+
+def _set_finding_state(run: Run, finding_id: str, **fields) -> dict | None:
+    """Mutates one finding in `findings.json` in place and persists it.
+    Returns the updated finding, or `None` when the id is not in this run."""
+    fs = run.findings()
+    updated = None
+    for f in fs:
+        if f.get("id") == finding_id:
+            f.update(fields)
+            updated = f
+            break
+    if updated is not None:
+        write_json(run.findings_path, fs)
+    return updated
+
+
+def dispatch(project: Project, run: Run, finding: dict, by: str) -> dict:
+    """Sends one gated finding through its pack's sink onto the board.
+
+    `run` is whichever run owns the finding — its own run for a candidate
+    that reached the end of the pipeline, or an upstream run's for a `held`
+    finding nobody in the chain decided on. Without a sink (a project with no
+    board) this does nothing at all: the finding stays `candidate`, which is
+    exactly the git-only fallback the pack's absence of a `sink` means.
+
+    On success the finding becomes `sent`, `sinks.githubProjectItem` carries
+    the board reference, and a `sent` event lands in both `decisions.jsonl`
+    and the committed trail. On failure — a non-zero exit, a timeout, or a
+    sink that did not print JSON — the finding stays `candidate` and the
+    caller records the error; a later `agency ingest` tries again, and the
+    sink's own idempotence marker keeps a retry from posting twice.
+    """
+    by = validate_by(by)
+    fid = finding.get("id")
+
+    from . import packs
+    try:
+        pack = packs.load(run.record().get("pack") or "", project)
+    except SystemExit:
+        pack = None
+    sink = pack.sink if pack else None
+    if not sink:
+        return {"id": fid, "ok": False, "noSink": True, "ref": None, "url": None, "error": None}
+
+    cmd = shlex.split(sink.format(id=fid, runDir=posix(run.dir)))
+    try:
+        result = subprocess.run(
+            cmd, cwd=project.root, env={**os.environ, RUN_ENV: run.id},
+            capture_output=True, text=True, encoding="utf-8", timeout=120)
+    except (OSError, subprocess.SubprocessError) as e:
+        return {"id": fid, "ok": False, "noSink": False, "ref": None, "url": None, "error": str(e)}
+
+    if result.returncode != 0:
+        error = (result.stderr or result.stdout or "").strip()[:400] or f"exit {result.returncode}"
+        return {"id": fid, "ok": False, "noSink": False, "ref": None, "url": None, "error": error}
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return {"id": fid, "ok": False, "noSink": False, "ref": None, "url": None,
+                "error": "the sink printed no readable JSON"}
+
+    ref = data.get("item") or data.get("ref")
+    url = data.get("url")
+
+    _set_finding_state(run, fid, state="sent",
+                       sinks={**(finding.get("sinks") or {}), "githubProjectItem": ref})
+    append_decision(run, fid, "sent", by=by, ref=ref, url=url)
+    append_trail(project, {
+        "id": fid, "runId": run.id, "pack": run.record().get("pack"),
+        "state": "sent", "title": finding.get("title"), "severity": finding.get("severity"),
+        "dimension": finding.get("dimension"), "fingerprint": finding.get("fingerprint"),
+        "anchor": finding.get("anchor"), "by": by, "ref": ref, "url": url, "reason": None,
+    })
+    return {"id": fid, "ok": True, "noSink": False, "ref": ref, "url": url, "error": None}
+
+
+def reject(project: Project, run: Run, finding_id: str, reason: str,
+          note: str | None = None, by: str = HUMAN) -> dict:
+    """A finding the next specialist in a chain judged untrue. Terminal — it
+    never reaches the board, and the trail remembers not to report it again."""
+    ev = append_decision(run, finding_id, "rejected", reason=reason, note=note, by=by)
+    finding = _set_finding_state(run, finding_id, state="rejected") or {}
+    append_trail(project, {
+        "id": finding_id, "runId": run.id, "pack": run.record().get("pack"),
+        "state": "rejected", "title": finding.get("title"), "severity": finding.get("severity"),
+        "dimension": finding.get("dimension"), "fingerprint": finding.get("fingerprint"),
+        "anchor": finding.get("anchor"), "by": ev["by"], "reason": reason, "ref": None, "url": None,
+    })
     return ev
 
 

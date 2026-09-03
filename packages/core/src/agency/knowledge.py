@@ -164,6 +164,21 @@ def pages_summary(project: Project) -> dict:
     return out
 
 
+def _trail_view(row: dict) -> dict:
+    """A trail row in the same shape `_view()` produces — for a finding whose
+    run is gone, so there is nothing left to view it FROM."""
+    a = row.get("anchor") or {}
+    return {
+        "id": row.get("id"), "title": row.get("title"),
+        "dimension": row.get("dimension"), "severity": row.get("severity"),
+        "file": a.get("file"), "line": a.get("line"),
+        "decision": row.get("state"), "reason": row.get("reason"),
+        "decidedBy": row.get("by"), "runId": row.get("runId"),
+        "hire": None, "pack": row.get("pack"), "provider": None,
+        "trailOnly": True,
+    }
+
+
 def for_run(project: Project, run) -> dict:
     """What this project already knows — across runs, packs and specialists.
 
@@ -182,9 +197,19 @@ def for_run(project: Project, run) -> dict:
     # specialist in a chain, not in a run's background.
     known = assemble(project, exclude=run.id, with_notes=False)
 
-    picked = known["findings"][:FOR_RUN_FINDINGS]
+    # A run whose directory is gone (discarded, or never cloned) still sent
+    # or had findings rejected — the trail is what keeps that memory once
+    # `.agency/runs/` no longer holds it.
+    live = {r.id for r in _runs.load_runs(project)}
+    seen = {f["id"] for f in known["findings"]}
+    trailed = [_trail_view(row) for row in _runs.read_trail(project).values()
+              if row.get("state") in ("sent", "rejected")
+              and row.get("runId") not in live and row.get("id") not in seen]
+
+    all_findings = known["findings"] + trailed
+    picked = all_findings[:FOR_RUN_FINDINGS]
     write_json(ev / "known-findings.json", picked)
-    stats = {"knownFindings": len(known["findings"])}
+    stats = {"knownFindings": len(all_findings)}
 
     pack = run.record().get("pack") or ""
     own_pages = [p for p in pages(project, pack)] if pack else []
@@ -273,8 +298,10 @@ def _is_human(by: str | None) -> bool:
 TIERS = ("unverified", "machine-confirmed", "human-reviewed")
 
 #: State of the claim. `deferred` is not `draft` — a deferred finding still
-#: holds, only nothing is being done about it right now.
-STATUS_BY_DECISION = {"accepted": "stable", "deferred": "stable", "rejected": "deprecated"}
+#: holds, only nothing is being done about it right now. `sent` (dispatched
+#: to the board) is the same "still holds" as `accepted` was.
+STATUS_BY_DECISION = {"accepted": "stable", "sent": "stable",
+                      "deferred": "stable", "rejected": "deprecated"}
 
 
 def _concept(members: list[dict], origin: dict) -> dict:

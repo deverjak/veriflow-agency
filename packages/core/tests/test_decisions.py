@@ -19,12 +19,12 @@ def test_rozhodnuti_prezije_znovunacteni(project, make_run):
     run = make_run()
     fid = run.findings()[0]["id"]
 
-    runs.append_decision(run, fid, "accepted", by="hire:review-graph@claude")
+    runs.append_decision(run, fid, "sent", by="hire:review-graph@claude")
 
     # Čte se z disku novým objektem — jako by mezitím spadl proces.
     znovu = runs.find_run(project, run.id)
     stav = runs.decisions(znovu)
-    assert stav[fid]["state"] == "accepted"
+    assert stav[fid]["state"] == "sent"
     assert stav[fid]["by"] == "hire:review-graph@claude", \
         "kdo rozhodl je vstup dalšího běhu, ne dekorace"
 
@@ -35,13 +35,13 @@ def test_posledni_zapis_vyhrava_ale_historie_zustava(project, make_run):
     run = make_run()
     fid = run.findings()[0]["id"]
 
-    runs.append_decision(run, fid, "deferred", by="vscode")
+    runs.append_decision(run, fid, "sent", by="vscode")
     runs.append_decision(run, fid, "rejected", reason="by-design", by="cli")
 
     assert runs.decisions(run)[fid]["state"] == "rejected"
 
     radky = [json.loads(l) for l in run.decisions_path.read_text(encoding="utf-8").splitlines() if l]
-    assert [r["state"] for r in radky] == ["deferred", "rejected"], "historie se přepsala"
+    assert [r["state"] for r in radky] == ["sent", "rejected"], "historie se přepsala"
     assert [r["by"] for r in radky] == ["human", "human"], \
         "starý zápis (`vscode`, `cli`) je člověk — dveřmi se identita neurčuje"
 
@@ -72,8 +72,8 @@ def test_poznamka_neni_rozhodnuti(project, make_run):
 
     assert runs.decisions(run) == {}, "poznámka se započítala jako rozhodnutí"
 
-    runs.append_decision(run, fid, "accepted", by="human")
-    assert runs.decisions(run)[fid]["state"] == "accepted"
+    runs.append_decision(run, fid, "sent", by="human")
+    assert runs.decisions(run)[fid]["state"] == "sent"
 
 
 def test_stejny_nalez_ve_dvou_bezich_ma_vlastni_rozhodnuti(project, make_run):
@@ -82,7 +82,7 @@ def test_stejny_nalez_ve_dvou_bezich_ma_vlastni_rozhodnuti(project, make_run):
     stary = make_run(run_id="01AAAAAAAAAAAAAAAAAAAAAAAA")
     novy = make_run(run_id="01BBBBBBBBBBBBBBBBBBBBBBBB")
 
-    runs.append_decision(stary, stary.findings()[0]["id"], "accepted", by="human")
+    runs.append_decision(stary, stary.findings()[0]["id"], "sent", by="human")
 
     assert len(runs.decisions(stary)) == 1
     assert runs.decisions(novy) == {}

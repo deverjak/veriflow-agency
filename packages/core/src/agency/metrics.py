@@ -46,7 +46,9 @@ class Tally:
         self.accepted = self.rejected = self.deferred = self.undecided = 0
 
     def add(self, state: str | None) -> None:
-        if state == "accepted":
+        # `sent` (dispatched to the board) counts the same as the older
+        # `accepted` — both mean the finding held up.
+        if state in ("accepted", "sent"):
             self.accepted += 1
         elif state == "rejected":
             self.rejected += 1
