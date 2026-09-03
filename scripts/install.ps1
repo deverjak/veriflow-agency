@@ -67,7 +67,7 @@ if ($Extension -or $both) {
 
 Step 'dál'
 Write-Host '  1. otevři projekt s git repem'
-Write-Host '  2. agency add review-graph'
+Write-Host '  2. cp -r packs/author <projekt>/.claude/skills/agency-author'
 Write-Host '  3. agency doctor'
-Write-Host '  4. ikona Agency v activity baru → Zrecenzovat pull request'
+Write-Host '  4. ikona Agency v activity baru → Specialists → Write a new specialist…'
 Write-Host ''
