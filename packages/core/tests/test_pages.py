@@ -38,6 +38,11 @@ PLAIN = """# Known regressions
 The cart empties after login. It came back a second time.
 """
 
+NO_HEADING = """Last reviewed: 2099-01-01
+
+No heading here, just a sentence.
+"""
+
 
 def write_page(project, pack: str, name: str, text: str):
     d = knowledge.pages_dir(project, pack)
@@ -70,6 +75,20 @@ def test_a_page_with_no_last_reviewed_line_is_not_broken(project):
 
     assert page["stale"] is False
     assert page["title"] == "Known regressions", "the page carries its own name in the heading"
+
+
+def test_the_title_is_the_heading_even_when_last_reviewed_comes_first(project):
+    """The convention puts `Last reviewed:` on line one. Taking "the first
+    non-empty line" as the title therefore named every page after its date,
+    and the knowledge index listed five pages called `Last reviewed: 2026-09-03`."""
+    install_pack(project, "qa")
+    write_page(project, "qa", "coverage", FRESH)
+    write_page(project, "qa", "notes", NO_HEADING)
+
+    found = {p["id"]: p for p in knowledge.pages(project, "qa")}
+
+    assert found["coverage"]["title"] == "What is covered and what is not"
+    assert found["notes"]["title"] == "No heading here, just a sentence.", "without a heading, the first real line"
 
 
 def test_pages_summary_counts_by_pack(project):

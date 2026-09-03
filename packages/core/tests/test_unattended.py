@@ -61,6 +61,30 @@ def test_a_bare_command_is_allowed_too():
     assert "Bash(git *)" in argv and "Bash(git)" in argv
 
 
+def test_a_tool_named_in_needs_is_granted_as_a_tool_not_as_a_command():
+    """A founder pack researches the web. `WebSearch` in `needs` used to come
+    out as `Bash(WebSearch *)` — a shell command that does not exist — and the
+    tool itself stayed refused in every unsupervised run."""
+    argv, _ = runs.launch_argv("/mem", "p", provider="claude",
+                               needs=["git", "WebSearch", "WebFetch(domain:karp-kv.cz)"])
+
+    assert "WebSearch" in argv
+    assert "WebFetch(domain:karp-kv.cz)" in argv
+    assert "Bash(WebSearch *)" not in argv and "Bash(WebSearch)" not in argv
+    assert "Bash(git *)" in argv, "commands keep their shell shape"
+
+
+def test_a_command_is_never_mistaken_for_a_tool():
+    """The distinction is the capital letter: every command a pack has ever
+    needed is lowercase, every Claude Code tool is PascalCase."""
+    assert providers.is_tool_rule("WebSearch")
+    assert providers.is_tool_rule("WebFetch(domain:example.org)")
+    assert not providers.is_tool_rule("git")
+    assert not providers.is_tool_rule("gh issue view")
+    assert not providers.is_tool_rule("python .claude/skills/agency-po/scripts/backlog.py")
+    assert not providers.is_tool_rule("agency triage")
+
+
 def test_the_allow_list_never_stands_right_before_the_prompt():
     """`--allowedTools` is variadic exactly like `--add-dir`, and that one
     already swallowed a positional prompt once (commit 8186673). Another flag

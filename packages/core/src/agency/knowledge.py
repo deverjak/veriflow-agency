@@ -145,8 +145,16 @@ def pages(project: Project, pack: str) -> list[dict]:
     found = []
     for path in sorted(d.glob("*.md")):
         text = path.read_text(encoding="utf-8", errors="replace")
-        title = next((line.lstrip("#").strip() for line in text.splitlines()
-                     if line.strip()), path.stem)
+        # The first heading names the page. The convention puts `Last
+        # reviewed:` on line one, so "first non-empty line" would title every
+        # page with its date — which is what the index used to show.
+        lines = text.splitlines()
+        title = next((line.lstrip("#").strip() for line in lines
+                      if line.startswith("#")), None)
+        if title is None:
+            title = next((line.strip() for line in lines
+                          if line.strip() and not line.startswith("Last reviewed:")),
+                         path.stem)
         found.append({"id": path.stem, "path": posix(path.relative_to(project.root)),
                      "title": title, "stale": _stale_after_days(text)})
     return found

@@ -12,6 +12,8 @@ positionally or behind a flag.
 
 from __future__ import annotations
 
+import re
+
 from . import proc
 
 BUILTIN: dict[str, dict] = {
@@ -102,6 +104,19 @@ BUILTIN: dict[str, dict] = {
 }
 
 
+# `needs` names commands — `git`, `gh issue view`, `python …/backlog.py` — and
+# the runner wraps each one in the runner's own shell shape. A pack that does
+# its work on the web needs a TOOL, not a command: `WebSearch`,
+# `WebFetch(domain:karp-kv.cz)`. Claude Code's tool names are PascalCase and a
+# shell command never is, so the capital letter is the whole distinction.
+TOOL_RULE = re.compile(r"^[A-Z][A-Za-z]*(\(.*\))?$")
+
+
+def is_tool_rule(entry: str) -> bool:
+    """Is this `needs` entry a tool rule already, rather than a command?"""
+    return bool(TOOL_RULE.match(str(entry).strip()))
+
+
 def known() -> list[str]:
     return sorted(BUILTIN)
 
@@ -142,7 +157,9 @@ def authorization(provider_id: str, needs: list[str], mode: str = "grant") -> li
     triage`, `git`, `gh pr view`, `npx vitest`. The core does not translate
     them into one runner's syntax, it only fills them into that runner's shape
     (`allowShapes`); a runner that authorizes with a sandbox (codex) ignores
-    the list, and that is correct rather than a gap.
+    the list, and that is correct rather than a gap. An entry that is a tool
+    rule already (`WebSearch`, `WebFetch(domain:…)` — see `is_tool_rule`) is
+    passed through untouched.
 
     Two modes:
 
@@ -162,6 +179,13 @@ def authorization(provider_id: str, needs: list[str], mode: str = "grant") -> li
         for cmd in needs:
             cmd = str(cmd).strip()
             if not cmd:
+                continue
+            # A tool rule goes in as it stands. Wrapping it would grant a
+            # shell command called `WebSearch` that does not exist, and
+            # refuse the tool the pack actually asked for.
+            if is_tool_rule(cmd):
+                if cmd not in rules:
+                    rules.append(cmd)
                 continue
             for shape in shapes:
                 rule = shape.format(cmd=cmd)

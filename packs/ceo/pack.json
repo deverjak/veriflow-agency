@@ -1,0 +1,24 @@
+{
+  "name": "ceo",
+  "title": "CEO / founder · Kvesteros",
+  "description": "The founder's strategy partner. Holds the product against the market it has to enter — the region's destination agencies, its innovation agency, the national portals, the AI trip planners — decides what to focus on next and how the product reaches people, and drafts every outward-facing step for the founder to send. Reads the web this run; a claim it cannot cite is not written.",
+  "requires": ["git"],
+  "target": "workspace",
+  "worktree": false,
+  "graph": false,
+  "prompt": "optional",
+  "needs": [
+    "agency triage", "agency note", "agency findings", "agency knowledge",
+    "git",
+    "WebSearch", "WebFetch"
+  ],
+  "minScore": 80,
+  "dimensions": [
+    { "id": "positioning", "title": "Where we claim to differ and do not" },
+    { "id": "focus", "title": "Roadmap and work in flight against the bets" },
+    { "id": "distribution", "title": "How the product reaches people — channels, stores, partners" },
+    { "id": "stakeholders", "title": "What the region's institutions need against what we offer" },
+    { "id": "readiness", "title": "What blocks an outward-facing conversation" },
+    { "id": "measurement", "title": "Strategic claims with no number behind them" }
+  ]
+}

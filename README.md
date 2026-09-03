@@ -11,7 +11,7 @@ which board, which staging URL, which law applies — is written into the skill
 as fact, the same way the code itself is project-specific. A second project
 gets a **copy** of the pack and rewrites its facts, not a shared parameter.
 
-## The five workflows over `main-panel`
+## The workflows — five over `main-panel`, one over `kvesteros-platform`
 
 This is the whole product. `agency` runs specialists against one project;
 what each one finds goes through a gate (evidence required, no duplicates)
@@ -89,6 +89,25 @@ already covered by an existing mechanism, for instance — because a model
 tuned to be careful about law tends to over-comply, and over-compliance is
 a cost too.
 
+**W6 — Strategy with a founder** (`kvesteros-platform`)
+
+```
+agency run ceo --prompt "how do I approach the region's innovation agency, and what do we ask for?"
+```
+
+The founder's strategy partner. Reads the roadmap before the web, then the
+web this run — the region's destination agencies, its innovation agency, the
+national portals, the AI trip planners — answers the question in
+`answer.md`, proposes at most three bets, and drafts every outward-facing
+step (an e-mail, a one-pager outline, a call agenda) into `drafts/` for the
+founder to send. Findings are what is wrong with the strategy itself: a
+claim of difference an incumbent already meets, work no bet covers, a gap
+that would end an institutional conversation on the first reply. The pack
+has no `sink` — the project has no board — so they rest in the committed
+knowledge. `needs` names `WebSearch` and `WebFetch` by tool name: an
+unsupervised run has nobody to approve a fetch, and a founder pack that
+cannot read the web is a memoir.
+
 ### Memory anyone can read
 
 `.agency/knowledge/` is a **committed** directory of markdown: a ledger of
@@ -123,7 +142,7 @@ veriflow-agency/                     this repository
                                      Knows nothing about any target project.
   packages/extension/                VIEWER — runs, findings next to the line, read-only.
                                      Talks only to `agency … --json`.
-  packs/                             EXAMPLES — reference copies of main-panel's packs, for the next project.
+  packs/                             EXAMPLES — reference copies of main-panel's and kvesteros-platform's packs, for the next project.
                                      Not bundled, not installed.
 
 <target-project>/
@@ -228,7 +247,9 @@ sandbox that will not otherwise let the agent run its own binary.
 
 Every key is read by the runner: `requires` feeds `doctor`; `target` /
 `worktree` / `graph` shape the run preparation; `prompt` (`required` |
-`optional` | `none`) validates `--prompt`; `needs` is the agent's allowlist;
+`optional` | `none`) validates `--prompt`; `needs` is the agent's allowlist — shell commands, or a Claude Code tool by its
+PascalCase name (`WebSearch`, `WebFetch(domain:…)`) for a pack that works on
+the web;
 `minScore` is the gate's threshold; `sink` is where a gated finding goes —
 absent, it just rests as `candidate` in the committed knowledge, a project
 with no board; `dimensions` validates findings and labels the extension's
@@ -324,7 +345,7 @@ what happened and shows it, it does not decide.
 |---|---|
 | `packages/core/` | the runner and CLI (Python, `uv`) |
 | `packages/extension/` | the VS Code extension (plain JS, no build step) |
-| `packs/` | reference copies of `main-panel`'s packs, for the next project to copy |
+| `packs/` | reference copies of packs living in `main-panel` and `kvesteros-platform`, for the next project to copy |
 | `schemas/` | `run.v1`, `finding.v1` — the contract across the boundary |
 | `docs/` | decisions and plans, including what changed in them and why |
 
