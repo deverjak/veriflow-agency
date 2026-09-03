@@ -12,7 +12,7 @@ import json
 
 import pytest
 
-from agency import runs
+from agency import cli, runs
 
 
 def test_rozhodnuti_prezije_znovunacteni(project, make_run):
@@ -86,3 +86,65 @@ def test_stejny_nalez_ve_dvou_bezich_ma_vlastni_rozhodnuti(project, make_run):
 
     assert len(runs.decisions(stary)) == 1
     assert runs.decisions(novy) == {}
+
+
+# ------------------------------------------------------------------ agency triage (CLI)
+
+def test_triage_accept_is_dispatch(project, make_run):
+    """`accept` is not a status flip — it runs the pack's sink. No sink in
+    this fixture project, so the finding stays `candidate`, honestly."""
+    run = make_run()
+    fid = run.findings()[0]["id"]
+
+    code = cli.main(["triage", "accept", fid, "--repo", str(project.root), "--json"])
+
+    assert code == 0
+    assert runs.find_run(project, run.id).findings()[0]["state"] == "candidate"
+
+
+def test_triage_reject_requires_a_reason(project, make_run):
+    run = make_run()
+    fid = run.findings()[0]["id"]
+
+    with pytest.raises(SystemExit):
+        cli.main(["triage", "reject", fid, "--repo", str(project.root)])
+
+
+def test_triage_defer_no_longer_exists(project, make_run):
+    """There is no third verdict any more — what is not rejected goes to
+    the board when the chain ends, so `defer` is simply not a command."""
+    run = make_run()
+    fid = run.findings()[0]["id"]
+
+    with pytest.raises(SystemExit):
+        cli.main(["triage", "defer", fid, "--repo", str(project.root)])
+
+
+def test_an_old_accepted_write_still_reads_back(project, make_run):
+    """History is not rewritten, only interpreted. A decisions.jsonl line
+    from before this migration still means what it always meant."""
+    run = make_run()
+    fid = run.findings()[0]["id"]
+    with open(run.decisions_path, "a", encoding="utf-8", newline="\n") as f:
+        f.write(json.dumps({"kind": "decision", "findingId": fid, "state": "accepted",
+                            "reason": None, "note": None, "by": "human",
+                            "at": runs.now()}) + "\n")
+
+    assert runs.decisions(run)[fid]["state"] == "accepted"
+
+
+def test_export_command_no_longer_exists(project):
+    with pytest.raises(SystemExit):
+        cli.build_parser().parse_args(["export"])
+
+
+def test_status_json_carries_the_provider_catalog(project, make_run, capsys):
+    """A client picking a runner before a run starts (the extension's preset
+    picker) needs the provider/model list without hardcoding it."""
+    make_run()
+
+    cli.main(["status", "--repo", str(project.root), "--json"])
+    data = json.loads(capsys.readouterr().out)
+
+    ids = [p["id"] for p in data["project"]["providers"]]
+    assert "claude" in ids and "codex" in ids

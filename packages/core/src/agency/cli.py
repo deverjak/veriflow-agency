@@ -12,7 +12,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import anchor, chain as chains, config, export, graph, ingest, knowledge, metrics, packs, proc, providers, runs
+from . import anchor, chain as chains, config, graph, ingest, knowledge, metrics, packs, proc, providers, runs
 from .util import bundled, out, posix, read_json, ulid
 
 # ---------------------------------------------------------------- helpers
@@ -143,6 +143,12 @@ def cmd_doctor(args) -> int:
                 check(f"pack {p.name} graph", True,
                       f"{graph.DRIVER}, without {', '.join(lacks_optional)} — "
                       f"those dimensions run without the graph signal", fatal=False)
+        if p.sink:
+            parts = p.sink.split()
+            token = (parts[1] if parts and parts[0] == "python" and len(parts) > 1
+                    else (parts[0] if parts else ""))
+            if token and not (project.root / token).is_file():
+                check(f"pack {p.name} sink", False, f"{token} not found", fatal=False)
 
     fatal = [c for c in checks if not c["ok"] and c["fatal"]]
 
@@ -727,6 +733,31 @@ def cmd_cleanup(args) -> int:
     """Close a run that is not coming back, and take its worktree with it."""
     project = _project(args)
 
+    if getattr(args, "all", False):
+        if not getattr(args, "discard", False):
+            raise SystemExit(
+                "--all only goes with --discard. To close runs whose terminal is "
+                "gone, use --unfinished.")
+        closed, skipped = [], []
+        for run in runs.load_runs(project):
+            if run.record().get("status") == "running":
+                continue
+            if runs.decisions(run) and not args.force:
+                skipped.append({"run": run.id, "decisions": len(runs.decisions(run))})
+                continue
+            closed.append({**runs.discard(project, run, force=args.force), "action": "discarded"})
+        data = {"closed": closed, "skipped": skipped, "unfinished": len(runs.unfinished(project))}
+
+        def human():
+            findings = sum(r.get("findings", 0) for r in closed)
+            print(f"  {len(closed)} run(s) discarded — {findings} findings went with them")
+            if skipped:
+                print(f"  {len(skipped)} kept, they carry decisions: "
+                      + ", ".join(s["run"][:10] for s in skipped)
+                      + "  — --force takes those too")
+
+        return _emit(args, data, human)
+
     targets: list = []
     if getattr(args, "unfinished", False):
         targets = runs.unfinished(project)
@@ -919,7 +950,13 @@ def _ingest_report(run, data: dict) -> None:
             label = (d["title"] or "")[:52]
             ref = "= " + (d["duplicateOf"] or "")[:10]
             print(f"      {out.dim('·')} {label:54} {out.dim(ref)} {out.dim(d['how'])}")
-    print(f"  {out.ok(str(c['kept']).rjust(3))} candidates to decide\n")
+    print(f"  {out.ok(str(c['kept']).rjust(3))} kept"
+          + (f"  {out.dim('·')}  {c.get('sent', 0)} sent to the board" if c.get("sent") else "")
+          + (f"  {out.dim('·')}  {c.get('held', 0)} held for the next specialist"
+             if c.get("held") else ""))
+    for e in data.get("dispatchErrors") or []:
+        print(f"  {out.err('  ×')} {e['id'][:10]} could not reach the board: {out.dim(e['error'][:80])}")
+    print()
     b = data.get("bundle") or {}
     if b.get("error"):
         print(f"  {out.warn('knowledge bundle not written')} {out.dim(b['error'])}")
@@ -1046,50 +1083,6 @@ def cmd_metrics(args) -> int:
     return _emit(args, r, human)
 
 
-# ---------------------------------------------------------------- export
-
-def cmd_export(args) -> int:
-    project = _project(args)
-    owner = args.owner or (project.slug or "/").split("/")[0]
-    if not owner:
-        raise SystemExit("Cannot tell who owns the Project. Use --owner.")
-
-    if args.run:
-        r = runs.find_run(project, args.run)
-        selected = [r] if r else []
-    else:
-        selected = runs.load_runs(project)
-    rows = export.plan(selected, only_decided=not args.include_undecided)
-    if not rows:
-        raise SystemExit(
-            "Nothing to export. Only decided findings are exported — "
-            "triage them, or run with --include-undecided.")
-
-    data = export.push(rows, int(args.project_number), owner, dry_run=args.dry_run)
-
-    def human():
-        if data["dryRun"]:
-            head = "Dry run — nothing was sent"
-        else:
-            title = data["project"].get("title")
-            head = f"Project #{args.project_number} ({owner})" + (f" — {title}" if title else "")
-        print(f"\n  {out.bold(head)}\n")
-        for r in data["created"]:
-            print(f"  {out.ok('+')} {(r['title'] or '')[:70]}")
-        for r in data["updated"]:
-            print(f"  {out.dim('~')} {(r['title'] or '')[:70]}")
-        for r in data["fieldSkips"]:
-            print(f"  {out.warn('!')} field {r['field']}: {r['why']}")
-        for r in data["failed"]:
-            print(f"  {out.err('x')} {(r['title'] or '')[:50]} — {r['error']}")
-        fail = out.err(f", {len(data['failed'])} failed") if data["failed"] else ""
-        print(f"\n  {len(data['created'])} new, "
-              f"{len(data['updated'])} updated{fail}\n")
-
-    _emit(args, data, human)
-    return 1 if data["failed"] else 0
-
-
 # ---------------------------------------------------------------- findings
 
 def cmd_findings(args) -> int:
@@ -1098,19 +1091,24 @@ def cmd_findings(args) -> int:
         [r] if (r := runs.find_run(project, args.run)) else [])
 
     rows = []
+    seen_ids: set[str] = set()
     for run in selected:
         dec = runs.decisions(run)
         hist = runs.history(run)
         rec = run.record()
         for f in run.findings():
-            d = dec.get(f.get("id"))
+            fid = f.get("id")
+            seen_ids.add(fid)
+            d = dec.get(fid)
             a = f.get("anchor") or {}
             row = {
-                "runId": run.id, "id": f.get("id"), "severity": f.get("severity"),
+                "runId": run.id, "id": fid, "severity": f.get("severity"),
                 "title": f.get("title"), "body": f.get("body"),
                 "dimension": f.get("dimension"),
                 "file": a.get("file"), "line": a.get("line"),
-                "decision": d["state"] if d else None,
+                "state": f.get("state"),
+                "ref": (f.get("sinks") or {}).get("githubProjectItem"),
+                "url": d.get("url") if d else None,
                 "reason": d.get("reason") if d else None,
                 "note": d.get("note") if d else None,
                 "by": runs.normalize_by(d.get("by")) if d else None,
@@ -1119,8 +1117,7 @@ def cmd_findings(args) -> int:
                 row["anchor"] = a
                 row["evidence"] = f.get("evidence") or []
                 row["target"] = rec.get("target") or {}
-                row["history"] = hist.get(f.get("id"), [])
-                row["state"] = f.get("state")
+                row["history"] = hist.get(fid, [])
                 row["duplicateOf"] = f.get("duplicateOf")
                 row["score"] = f.get("score")
                 row["pack"] = f.get("pack")
@@ -1130,21 +1127,39 @@ def cmd_findings(args) -> int:
                     row["resolved"] = {"line": r.line, "via": r.via, "note": r.note}
             rows.append(row)
 
+    # Across all runs, a finding whose own run is gone still has a line —
+    # the trail is what a clone with no `.agency/runs/` has to go on.
+    if args.all:
+        for fid, trow in runs.read_trail(project).items():
+            if fid in seen_ids or trow.get("state") not in ("sent", "rejected"):
+                continue
+            a = trow.get("anchor") or {}
+            rows.append({
+                "runId": trow.get("runId"), "id": fid, "severity": trow.get("severity"),
+                "title": trow.get("title"), "body": None, "dimension": trow.get("dimension"),
+                "file": a.get("file"), "line": a.get("line"), "state": trow.get("state"),
+                "ref": trow.get("ref"), "url": trow.get("url"), "reason": trow.get("reason"),
+                "note": None, "by": runs.normalize_by(trow.get("by")), "trailOnly": True,
+            })
+
     def human():
         if not rows:
             print(f"\n  {out.dim('No findings. Run `agency run review-graph --pr <n>`.')}\n")
             return
-        undecided = sum(1 for r in rows if not r["decision"])
+        undecided = sum(1 for r in rows if r["state"] in (None, "candidate", "held"))
         print(f"\n  {len(rows)} findings, {undecided} undecided\n")
-        mark = {"accepted": out.ok("✔"), "rejected": out.err("✘"), "deferred": out.warn("⏱")}
+        mark = {"sent": out.ok("→"), "rejected": out.err("✘")}
         sev = {"blocker": out.err("●"), "high": out.err("●"), "medium": out.warn("●"), "low": out.dim("●")}
         for r in rows:
-            m = mark.get(r["decision"], out.dim("·"))
+            m = mark.get(r["state"], out.dim("·"))
             tail = ""
-            if r["decision"]:
-                tail = out.dim(f"{r['decision']}{'/' + r['reason'] if r['reason'] else ''} ({r['by']})")
+            if r["state"] == "rejected":
+                tail = out.dim(f"{r['reason'] or ''} ({r['by']})" if r["by"] else (r["reason"] or ""))
+            elif r["state"] == "sent" and r["ref"]:
+                tail = out.dim(r["ref"])
+            loc = f"{r['file']}:{r['line']}"
             print(f"  {m} {sev.get(r['severity'], '·')} {(r['id'] or '')[:8]:9} "
-                  f"{(r['title'] or '')[:52]:54} {out.dim(f'{r['file']}:{r['line']}')} {tail}")
+                  f"{(r['title'] or '')[:52]:54} {out.dim(loc)} {tail}")
         print()
 
     return _emit(args, rows, human)
@@ -1158,18 +1173,40 @@ def _run_with_finding(project: config.Project, finding_id: str) -> runs.Run:
 
 
 def cmd_triage(args) -> int:
+    """Judge a finding — a chain member's own `agency triage`, or a person's.
+
+    There is no `defer`: what is not rejected goes to the board when the
+    chain ends, so the only two verdicts are `accept` (dispatch it now) and
+    `reject` (remember not to report it again).
+    """
     project = _project(args)
     run = _run_with_finding(project, args.finding)
 
-    state = {"accept": "accepted", "reject": "rejected", "defer": "deferred"}[args.action]
-    ev = runs.append_decision(run, args.finding, state, args.reason, args.note, args.by)
+    if args.action == "reject":
+        ev = runs.reject(project, run, args.finding, args.reason, args.note, args.by)
+
+        def human():
+            print(f"  {args.finding} → rejected"
+                  + (f" · {ev['reason']}" if ev["reason"] else "")
+                  + (f" · {ev['note']}" if ev["note"] else ""))
+
+        return _emit(args, ev, human)
+
+    finding = next((f for f in run.findings() if f.get("id") == args.finding), None)
+    if finding is None:
+        raise SystemExit(f"Finding “{args.finding}” was not found in run {run.id}.")
+    result = runs.dispatch(project, run, finding, args.by)
 
     def human():
-        print(f"  {args.finding} → {ev['state']}"
-              + (f" · {ev['reason']}" if ev["reason"] else "")
-              + (f" · {ev['note']}" if ev["note"] else ""))
+        if result.get("noSink"):
+            print(f"  {args.finding} — no board here, stays candidate")
+        elif result["ok"]:
+            print(f"  {args.finding} → sent" + (f" · {result['ref']}" if result["ref"] else ""))
+        else:
+            print(f"  {args.finding} — could not reach the board: {result['error']}")
 
-    return _emit(args, ev, human)
+    _emit(args, result, human)
+    return 1 if (not result.get("noSink") and not result["ok"]) else 0
 
 
 def cmd_note(args) -> int:
@@ -1221,7 +1258,8 @@ def cmd_status(args) -> int:
 
     installed = [p.name for p in packs.available(project)]
     payload = {"project": {"name": project.name, "slug": project.slug,
-                           "root": posix(project.root), "packs": installed},
+                           "root": posix(project.root), "packs": installed,
+                           "providers": providers.catalog()},
               "runs": rows}
 
     def human():
@@ -1364,16 +1402,6 @@ def build_parser() -> argparse.ArgumentParser:
                        help="precision, dedup, queue age — by dimension, severity and provider")
     s.set_defaults(fn=cmd_metrics)
 
-    s = sub.add_parser("export", parents=[common], help="one-way push of decided findings into a GitHub Project")
-    s.add_argument("--run", help="a single run only (default: all)")
-    s.add_argument("--project", dest="project_number", type=int, required=True,
-                   help="Project number")
-    s.add_argument("--owner", help="Project owner (default: from the git remote)")
-    s.add_argument("--include-undecided", action="store_true",
-                   help="undecided findings too")
-    s.add_argument("--dry-run", action="store_true", help="only show what would be sent")
-    s.set_defaults(fn=cmd_export)
-
     s = sub.add_parser("cleanup", parents=[common],
                        help="close a run that is not coming back and remove its worktree")
     s.add_argument("--run")
@@ -1382,6 +1410,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--discard", action="store_true",
                    help="delete the run outright, record and evidence included; "
                         "refused when it carries decisions")
+    s.add_argument("--all", action="store_true",
+                   help="every finished run; only together with --discard")
     s.add_argument("--force", action="store_true",
                    help="discard even a run that carries decisions")
     s.set_defaults(fn=cmd_cleanup)
@@ -1392,7 +1422,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(fn=cmd_findings)
 
     s = sub.add_parser("triage", parents=[common], help="decide on a finding — an agent calls this too")
-    s.add_argument("action", choices=["accept", "reject", "defer"])
+    s.add_argument("action", choices=["accept", "reject"])
     s.add_argument("finding")
     s.add_argument("--reason", choices=list(runs.REJECT_REASONS))
     s.add_argument("--note")
