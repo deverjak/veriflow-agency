@@ -35,9 +35,11 @@ function workspaceRoot() {
   return folders && folders.length ? folders[0].uri.fsPath : null;
 }
 
-/** Findings waiting for a decision. Duplicates and decided ones do not count. */
-function queue() {
-  return snapshot.findings.filter((f) => !f.decision && f.state !== 'duplicate');
+/** Findings resting with no board to go to — the one thing left that might
+ *  actually need a person's attention, since everything else either went
+ *  out through a sink already or is waiting on the next chain member. */
+function candidates() {
+  return snapshot.findings.filter((f) => f.state === 'candidate');
 }
 
 function findingById(id) {
@@ -94,5 +96,5 @@ async function refresh({ light = false } = {}) {
 }
 
 module.exports = {
-  snapshot, onDidChange, refresh, queue, findingById, workspaceRoot, emitter,
+  snapshot, onDidChange, refresh, candidates, findingById, workspaceRoot, emitter,
 };

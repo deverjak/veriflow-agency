@@ -2,7 +2,7 @@
   "name": "veriflow-agency",
   "displayName": "Agency",
   "description": "Specialists for this repository. Pull request reviews with evidence-backed findings, triage right next to the code, and measurable precision.",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "publisher": "veriflow",
   "license": "UNLICENSED",
   "private": true,
@@ -119,16 +119,25 @@
           "default": true,
           "markdownDescription": "Reload when `.agency/runs/` changes from the outside — that is, when an agent or a terminal decides. Turning this off means changes only show up after a manual refresh.",
           "order": 3
+        },
+        "agency.presets": {
+          "type": "array",
+          "default": [],
+          "markdownDescription": "Launch presets — `agency run <pack> --provider <provider> --model <model>` said in advance, for when you want to pick a runner without being asked every time (a real reason: hitting a subscription limit mid-team and needing to switch). The core knows nothing about these; they live only here, per workspace.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "pack": { "type": "string" },
+              "provider": { "type": "string" },
+              "model": { "type": "string" },
+              "label": { "type": "string" }
+            },
+            "required": ["pack", "provider"]
+          },
+          "order": 4
         }
       }
     },
-    "submenus": [
-      {
-        "id": "agency.rejectMenu",
-        "label": "Reject",
-        "icon": "$(circle-slash)"
-      }
-    ],
     "commands": [
       {
         "command": "agency.review.pick",
@@ -220,39 +229,9 @@
         "icon": "$(go-to-file)"
       },
       {
-        "command": "agency.finding.accept",
-        "title": "Accept",
-        "icon": "$(check)"
-      },
-      {
-        "command": "agency.finding.defer",
-        "title": "Defer for later",
-        "icon": "$(bookmark)"
-      },
-      {
-        "command": "agency.finding.reject.not-reproducible",
-        "title": "Could not reproduce"
-      },
-      {
-        "command": "agency.finding.reject.by-design",
-        "title": "Behaves that way by design"
-      },
-      {
-        "command": "agency.finding.reject.wrong-diagnosis",
-        "title": "Wrong diagnosis — the problem is elsewhere"
-      },
-      {
-        "command": "agency.finding.reject.duplicate-missed",
-        "title": "Duplicate the dedup missed"
-      },
-      {
-        "command": "agency.finding.reject.out-of-scope",
-        "title": "Out of scope for this project"
-      },
-      {
-        "command": "agency.finding.rejectPick",
-        "title": "Reject…",
-        "icon": "$(circle-slash)"
+        "command": "agency.finding.openOnBoard",
+        "title": "Open on the board",
+        "icon": "$(link-external)"
       },
       {
         "command": "agency.finding.addNote",
@@ -269,52 +248,41 @@
         "icon": "$(git-compare)"
       },
       {
-        "command": "agency.decision.apply",
-        "title": "Record a decision (programmatically)",
-        "category": "Agency"
-      },
-      {
         "command": "agency.view.findings.focus",
         "title": "Go to the findings queue",
         "category": "Agency"
+      },
+      {
+        "command": "agency.preset.add",
+        "title": "Add launch preset…",
+        "category": "Agency",
+        "icon": "$(add)"
+      },
+      {
+        "command": "agency.preset.run",
+        "title": "Run with this preset",
+        "icon": "$(play)"
+      },
+      {
+        "command": "agency.preset.remove",
+        "title": "Remove preset",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "agency.runs.clearAll",
+        "title": "Discard all finished runs…",
+        "category": "Agency",
+        "icon": "$(clear-all)"
       }
     ],
     "menus": {
       "commandPalette": [
         {
-          "command": "agency.finding.accept",
-          "when": "false"
-        },
-        {
-          "command": "agency.finding.defer",
-          "when": "false"
-        },
-        {
-          "command": "agency.finding.rejectPick",
+          "command": "agency.finding.openOnBoard",
           "when": "false"
         },
         {
           "command": "agency.finding.addNote",
-          "when": "false"
-        },
-        {
-          "command": "agency.finding.reject.not-reproducible",
-          "when": "false"
-        },
-        {
-          "command": "agency.finding.reject.by-design",
-          "when": "false"
-        },
-        {
-          "command": "agency.finding.reject.wrong-diagnosis",
-          "when": "false"
-        },
-        {
-          "command": "agency.finding.reject.duplicate-missed",
-          "when": "false"
-        },
-        {
-          "command": "agency.finding.reject.out-of-scope",
           "when": "false"
         },
         {
@@ -334,10 +302,6 @@
           "when": "false"
         },
         {
-          "command": "agency.decision.apply",
-          "when": "false"
-        },
-        {
           "command": "agency.view.findings.focus",
           "when": "false"
         },
@@ -351,6 +315,14 @@
         },
         {
           "command": "agency.run.discard",
+          "when": "false"
+        },
+        {
+          "command": "agency.preset.run",
+          "when": "false"
+        },
+        {
+          "command": "agency.preset.remove",
           "when": "false"
         }
       ],
@@ -399,43 +371,58 @@
           "command": "agency.run.close",
           "group": "navigation@3",
           "when": "view == agency.runs"
+        },
+        {
+          "command": "agency.runs.clearAll",
+          "group": "navigation@5",
+          "when": "view == agency.runs"
+        },
+        {
+          "command": "agency.preset.add",
+          "group": "navigation@1",
+          "when": "view == agency.tools"
         }
       ],
       "view/item/context": [
         {
-          "command": "agency.finding.accept",
+          "command": "agency.finding.openOnBoard",
           "group": "inline@1",
-          "when": "viewItem == agencyFinding.open"
-        },
-        {
-          "command": "agency.finding.rejectPick",
-          "group": "inline@2",
-          "when": "viewItem == agencyFinding.open"
+          "when": "viewItem == agencyFinding"
         },
         {
           "command": "agency.finding.reveal",
-          "group": "inline@3",
-          "when": "viewItem =~ /^agencyFinding/"
-        },
-        {
-          "command": "agency.finding.defer",
-          "group": "1_decide@1",
-          "when": "viewItem == agencyFinding.open"
+          "group": "inline@2",
+          "when": "viewItem == agencyFinding"
         },
         {
           "command": "agency.finding.openAtCommit",
           "group": "2_look@1",
-          "when": "viewItem =~ /^agencyFinding/"
+          "when": "viewItem == agencyFinding"
         },
         {
           "command": "agency.finding.diffAgainstHead",
           "group": "2_look@2",
-          "when": "viewItem =~ /^agencyFinding/"
+          "when": "viewItem == agencyFinding"
         },
         {
           "command": "agency.pack.run",
           "group": "inline@1",
           "when": "viewItem == agencyPack"
+        },
+        {
+          "command": "agency.preset.add",
+          "group": "1_preset@1",
+          "when": "viewItem == agencyPack"
+        },
+        {
+          "command": "agency.preset.run",
+          "group": "inline@1",
+          "when": "viewItem == agencyPreset"
+        },
+        {
+          "command": "agency.preset.remove",
+          "group": "9_remove@1",
+          "when": "viewItem == agencyPreset"
         },
         {
           "command": "agency.run.close",
@@ -455,68 +442,24 @@
       ],
       "comments/commentThread/title": [
         {
-          "command": "agency.finding.accept",
+          "command": "agency.finding.open",
           "group": "inline@1",
           "when": "commentController == agency.findings"
         },
         {
-          "command": "agency.finding.defer",
+          "command": "agency.finding.openAtCommit",
           "group": "inline@2",
           "when": "commentController == agency.findings"
         },
         {
-          "submenu": "agency.rejectMenu",
-          "group": "inline@3",
-          "when": "commentController == agency.findings"
-        },
-        {
-          "command": "agency.finding.open",
-          "group": "inline@4",
-          "when": "commentController == agency.findings"
-        },
-        {
-          "command": "agency.finding.openAtCommit",
-          "group": "inline@5",
-          "when": "commentController == agency.findings"
-        },
-        {
           "command": "agency.finding.diffAgainstHead",
-          "group": "inline@6",
+          "group": "inline@3",
           "when": "commentController == agency.findings && commentThread == agencyFinding.drifted"
-        }
-      ],
-      "agency.rejectMenu": [
-        {
-          "command": "agency.finding.reject.not-reproducible",
-          "group": "1_reasons@1"
-        },
-        {
-          "command": "agency.finding.reject.by-design",
-          "group": "1_reasons@2"
-        },
-        {
-          "command": "agency.finding.reject.wrong-diagnosis",
-          "group": "1_reasons@3"
-        },
-        {
-          "command": "agency.finding.reject.duplicate-missed",
-          "group": "1_reasons@4"
-        },
-        {
-          "command": "agency.finding.reject.out-of-scope",
-          "group": "1_reasons@5"
         }
       ],
       "comments/commentThread/context": [
         {
           "command": "agency.finding.addNote",
-          "group": "inline@1",
-          "when": "commentController == agency.findings"
-        }
-      ],
-      "comments/comment/context": [
-        {
-          "command": "agency.finding.rejectPick",
           "group": "inline@1",
           "when": "commentController == agency.findings"
         }

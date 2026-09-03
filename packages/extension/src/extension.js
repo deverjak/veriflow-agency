@@ -25,6 +25,7 @@ const views = require('./views.js');
 const panel = require('./panel.js');
 const gitx = require('./git.js');
 const review = require('./review.js');
+const presets = require('./presets.js');
 const { Threads, threadOf, replyTextOf } = require('./threads.js');
 
 /** @type {vscode.OutputChannel} */
@@ -62,42 +63,26 @@ async function openFinding(findingId) {
   const f = state.findingById(findingId);
   if (!f) return;
   showPanel(`finding:${findingId}`, f.title || 'Finding', panel.findingHtml(f), async (msg) => {
-    const note = msg.note || undefined;
-    if (msg.cmd === 'accept') await decide(findingId, 'accept', { note });
-    else if (msg.cmd === 'defer') await decide(findingId, 'defer', { note });
-    else if (msg.cmd === 'reject') await decide(findingId, 'reject', { reason: msg.reason, note });
-    else if (msg.cmd === 'note') await addNote(findingId, msg.note);
+    if (msg.cmd === 'note') await addNote(findingId, msg.note);
     else if (msg.cmd === 'open') await revealFinding(findingId, 'working-tree');
     else if (msg.cmd === 'atCommit') await revealFinding(findingId, 'at-commit');
     else if (msg.cmd === 'diff') await diffFinding(findingId);
+    else if (msg.cmd === 'openOnBoard') await openOnBoard(findingId);
   });
 }
 
-// ------------------------------------------------------------ decisions
-
-/**
- * The ONLY path by which a decision comes into being inside the extension.
- * It goes through `agency triage`, the same layer an agent calls — if it
- * were an editor command instead, an agent could not triage and would not
- * be an equal client.
- */
-async function decide(findingId, action, opts = {}) {
-  const res = await cli.triage(state.snapshot.cwd, findingId, action, opts);
-  if (!res.ok) {
-    vscode.window.showErrorMessage(`Agency: ${res.error}`);
-    log.appendLine(`[decision] REFUSED ${findingId}: ${res.error}`);
-    return null;
-  }
-  log.appendLine(`[decision] ${findingId} → ${action}`
-    + (opts.reason ? ` · ${opts.reason}` : ''));
-  // A full reload, not a light one: a decision changes precision in the overview too.
-  await refresh();
+/** The board reference is a link when the sink returned a URL, otherwise
+ *  just an id — copied, since there is nowhere else to send the user. */
+async function openOnBoard(findingId) {
   const f = state.findingById(findingId);
-  if (f && panels.has(`finding:${findingId}`)) {
-    panels.get(`finding:${findingId}`).webview.html = panel.findingHtml(f);
+  if (!f || !f.ref) return;
+  if (f.url) {
+    vscode.env.openExternal(vscode.Uri.parse(f.url));
+    return;
   }
-  vscode.window.setStatusBarMessage(`Agency: ${action}`, 3000);
-  return res.data;
+  await vscode.env.clipboard.writeText(f.ref);
+  vscode.window.showInformationMessage(
+    `Agency: ${f.ref} copied — this finding has no URL, only the board reference.`);
 }
 
 async function addNote(findingId, text) {
@@ -172,11 +157,11 @@ function updateStatusBar() {
     status.text = '$(tools) Agency';
     status.tooltip = s.probe.error || 'Agency is not ready';
   } else {
-    const q = state.queue().length;
-    status.text = q ? `$(inbox) Agency: ${q}` : '$(check-all) Agency';
-    status.tooltip = q
-      ? `${q} findings waiting for a decision`
-      : 'No finding is waiting for a decision';
+    const c = state.candidates().length;
+    status.text = c ? `$(circle-outline) Agency: ${c}` : '$(check-all) Agency';
+    status.tooltip = c
+      ? `${c} finding(s) resting with no board — the pack that found them has no sink`
+      : 'Every finding either went to a board or is waiting on the next specialist in a chain';
   }
   status.command = 'agency.view.findings.focus';
   status.show();
@@ -228,12 +213,12 @@ function activate(context) {
     vscode.window.registerTreeDataProvider('agency.runs', trees.runs),
     findingsView);
 
-  // A badge with the number waiting. The backlog has to be visible without a
-  // click — it is provably the most expensive place in the whole system.
+  // A badge for findings resting with no board — the one number here that
+  // might actually need a person to notice a pack has no `sink` yet.
   state.onDidChange(() => {
-    const q = state.queue().length;
-    findingsView.badge = q
-      ? { value: q, tooltip: `${q} findings waiting for a decision` } : undefined;
+    const c = state.candidates().length;
+    findingsView.badge = c
+      ? { value: c, tooltip: `${c} finding(s) resting with no board` } : undefined;
   });
 
   status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
@@ -432,7 +417,50 @@ function activate(context) {
     if (d) setTimeout(() => refresh(), 2000);
   });
 
-  // --- findings
+  // --- presets — a saved provider/model, run the same way a pack itself is.
+  reg('agency.preset.run', async (arg) => {
+    if (!state.snapshot.probe.ok) return showNotReady();
+    const info = presetArgOf(arg);
+    if (!info) return;
+    const extra = { provider: info.preset.provider, model: info.preset.model };
+    const d = (info.pack.run && info.pack.run.target === 'workspace')
+      ? await review.runOverWorkspace(state.snapshot.cwd, info.pack, log, extra)
+      : await runOneOverPr(info.pack, extra);
+    if (d) setTimeout(() => refresh(), 2000);
+  });
+
+  reg('agency.preset.add', async (arg) => {
+    let pack = null;
+    const name = packNameOf(arg);
+    if (name) pack = (state.snapshot.packs || []).find((x) => x.name === name);
+    if (!pack) {
+      const candidates = state.snapshot.packs || [];
+      if (!candidates.length) return;
+      const picked = await review.pickPacks(candidates,
+        { title: 'Preset for which specialist?', canMultiSelect: false });
+      if (!picked || !picked.length) return;
+      [pack] = picked;
+    }
+    const pm = await pickProviderModel();
+    if (!pm) return;
+    const added = await presets.add({ pack: pack.name, provider: pm.provider, model: pm.model });
+    if (!added) {
+      vscode.window.showInformationMessage('Agency: that preset already exists.');
+      return;
+    }
+    state.emitter.fire();
+  });
+
+  reg('agency.preset.remove', async (arg) => {
+    const preset = arg && (arg.preset || arg._preset);
+    if (!preset) return;
+    await presets.remove(preset);
+    state.emitter.fire();
+  });
+
+  // --- findings — a viewer only. What a finding IS (candidate/held/sent/
+  //     rejected) comes from a chain member's own `agency triage`, or from
+  //     the board — never from a click here.
   reg('agency.finding.open', (arg) => {
     const id = typeof arg === 'string' ? arg : findingIdOf(arg);
     if (id) openFinding(id);
@@ -441,23 +469,9 @@ function activate(context) {
     const id = typeof arg === 'string' ? arg : findingIdOf(arg);
     if (id) revealFinding(id);
   });
-  reg('agency.finding.accept', (arg) => withFinding(arg, (id, note) =>
-    decide(id, 'accept', { note })));
-  reg('agency.finding.defer', (arg) => withFinding(arg, (id, note) =>
-    decide(id, 'defer', { note })));
-  for (const [reason] of panel.REASONS) {
-    reg(`agency.finding.reject.${reason}`, (arg) => withFinding(arg, (id, note) =>
-      decide(id, 'reject', { reason, note })));
-  }
-  reg('agency.finding.rejectPick', async (arg) => {
+  reg('agency.finding.openOnBoard', (arg) => {
     const id = findingIdOf(arg) || (typeof arg === 'string' ? arg : null);
-    if (!id) return;
-    const typed = replyTextOf(arg);
-    const pick = await vscode.window.showQuickPick(
-      panel.REASONS.map(([value, label]) => ({ label, detail: value, value })),
-      { title: 'Reason for rejection', placeHolder: 'An enum, not free text — precision is computed from it' });
-    if (!pick) return;
-    decide(id, 'reject', { reason: pick.value, note: typed || undefined });
+    if (id) openOnBoard(id);
   });
   reg('agency.finding.addNote', (arg) => {
     const id = findingIdOf(arg);
@@ -473,13 +487,35 @@ function activate(context) {
     if (id) diffFinding(id);
   });
 
-  // A programmatic path for anything inside the extension host. An agent
-  // outside VS Code calls `agency triage` — both end up in the same store.
-  reg('agency.decision.apply', (p) => {
-    if (!p || !p.findingId || !p.action) {
-      throw new Error('agency.decision.apply expects { findingId, action, reason?, note? }');
+  // --- bulk cleanup. The trail is committed and append-only, so discarding
+  //     every finished run's directory never loses what it sent or had
+  //     rejected — only what a run left `candidate` with nowhere to go.
+  reg('agency.runs.clearAll', async () => {
+    const finished = (state.snapshot.runs || []).filter((r) => r.status !== 'running');
+    if (!finished.length) {
+      vscode.window.showInformationMessage('Agency: no finished run to discard.');
+      return;
     }
-    return decide(p.findingId, p.action, p);
+    const findings = finished.reduce((n, r) => n + (r.findings || 0), 0);
+    const yes = await vscode.window.showWarningMessage(
+      'Discard all finished runs?',
+      { modal: true,
+        detail: `${finished.length} listed here. Their records, evidence and ${findings} `
+          + 'finding(s) are deleted from `.agency/runs/`; the committed trail in '
+          + '`.agency/knowledge/` keeps what went to the board and what was rejected. '
+          + 'Runs still marked running are left alone.' },
+      'Discard all');
+    if (yes !== 'Discard all') return;
+
+    const res = await cli.cleanup(state.snapshot.cwd, { all: true, discard: true, force: true });
+    if (!res.ok) {
+      vscode.window.showErrorMessage(`Agency: ${res.error}`);
+      return;
+    }
+    const closed = (res.data.closed || []).length;
+    log.appendLine(`[cleanup] --all discarded ${closed} run(s)`);
+    vscode.window.setStatusBarMessage(`Agency: ${closed} run(s) discarded`, 4000);
+    await refresh();
   });
 
   // --- watching for outside changes. A write from the terminal or from an
@@ -540,7 +576,7 @@ function packNameOf(arg) {
  * place where a model could be chosen, and the run record would then be
  * lying about one of them.
  */
-async function runOneOverPr(pack) {
+async function runOneOverPr(pack, extra = {}) {
   const prs = await cli.prs(state.snapshot.cwd, { state: 'all', limit: 30 });
   if (!prs.length) {
     vscode.window.showWarningMessage(
@@ -554,7 +590,51 @@ async function runOneOverPr(pack) {
   });
   if (!picked || !picked.pr) return null;
   return review.runEach(state.snapshot.cwd, [pack],
-    { pr: picked.pr.number, force: picked.pr.reviewed || undefined }, null);
+    { ...extra, pr: picked.pr.number, force: picked.pr.reviewed || undefined }, null);
+}
+
+/** A preset's `{preset, pack}` — from a click (`agency.preset.run`'s own
+ *  explicit `args`) or from the inline icon, which hands back the tree
+ *  node itself, carrying `_preset`/`_pack`. */
+function presetArgOf(arg) {
+  if (arg && arg.preset && arg.pack) return arg;
+  if (arg && arg._preset && arg._pack) return { preset: arg._preset, pack: arg._pack };
+  return null;
+}
+
+/**
+ * Asks which runner, then which model — the model list comes from
+ * `agency status --json`'s provider catalog, so a new provider needs no
+ * change here.
+ */
+async function pickProviderModel() {
+  const known = (state.snapshot.project && state.snapshot.project.providers) || [];
+  const catalog = known.length ? known : [
+    { id: 'claude', title: 'Claude Code', models: [], defaultModel: null },
+    { id: 'codex', title: 'Codex CLI', models: [], defaultModel: null },
+  ];
+  const providerPick = await vscode.window.showQuickPick(
+    catalog.map((p) => ({ label: p.title || p.id, description: p.id, provider: p })),
+    { title: 'Which runner?' });
+  if (!providerPick) return null;
+
+  const p = providerPick.provider;
+  const modelPick = await vscode.window.showQuickPick(
+    [
+      { label: p.defaultModel ? `${p.defaultModel} (default)` : 'Provider default', model: p.defaultModel || undefined },
+      ...(p.models || []).filter((m) => m !== p.defaultModel).map((m) => ({ label: m, model: m })),
+      { label: 'Another model…', another: true },
+    ],
+    { title: `${p.title || p.id} — which model?` });
+  if (!modelPick) return null;
+
+  let model = modelPick.model;
+  if (modelPick.another) {
+    const typed = await vscode.window.showInputBox({ title: 'Model name', ignoreFocusOut: true });
+    if (typed === undefined) return null;
+    model = typed.trim() || undefined;
+  }
+  return { provider: p.id, model };
 }
 
 /** Id of a run out of a tree item or a plain string. */
@@ -572,16 +652,14 @@ function chainIdOf(arg) {
   return null;
 }
 
+/** A finding id out of a comment thread (`_agency.finding.id`) or a
+ *  Findings-tree node (`item.id`, "finding:<id>") — the two shapes an
+ *  inline icon on a finding can hand back. */
 function findingIdOf(arg) {
   const t = threadOf(arg);
-  return t && t._agency ? t._agency.finding.id : null;
-}
-
-/** An action from a thread: finding id + the reply box text, when one just arrived. */
-function withFinding(arg, fn) {
-  const id = findingIdOf(arg) || (typeof arg === 'string' ? arg : null);
-  if (!id) return;
-  return fn(id, replyTextOf(arg) || undefined);
+  if (t && t._agency) return t._agency.finding.id;
+  const id = arg && arg.item && arg.item.id;
+  return id && String(id).startsWith('finding:') ? String(id).slice(8) : null;
 }
 
 async function pickRun(title) {

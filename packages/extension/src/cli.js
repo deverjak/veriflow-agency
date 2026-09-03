@@ -1,13 +1,14 @@
 // CLI client — the only path through which the extension touches data.
 //
 // The extension does not read `.agency/` from files, even though it could. If
-// it did, there would be two interpretations of the same state and an agent
-// would stop being an equal client: its `agency triage` would take a
-// different path than a click in the editor. This is the boundary from
-// ui-surface-decision.md §4 — the extension is a viewer and a command
-// issuer, never an owner of state.
+// it did, there would be two interpretations of the same state — the run
+// directories on disk, and whatever this process cached. This is the
+// boundary from ui-surface-decision.md §4 — the extension is a viewer and a
+// command issuer over runs and notes, never an owner of a finding's outcome.
+// That now lives entirely with the pack's own gate and sink, and with a
+// chain member's own `agency triage` — not with a click in the editor.
 //
-// The cost is a process spawn per query (~150-300 ms), which the triage UI
+// The cost is a process spawn per query (~150-300 ms), which the panel
 // tolerates. If that ever becomes a problem, the transport changes to a
 // long-lived process; the contract stays.
 
@@ -98,23 +99,9 @@ const prs = (cwd, { state = 'all', limit = 30 } = {}) =>
 
 // ---------------------------------------------------------------- writes
 
-/**
- * A decision. Goes through the same path as `agency triage` from the
- * terminal or from an agent — the extension is not an owner, just one of
- * three equal clients.
- */
-function triage(cwd, findingId, action, { reason, note } = {}) {
-  // `human`, not `vscode`: identity answers "who decided", not "through
-  // which door". A person clicking in the editor is the same person who
-  // types in the terminal — and the distinction that matters is against an
-  // agent's `hire:<id>`.
-  const args = ['triage', action, findingId, '--by', 'human'];
-  if (reason) args.push('--reason', reason);
-  if (note) args.push('--note', note);
-  return call(cwd, args);
-}
-
-/** A note. Its own command, because a note is NOT a decision. */
+/** A note. Its own command, because a note is NOT a decision. Deciding a
+ *  finding is not this client's job any more — that happens through a
+ *  chain member's own `agency triage`, or on the board itself. */
 const note = (cwd, findingId, text) =>
   call(cwd, ['note', findingId, text, '--by', 'human']);
 
@@ -157,11 +144,12 @@ async function run(cwd, pack, { pr, latestMerged, force, model, provider,
  * happens in a terminal, and closing that terminal leaves no signal behind.
  * So this is never automatic — it is the user saying the run is over.
  */
-const cleanup = (cwd, { run, unfinished, discard, force } = {}) => {
+const cleanup = (cwd, { run, unfinished, discard, all, force } = {}) => {
   const args = ['cleanup'];
   if (run) args.push('--run', run);
   if (unfinished) args.push('--unfinished');
   if (discard) args.push('--discard');
+  if (all) args.push('--all');
   if (force) args.push('--force');
   return call(cwd, args, { timeout: 120000 });
 };
@@ -169,5 +157,5 @@ const cleanup = (cwd, { run, unfinished, discard, force } = {}) => {
 module.exports = {
   bin, call, probe,
   doctor, packs, status, metrics, findings, prs,
-  triage, note, ingest, run, cleanup,
+  note, ingest, run, cleanup,
 };

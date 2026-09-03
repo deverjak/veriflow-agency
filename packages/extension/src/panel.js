@@ -1,25 +1,18 @@
-// Panely v editoru — detail nálezu, metriky, předpoklady.
+// Panels in the editor — finding detail, metrics, prerequisites.
 //
-// Do postranního panelu se vejde navigace, ne obsah. Nález má tvrzení, tělo,
-// evidenci, kotvu a historii rozhodnutí; ve 300 px by to bylo nečitelné.
-// Panel se otevře jako tab vedle kódu, v plné šířce, a rozhodnutí jde udělat
-// odsud — takže nemusíš skákat zpátky do stromu.
+// The side panel has room for navigation, not content. A finding carries a
+// claim, a body, evidence, an anchor and a trail; at 300 px that would be
+// unreadable. The panel opens as a tab next to the code, at full width — a
+// read surface, not a decision surface: outcome (sent/held/rejected/
+// candidate) is shown, never decided, from here.
 //
-// Theming jde přes `--vscode-*` proměnné, ne přes vlastní barvy. Stránka se tím
-// sladí s aktivním tématem uživatele včetně vysokého kontrastu, a nemusí se to
-// nikde udržovat. `@vscode/webview-ui-toolkit` je deprecated a nebere se.
+// Theming goes through `--vscode-*` variables, not custom colors — the page
+// matches the user's active theme, high contrast included, with nothing to
+// maintain. `@vscode/webview-ui-toolkit` is deprecated and is not used.
 //
-// Žádné CDN, žádný bundler: obsah je jeden string, skript je inline s nonce.
+// No CDN, no bundler: the content is one string, the script is inline with a nonce.
 
 const vscode = require('vscode');
-
-const REASONS = [
-  ['not-reproducible', 'Could not reproduce'],
-  ['by-design', 'Behaves that way by design'],
-  ['wrong-diagnosis', 'Wrong diagnosis — the problem is elsewhere'],
-  ['duplicate-missed', 'Duplicate the dedup missed'],
-  ['out-of-scope', 'Out of scope for this project'],
-];
 
 const DRIFT_NOTE = {
   untouched: ['ok', 'The code has not changed since the analysis',
@@ -193,14 +186,24 @@ function findingHtml(f) {
       return `<div class="hist"><div>${md(h.text)}</div>
         <div class="who">note · ${esc(h.by)} · ${esc((h.at || '').slice(0, 16).replace('T', ' '))}</div></div>`;
     }
-    const mark = { accepted: 'Accepted', rejected: 'Rejected', deferred: 'Deferred' }[h.state] || h.state;
+    const mark = { sent: 'Sent', rejected: 'Rejected' }[h.state] || h.state;
     return `<div class="hist"><div><strong>${esc(mark)}</strong>${h.reason ? ` — <code>${esc(h.reason)}</code>` : ''}</div>
       ${h.note ? `<div>${md(h.note)}</div>` : ''}
       <div class="who">${esc(h.by)} · ${esc((h.at || '').slice(0, 16).replace('T', ' '))}</div></div>`;
   }).join('');
 
-  const reasonOptions = REASONS.map(([v, l]) =>
-    `<option value="${v}">${esc(l)}</option>`).join('');
+  const outcome = f.state === 'sent'
+    ? `<div class="note ok"><strong>→ ${f.ref
+        ? (f.url ? `<a href="${esc(f.url)}">${esc(f.ref)}</a>` : esc(f.ref)) : 'on the board'}</strong>
+       <span>Sent through the pack's sink.</span></div>`
+    : f.state === 'rejected'
+      ? `<div class="note warn"><strong>Rejected${f.reason ? ` — ${esc(f.reason)}` : ''}</strong>
+         <span>${f.by ? `By ${esc(f.by)} — ` : ''}remembered so it is not reported again.</span></div>`
+      : f.state === 'held'
+        ? `<div class="note"><strong>Held</strong>
+           <span>Waiting for the next specialist in a chain to judge it.</span></div>`
+        : `<div class="note"><strong>Candidate</strong>
+           <span>Resting — this pack has no board, or the sink has not run yet.</span></div>`;
 
   return shell(f.title || 'Finding', `
     <div class="badges">${badges}</div>
@@ -230,33 +233,22 @@ function findingHtml(f) {
       ${f.drift === 'touched' ? '<button class="sec" data-cmd="diff">Compare with today</button>' : ''}
     </div>
 
-    <h2>Decision</h2>
-    ${f.decision
-      ? `<div class="note ok"><strong>${esc({ accepted: 'Accepted', rejected: 'Rejected', deferred: 'Deferred' }[f.decision])}${f.reason ? ` — ${esc(f.reason)}` : ''}</strong>
-         <span>A decision is an append-only event — it can be overwritten by a new one, the history stays.</span></div>`
-      : `<p class="empty">Undecided so far. Until you decide it, it does not count towards precision.</p>`}
+    <h2>Outcome</h2>
+    ${outcome}
+    ${f.state === 'sent' && f.ref
+      ? '<div class="bar"><button class="sec" data-cmd="openOnBoard">Open on the board</button></div>' : ''}
     ${history ? `<div>${history}</div>` : ''}
 
-    <div class="bar">
-      <button data-cmd="accept">Accept</button>
-      <button class="sec" data-cmd="defer">Defer</button>
-      <select id="reason">${reasonOptions}</select>
-      <button class="sec" data-cmd="reject">Reject</button>
-    </div>
-    <textarea id="note" placeholder="Note — free text for the reader. It is stored separately from the decision, because precision is computed from decisions."></textarea>
+    <h2>Note</h2>
+    <textarea id="note" placeholder="Note — free text for the reader. It is not a decision; those come from a chain member's own judgement, or from the board."></textarea>
     <div class="bar"><button class="sec" data-cmd="note">Save note</button></div>
   `, {
     script: `
       const vs = acquireVsCodeApi();
       document.querySelectorAll('button[data-cmd]').forEach((b) => {
         b.addEventListener('click', () => {
-          const reasonEl = document.getElementById('reason');
           const noteEl = document.getElementById('note');
-          vs.postMessage({
-            cmd: b.dataset.cmd,
-            reason: reasonEl ? reasonEl.value : null,
-            note: noteEl ? noteEl.value.trim() : '',
-          });
+          vs.postMessage({ cmd: b.dataset.cmd, note: noteEl ? noteEl.value.trim() : '' });
           if (noteEl && (b.dataset.cmd === 'note')) noteEl.value = '';
         });
       });
@@ -371,5 +363,5 @@ function doctorHtml(checks) {
 }
 
 module.exports = {
-  shell, esc, md, findingHtml, metricsHtml, doctorHtml, REASONS,
+  shell, esc, md, findingHtml, metricsHtml, doctorHtml,
 };

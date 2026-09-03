@@ -182,8 +182,11 @@ async function runEach(cwd, packs, opts, log) {
 /**
  * A run over the project as it is right now. No pull request, no worktree —
  * QA tries the running application, and that runs over the working copy.
+ *
+ * `extra` carries a preset's `provider`/`model`, when the run was started
+ * from one — merged in ahead of the prompt, never overriding it.
  */
-async function runOverWorkspace(cwd, pack, log) {
+async function runOverWorkspace(cwd, pack, log, extra = {}) {
   let chosen = pack ? [pack] : null;
 
   if (!chosen) {
@@ -202,7 +205,7 @@ async function runOverWorkspace(cwd, pack, log) {
   const asked = await askPrompt(chosen[0].name);
   if (!asked) return null;
 
-  return runEach(cwd, chosen.slice(0, 1), { prompt: asked.prompt }, log);
+  return runEach(cwd, chosen.slice(0, 1), { ...extra, prompt: asked.prompt }, log);
 }
 
 /**
@@ -282,7 +285,8 @@ function launch(data, pack, log) {
   const agent = data.agent || {};
   const target = data.target || {};
   const what = target.pr ? `PR #${target.pr}` : (target.ref || 'session');
-  const name = `Agency · ${what}` + (pack ? ` · ${pack.title || pack.name}` : '');
+  const who = agent.provider ? (agent.model ? `${agent.provider}/${agent.model}` : agent.provider) : '';
+  const name = `Agency · ${what}` + (pack ? ` · ${pack.title || pack.name}` : '') + (who ? ` · ${who}` : '');
   const term = vscode.window.createTerminal({ name, cwd: data.worktree });
   term.show(true);
   term.sendText(data.launch.map(quote).join(' '));

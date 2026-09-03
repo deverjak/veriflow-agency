@@ -105,8 +105,7 @@ class Threads {
         md.appendMarkdown(e.text || '');
         return { body: md, mode: vscode.CommentMode.Preview, author: { name: `📝 ${e.by}` } };
       }
-      const mark = { accepted: '✔ Accepted', rejected: '✘ Rejected', deferred: '⏱ Deferred' }[e.state]
-        || e.state;
+      const mark = { sent: '→ Sent', rejected: '✘ Rejected' }[e.state] || e.state;
       md.appendMarkdown(`**${mark}**${e.reason ? ` — \`${e.reason}\`` : ''}`);
       if (e.note) md.appendMarkdown(`\n\n${e.note}`);
       return { body: md, mode: vscode.CommentMode.Preview, author: { name: `⚖ ${e.by}` } };
@@ -139,9 +138,9 @@ class Threads {
       // Přítomnost toho tlačítka je tím pádem tentýž signál jako test driftu.
       thread.contextValue = f.drift === 'touched' ? 'agencyFinding.drifted'
         : f.drift === 'deleted' ? 'agencyFinding.deleted' : 'agencyFinding';
-      const mark = { accepted: '✔ ', rejected: '✘ ', deferred: '⏱ ' }[f.decision] || '';
+      const mark = f.state === 'sent' ? `→ ${f.ref || 'board'} ` : f.state === 'rejected' ? '✘ ' : '';
       thread.label = mark + String(f.title || '').slice(0, 70);
-      thread.state = f.decision === 'accepted'
+      thread.state = (f.state === 'sent' || f.state === 'rejected')
         ? vscode.CommentThreadState.Resolved : vscode.CommentThreadState.Unresolved;
       thread._agency = { finding: f, repo, placed: spot.placed };
       this.threads.push(thread);

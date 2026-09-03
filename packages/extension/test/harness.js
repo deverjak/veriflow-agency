@@ -23,6 +23,7 @@ class EventEmitter {
 
 const fake = {
   EventEmitter,
+  ConfigurationTarget: { Global: 1, Workspace: 2 },
   ThemeIcon: class { constructor(id, color) { this.id = id; this.color = color; } },
   ThemeColor: class { constructor(id) { this.id = id; } },
   MarkdownString: class {
@@ -37,10 +38,22 @@ const fake = {
   Uri: {
     file: (p) => ({ scheme: 'file', fsPath: p, path: String(p).replace(/\\/g, '/') }),
     from: (o) => ({ ...o, fsPath: o.path, toString: () => `${o.scheme}:${o.path}?${o.query}` }),
+    parse: (s) => ({ scheme: String(s).split(':')[0], toString: () => String(s) }),
   },
   workspace: {
     workspaceFolders: [{ uri: { fsPath: 'C:/project' } }],
-    getConfiguration: () => ({ get: (k) => ({ cliPath: 'agency' }[k]) }),
+    // A mutable store per section, so `presets.js` can round-trip through
+    // `.get`/`.update` the same way the real settings object does — a fake
+    // that only ever answered `cliPath` could not test a preset surviving
+    // a redraw.
+    _settings: { agency: { cliPath: 'agency', presets: [] } },
+    getConfiguration(section) {
+      const store = fake.workspace._settings[section] || (fake.workspace._settings[section] = {});
+      return {
+        get: (key, def) => (key in store ? store[key] : def),
+        update: (key, value) => { store[key] = value; return Promise.resolve(); },
+      };
+    },
     registerTextDocumentContentProvider: () => ({ dispose() {} }),
     createFileSystemWatcher: () => ({
       onDidChange() {}, onDidCreate() {}, onDidDelete() {}, dispose() {},
@@ -58,6 +71,10 @@ const fake = {
     showErrorMessage() {}, showWarningMessage() {}, showInformationMessage() {},
     setStatusBarMessage() {}, showTextDocument() {}, showQuickPick() {},
     withProgress: (_o, fn) => fn({ report() {} }),
+  },
+  env: {
+    clipboard: { writeText: async () => {} },
+    openExternal() {},
   },
   commands: { registerCommand: () => ({ dispose() {} }), executeCommand() {} },
   comments: {
@@ -110,7 +127,10 @@ const FINDING = {
   resolved: { line: 170, via: 'snippet', note: 'shifted 185 → 170' },
   score: 90,
   state: 'candidate',
-  decision: null,
+  ref: null,
+  url: null,
+  reason: null,
+  by: null,
   history: [],
   target: { pr: 467, url: 'https://github.com/x/y/pull/467' },
 };
@@ -184,12 +204,24 @@ check('an untouched finding does not offer a diff', () => {
     'a diff against the working copy would show the same content twice');
 });
 
-check('finding detail has decision actions and a note field', () => {
-  const html = panel.findingHtml(FINDING);
-  for (const cmd of ['accept', 'defer', 'reject', 'note']) {
-    assert.ok(html.includes(`data-cmd="${cmd}"`), `missing action ${cmd}`);
+check('finding detail shows the outcome and a note field, never a decision button', () => {
+  const html = panel.findingHtml({ ...FINDING, state: 'sent', ref: 'PVTI_X', url: 'https://x/PVTI_X' });
+  assert.ok(html.includes('Outcome'), 'missing the outcome section');
+  assert.ok(html.includes('PVTI_X'), 'missing the board reference');
+  assert.ok(html.includes('data-cmd="note"'), 'missing the note action');
+  assert.ok(html.includes('data-cmd="openOnBoard"'), 'missing the open-on-board action');
+  for (const cmd of ['accept', 'defer', 'reject']) {
+    assert.ok(!html.includes(`data-cmd="${cmd}"`), `a viewer must not offer to ${cmd} a finding`);
   }
-  assert.ok(html.includes('id="reason"'), 'missing the rejection reason picker');
+  assert.ok(!html.includes('id="reason"'), 'the rejection reason picker should be gone');
+});
+
+check('a rejected finding shows the reason, a held one shows it is waiting', () => {
+  const rejected = panel.findingHtml({ ...FINDING, state: 'rejected', reason: 'by-design', by: 'hire:po@claude' });
+  assert.ok(rejected.includes('Rejected') && rejected.includes('by-design'));
+
+  const held = panel.findingHtml({ ...FINDING, state: 'held' });
+  assert.ok(held.includes('Held'));
 });
 
 check('metrics with no data show a dash, not a zero', () => {
@@ -233,35 +265,47 @@ check('agreement between two specialists shows only once there are two', () => {
 
 // -------------------------------------------------------------- Overview
 
-check('the findings tree splits the queue, decided and duplicates', () => {
+check('the findings tree splits by outcome — board, chain, no board, not reported, duplicates', () => {
   Object.assign(state.snapshot, {
     probe: { ok: true }, cwd: 'C:/project', runs: [], packs: [], project: null, metrics: null,
     findings: [
-      FINDING,
-      { ...FINDING, id: 'B', decision: 'accepted' },
-      { ...FINDING, id: 'C', state: 'duplicate' },
+      { ...FINDING, id: 'A', state: 'sent', ref: 'PVTI_X' },
+      { ...FINDING, id: 'B', state: 'held' },
+      { ...FINDING, id: 'C', state: 'candidate' },
+      { ...FINDING, id: 'D', state: 'rejected', reason: 'by-design' },
+      { ...FINDING, id: 'E', state: 'duplicate' },
     ],
   });
   const roots = new views.FindingsTree().roots();
   const labels = roots.map((r) => r.item.label);
-  assert.deepStrictEqual(labels, ['To decide', 'Decided', 'Duplicates']);
+  assert.deepStrictEqual(labels,
+    ['On the board', 'In a chain', 'Waiting — no board here', 'Not reported again', 'Duplicates']);
   assert.strictEqual(roots[0].children.length, 1);
 });
 
-check('the queue sorts untouched findings to the top', () => {
+check('a finding on the board shows its board reference, not a decision mark', () => {
+  Object.assign(state.snapshot, {
+    probe: { ok: true },
+    findings: [{ ...FINDING, id: 'A', state: 'sent', ref: 'PVTI_X' }],
+  });
+  const board = new views.FindingsTree().roots()[0];
+  assert.ok(String(board.children[0].item.description).includes('PVTI_X'));
+});
+
+check('sent findings sort untouched-since-analysis first', () => {
   Object.assign(state.snapshot, {
     probe: { ok: true },
     findings: [
-      { ...FINDING, id: 'A', drift: 'touched', severity: 'high' },
-      { ...FINDING, id: 'B', drift: 'untouched', severity: 'medium' },
+      { ...FINDING, id: 'A', state: 'sent', drift: 'touched', severity: 'high' },
+      { ...FINDING, id: 'B', state: 'sent', drift: 'untouched', severity: 'medium' },
     ],
   });
-  const open = new views.FindingsTree().roots()[0];
-  assert.strictEqual(open.children[0].item.id, 'finding:B',
+  const board = new views.FindingsTree().roots()[0];
+  assert.strictEqual(board.children[0].item.id, 'finding:B',
     'the finding on code nobody touched should be on top — it holds literally');
 });
 
-check('the overview shows the queue and precision', () => {
+check('the overview shows precision, with no decision queue of its own', () => {
   Object.assign(state.snapshot, {
     probe: { ok: true }, cwd: 'C:/project', loadedAt: new Date(),
     project: { slug: 'org/repo' }, doctor: [{ name: 'gh', ok: true, detail: '' }],
@@ -271,10 +315,11 @@ check('the overview shows the queue and precision', () => {
     metrics: { triage: { precision: 0.8, accepted: 4, rejected: 1 } },
   });
   const labels = new views.OverviewTree().roots().map((r) => r.item.label);
-  for (const want of ['Project', 'Prerequisites', 'Specialists', 'Last run',
-    'Decision queue', 'Precision']) {
+  for (const want of ['Project', 'Prerequisites', 'Specialists', 'Last run', 'Precision']) {
     assert.ok(labels.includes(want), `overview is missing "${want}"`);
   }
+  assert.ok(!labels.includes('Decision queue'),
+    'a viewer does not own a queue of decisions to make');
 });
 
 check('the overview lists the packs actually in this project', () => {
@@ -371,6 +416,67 @@ check('a pack that needs a tool says so, one that needs none has no Requires row
 
   const qa = rows.find((r) => r.item.id === 'pack:qa');
   assert.ok(!qa.children.some((c) => c.item.label === 'Requires'));
+});
+
+check('preset rows sit under their pack, ahead of the pack\'s own info rows', () => {
+  const vscode = require.cache.vscode.exports;
+  vscode.workspace._settings.agency.presets = [
+    { pack: 'review-graph', provider: 'codex', model: 'gpt-5', label: 'Reviewer · codex' },
+  ];
+  Object.assign(state.snapshot, { probe: { ok: true }, packs: [RG_PACK, QA_PACK] });
+
+  const row = new views.ToolsTree().roots()[0];
+  assert.strictEqual(row.children[0].item.label, 'Reviewer · codex');
+  assert.strictEqual(row.children[0].item.contextValue, 'agencyPreset');
+  assert.strictEqual(row.children[0]._pack.name, 'review-graph');
+  assert.ok(row.children.some((c) => c.item.label === 'What it does'),
+    'the pack\'s own info rows must still be there, after the presets');
+
+  vscode.workspace._settings.agency.presets = [];
+});
+
+checkAsync('presets.add refuses a duplicate', async () => {
+  const presets = require(path.join(SRC, 'presets.js'));
+  const vscode = require.cache.vscode.exports;
+  vscode.workspace._settings.agency.presets = [];
+
+  const p = { pack: 'qa', provider: 'claude', model: 'sonnet' };
+  const first = await presets.add(p);
+  const second = await presets.add(p);
+
+  assert.strictEqual(first, true);
+  assert.strictEqual(second, false, 'the same preset added twice must not duplicate');
+  assert.strictEqual(presets.all().length, 1);
+
+  vscode.workspace._settings.agency.presets = [];
+});
+
+checkAsync('a preset\'s provider/model reach cli.run, alongside the prompt', async () => {
+  const review = require(path.join(SRC, 'review.js'));
+  const vscode = require.cache.vscode.exports;
+  const cli = require(path.join(SRC, 'cli.js'));
+  Object.assign(state.snapshot, { probe: { ok: true }, cwd: 'C:/project', packs: [QA_PACK] });
+
+  let captured = null;
+  cli.run = async (cwd, pack, opts) => {
+    captured = opts;
+    return {
+      ok: true,
+      data: {
+        runId: '01M1CGN9HAMBKK63SASPP2EYWJ', worktree: 'C:/project',
+        agent: { provider: opts.provider, model: opts.model },
+        target: { ref: 'main' }, launch: ['claude', 'go'],
+      },
+    };
+  };
+  vscode.window.showInputBox = async () => 'try cancelling a booking';
+
+  await review.runOverWorkspace('C:/project', QA_PACK, { appendLine() {} },
+    { provider: 'codex', model: 'gpt-5' });
+
+  assert.strictEqual(captured.provider, 'codex');
+  assert.strictEqual(captured.model, 'gpt-5');
+  assert.strictEqual(captured.prompt, 'try cancelling a booking');
 });
 
 check('a tree row carries a name, not an object', () => {
@@ -761,6 +867,43 @@ check('the pack row offers "run" inline, not only in the context menu', () => {
   assert.ok(run, 'missing agency.pack.run in the context menu');
   assert.strictEqual(run.when, 'viewItem == agencyPack');
   assert.ok(run.group.startsWith('inline'), 'an action only in the right-click menu is one nobody finds');
+});
+
+check('accept/defer/rejectPick/decision.apply are no longer contributed', () => {
+  const pkg = require(path.join(SRC, '..', 'package.json'));
+  const ids = pkg.contributes.commands.map((c) => c.command);
+  for (const gone of ['agency.finding.accept', 'agency.finding.defer',
+    'agency.finding.rejectPick', 'agency.decision.apply',
+    'agency.finding.reject.not-reproducible', 'agency.finding.reject.by-design',
+    'agency.finding.reject.wrong-diagnosis', 'agency.finding.reject.duplicate-missed',
+    'agency.finding.reject.out-of-scope']) {
+    assert.ok(!ids.includes(gone), `${gone} should no longer be contributed`);
+  }
+  assert.ok(!('agency.rejectMenu' in (pkg.contributes.submenus || {})),
+    'the reject submenu should be gone');
+});
+
+check('openOnBoard is inline on a finding row', () => {
+  const pkg = require(path.join(SRC, '..', 'package.json'));
+  const ctx = pkg.contributes.menus['view/item/context'];
+  const openOnBoard = ctx.find((m) => m.command === 'agency.finding.openOnBoard');
+  assert.ok(openOnBoard, 'missing agency.finding.openOnBoard in the finding context menu');
+  assert.strictEqual(openOnBoard.when, 'viewItem == agencyFinding');
+  assert.ok(openOnBoard.group.startsWith('inline'));
+});
+
+check('Clear all sits on the Runs view title, a preset runs inline', () => {
+  const pkg = require(path.join(SRC, '..', 'package.json'));
+  const title = pkg.contributes.menus['view/title'];
+  const clearAll = title.find((m) => m.command === 'agency.runs.clearAll');
+  assert.ok(clearAll, 'missing agency.runs.clearAll on a view title');
+  assert.strictEqual(clearAll.when, 'view == agency.runs');
+
+  const ctx = pkg.contributes.menus['view/item/context'];
+  const run = ctx.find((m) => m.command === 'agency.preset.run');
+  assert.ok(run, 'missing agency.preset.run in the preset context menu');
+  assert.strictEqual(run.when, 'viewItem == agencyPreset');
+  assert.ok(run.group.startsWith('inline'));
 });
 
 check('no leftover roster, provider-registry or Playwright-config commands remain', () => {

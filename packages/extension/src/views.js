@@ -18,18 +18,13 @@
 const vscode = require('vscode');
 const path = require('path');
 const state = require('./state.js');
+const presets = require('./presets.js');
 
 const SEVERITY = {
   blocker: { icon: 'error', color: 'charts.red', label: 'blocker' },
   high: { icon: 'error', color: 'charts.red', label: 'high' },
   medium: { icon: 'warning', color: 'charts.orange', label: 'medium' },
   low: { icon: 'info', color: 'charts.blue', label: 'low' },
-};
-
-const DECISION = {
-  accepted: { icon: 'pass-filled', color: 'charts.green', label: 'accepted' },
-  rejected: { icon: 'error-small', color: 'charts.red', label: 'rejected' },
-  deferred: { icon: 'clock', color: 'charts.yellow', label: 'deferred' },
 };
 
 const DRIFT = {
@@ -142,17 +137,6 @@ class OverviewTree extends Tree {
         : 'Click and pick a pull request to review.',
     }));
 
-    const q = state.queue();
-    rows.push(node('Decision queue', {
-      description: q.length ? `${q.length}` : 'empty',
-      iconId: q.length ? 'inbox' : 'check-all',
-      color: q.length ? 'charts.orange' : 'charts.green',
-      command: 'agency.view.findings.focus',
-      tooltip: 'An undecided finding is neither true nor false. Until you decide it, '
-        + 'it does not count towards precision — which is why a growing queue is the '
-        + 'most expensive thing in the whole system.',
-    }));
-
     const m = s.metrics;
     const t = m && m.triage;
     rows.push(node('Precision', {
@@ -163,10 +147,10 @@ class OverviewTree extends Tree {
       color: t && t.precision >= 0.7 ? 'charts.green'
         : t && t.precision !== null && t.precision !== undefined ? 'charts.orange' : undefined,
       command: 'agency.metrics',
-      tooltip: 'How much of what the pack found is true. It is computed **only from decided** '
-        + 'findings — undecided ones would dilute the number and it would then measure the '
-        + 'speed of triage, not the quality of the findings.\n\nClick for the full breakdown '
-        + 'by dimension, severity and provider.',
+      tooltip: 'How much of what the pack found is true — judged by the next specialist '
+        + 'in a chain, `by` starting `hire:`. A human verdict lives on the board and is '
+        + 'not read back here, so it is not in this number.\n\nClick for the full '
+        + 'breakdown by dimension, severity and provider.',
     }));
 
     return rows;
@@ -226,6 +210,21 @@ function packChildren(p) {
   return children;
 }
 
+/** A saved "which runner, which model" for one pack — a real reason this
+ *  exists: hitting a subscription limit mid-team and needing to switch. */
+function presetNode(p, pack) {
+  const n = node(presets.label(p), {
+    description: [p.provider, p.model].filter(Boolean).join(' · '),
+    iconId: 'rocket',
+    contextValue: 'agencyPreset',
+    command: 'agency.preset.run',
+    args: [{ preset: p, pack }],
+  });
+  n._preset = p;
+  n._pack = pack;
+  return n;
+}
+
 class ToolsTree extends Tree {
   roots() {
     const s = state.snapshot;
@@ -237,7 +236,10 @@ class ToolsTree extends Tree {
       color: 'charts.green',
       contextValue: 'agencyPack',
       collapsed: true,
-      children: packChildren(p),
+      children: [
+        ...presets.forPack(p.name).map((preset) => presetNode(preset, p)),
+        ...packChildren(p),
+      ],
       tooltip: `**${p.title || p.name}**\n\n${p.description || ''}\n\n---\n\n`
         + `\`agency run ${p.name}\` — or the ▶ on this row.`,
     }));
@@ -366,7 +368,6 @@ function runNode(r) {
 
 function findingNode(f, { showFile = true } = {}) {
   const sev = SEVERITY[f.severity] || SEVERITY.low;
-  const dec = DECISION[f.decision];
   const loc = f.file ? `${path.basename(f.file)}:${(f.resolved && f.resolved.line) || f.line}` : '';
   const drifted = f.drift === 'touched' || f.drift === 'deleted';
 
@@ -379,15 +380,20 @@ function findingNode(f, { showFile = true } = {}) {
   tip.appendMarkdown(`- ${DRIFT[f.drift] || 'drift unknown'}\n`);
   if (f.resolved && f.resolved.note) tip.appendMarkdown(`- anchor: ${f.resolved.note}\n`);
   tip.appendMarkdown(`- evidence: ${(f.evidence || []).length}×\n`);
-  if (dec) tip.appendMarkdown(`- decision: **${dec.label}**${f.reason ? ` — \`${f.reason}\`` : ''}\n`);
+  if (f.state === 'sent') tip.appendMarkdown(`- → ${f.ref || 'on the board'}${f.by ? ` · ${f.by}` : ''}\n`);
+  else if (f.state === 'rejected') {
+    tip.appendMarkdown(`- rejected${f.reason ? ` — \`${f.reason}\`` : ''}${f.by ? ` · ${f.by}` : ''}\n`);
+  }
 
+  const tag = f.state === 'sent' && f.ref ? `→ ${f.ref}`
+    : f.state === 'rejected' && f.reason ? f.reason : '';
   return node(f.title || '(untitled)', {
     id: `finding:${f.id}`,
-    description: [showFile ? loc : '', drifted ? '· touched' : ''].filter(Boolean).join(' '),
-    iconId: dec ? dec.icon : sev.icon,
-    color: dec ? dec.color : sev.color,
+    description: [showFile ? loc : '', tag, drifted ? '· touched' : ''].filter(Boolean).join(' '),
+    iconId: sev.icon,
+    color: sev.color,
     tooltip: tip,
-    contextValue: dec ? 'agencyFinding.decided' : 'agencyFinding.open',
+    contextValue: 'agencyFinding',
     command: 'agency.finding.open',
     args: [f.id],
   });
@@ -400,32 +406,51 @@ class FindingsTree extends Tree {
     const all = s.findings || [];
     if (!all.length) return [];
 
-    const open = all.filter((f) => !f.decision && f.state !== 'duplicate');
-    const decided = all.filter((f) => f.decision);
+    const sent = all.filter((f) => f.state === 'sent');
+    const held = all.filter((f) => f.state === 'held');
+    const candidate = all.filter((f) => f.state === 'candidate' || !f.state);
+    const rejected = all.filter((f) => f.state === 'rejected');
     const dupes = all.filter((f) => f.state === 'duplicate');
 
-    // Untouched-since-analysis first inside the queue — those hold literally.
-    // "Touched" findings are often already fixed and cost more time to review.
-    const rank = (f) => (f.drift === 'untouched' ? 0 : 1) * 10
-      + ['blocker', 'high', 'medium', 'low'].indexOf(f.severity || 'low');
-    open.sort((a, b) => rank(a) - rank(b));
+    // Untouched-since-analysis first — those hold literally, and are the
+    // fastest to read.
+    sent.sort((a, b) => (a.drift === 'untouched' ? 0 : 1) - (b.drift === 'untouched' ? 0 : 1));
 
     const groups = [];
-    if (open.length) {
-      groups.push(node(`To decide`, {
-        description: String(open.length),
-        iconId: 'inbox',
-        children: open.map((f) => findingNode(f)),
-        tooltip: 'Sorted so that findings on code nobody has touched since the analysis '
-          + 'come first — those hold literally and are the fastest to decide.',
+    if (sent.length) {
+      groups.push(node('On the board', {
+        description: String(sent.length),
+        iconId: 'link-external',
+        children: sent.map((f) => findingNode(f)),
+        tooltip: 'Sent through the pack\'s sink. Sorted so findings on code nobody has '
+          + 'touched since the analysis come first.',
       }));
     }
-    if (decided.length) {
-      groups.push(node('Decided', {
-        description: String(decided.length),
-        iconId: 'check-all',
+    if (held.length) {
+      groups.push(node('In a chain', {
+        description: String(held.length),
+        iconId: 'sync',
+        children: held.map((f) => findingNode(f)),
+        tooltip: 'Waiting for the next specialist in the chain to judge it.',
+      }));
+    }
+    if (candidate.length) {
+      groups.push(node('Waiting — no board here', {
+        description: String(candidate.length),
+        iconId: 'circle-outline',
+        children: candidate.map((f) => findingNode(f)),
+        tooltip: 'This pack has no `sink` — the finding rests in the committed knowledge '
+          + 'instead of going anywhere.',
+      }));
+    }
+    if (rejected.length) {
+      groups.push(node('Not reported again', {
+        description: String(rejected.length),
+        iconId: 'circle-slash',
         collapsed: true,
-        children: decided.map((f) => findingNode(f)),
+        children: rejected.map((f) => findingNode(f)),
+        tooltip: 'Rejected by the next specialist in a chain — remembered so it is not '
+          + 'reported again.',
       }));
     }
     if (dupes.length) {
@@ -435,8 +460,7 @@ class FindingsTree extends Tree {
         collapsed: true,
         children: dupes.map((f) => findingNode(f)),
         tooltip: 'A finding the pack found a second time. It is not thrown away — the '
-          + 'dedup ratio is the metric this is counted for — but it does not belong in '
-          + 'the queue.',
+          + 'dedup ratio is the metric this is counted for — but it is not its own finding.',
       }));
     }
     return groups;
