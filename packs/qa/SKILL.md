@@ -9,6 +9,8 @@ Exploration of the **running staging application** against a brief a human wrote
 
 **The output is not a report. The output is `findings.json`.** Every finding is reproduced and anchored to the line of code that causes it. An unreproduced observation is not a finding; a finding with no anchor is one nobody finds again in a month.
 
+**Findings go to the board through the core.** Write findings to `RUN_DIR/findings.json`. Do not create board items, PR comments or issues for a finding yourself — `agency ingest` sends what passes the gate through `backlog.py draft --finding`. In a chain, judge the upstream findings with `agency triage accept <id>` (it goes to the board) or `agency triage reject <id> --reason <r>` (it is remembered, never reported again). There is no `defer`: what you do not reject goes to the board when the chain ends.
+
 ## Project facts
 
 Read this section instead of a configuration file — there isn't one.

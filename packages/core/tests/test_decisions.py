@@ -133,6 +133,20 @@ def test_an_old_accepted_write_still_reads_back(project, make_run):
     assert runs.decisions(run)[fid]["state"] == "accepted"
 
 
+def test_packs_json_carries_the_sink(project, capsys):
+    """`agency doctor` and the pack's own manifest both need to see the sink
+    a pack declares — without it a project without a board looks the same
+    as one whose sink is simply broken."""
+    from conftest import install_pack
+    install_pack(project, "review-graph", {"sink": "python sink.py --finding {id}"})
+
+    cli.main(["packs", "--repo", str(project.root), "--json"])
+    data = json.loads(capsys.readouterr().out)
+
+    by_name = {p["name"]: p for p in data}
+    assert by_name["review-graph"]["sink"] == "python sink.py --finding {id}"
+
+
 def test_export_command_no_longer_exists(project):
     with pytest.raises(SystemExit):
         cli.build_parser().parse_args(["export"])

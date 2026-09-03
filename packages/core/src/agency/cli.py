@@ -44,6 +44,7 @@ def cmd_packs(args) -> int:
             "requires": p.requires,
             "run": p.run_policy,
             "minScore": p.min_score,
+            "sink": p.sink,
         })
 
     def human():

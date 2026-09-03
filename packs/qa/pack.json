@@ -12,6 +12,7 @@
     "git", "npx playwright test", "curl", "gh project item-list"
   ],
   "minScore": 70,
+  "sink": "python .claude/skills/agency-po/scripts/backlog.py draft --finding {id} --run-dir {runDir}",
   "dimensions": [
     { "id": "happy-path", "title": "The main flows do what they promise" },
     { "id": "edge-cases", "title": "Boundaries, empty states, unexpected input" },

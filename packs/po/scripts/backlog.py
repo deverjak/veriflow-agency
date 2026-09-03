@@ -20,6 +20,9 @@ Subcommands:
     snapshot   [--run-dir DIR]                    the queue, frozen, to evidence/backlog.json
     comment    --ref REF --key KEY --body-file F [--run-dir DIR] [--dry-run]
     draft      --title T --key KEY --body-file F [--run-dir DIR] [--dry-run]
+               --finding ID                        [--run-dir DIR] [--dry-run]
+                   this is the core's sink — `agency ingest` calls it with a
+                   gated finding's id, never a title/body an agent composed
     promote    --ref PVTI_xxx [--label L ...] [--run-dir DIR] [--dry-run]
     decide     --ref REF --disposition D --because-file F [--commitment TEXT]
                [--label L ...] [--status NAME] [--run-dir DIR] [--dry-run]
@@ -204,6 +207,26 @@ def option_id(field: dict | None, name: str) -> str | None:
     return None
 
 
+def _set_status(board: "Board", item_id: str | None, status_name: str, dry_run: bool) -> dict:
+    """Moves the `Stav` field on a board item — shared by `decide` and
+    `draft --finding`. A missing field or option is a warning in the
+    result, never a failure: the item is already on the board either way."""
+    if dry_run:
+        return {"action": "would-move", "to": status_name}
+    if not item_id:
+        return {"action": "skipped", "why": "not on the board"}
+    meta = board.meta()
+    fld = meta["fields"].get(STATUS_FIELD)
+    if not fld:
+        return {"action": "skipped", "why": f"no field “{STATUS_FIELD}”"}
+    opt = option_id(fld, status_name)
+    if not opt:
+        return {"action": "skipped", "why": f"“{STATUS_FIELD}” has no option “{status_name}”"}
+    gh("project", "item-edit", "--id", item_id, "--project-id", meta["id"],
+      "--field-id", fld["id"], "--single-select-option-id", opt)
+    return {"action": "moved", "to": status_name}
+
+
 def _ref_from_item(it: dict) -> dict:
     """A board row as a ref — carrying BOTH ids a draft has.
 
@@ -340,7 +363,110 @@ def cmd_comment(args) -> dict:
     return append(args.run_dir, res)
 
 
+#: Matches `export.py`'s old marker shape (uppercase id) — a second marker
+#: so a finding drafted here can be found by that convention too, not only
+#: by this script's own `agency:po:<key>`.
+FINDING_MARKER = "<!-- agency:finding:{id} -->"
+
+
+def _load_finding(finding_id: str, run_dir: str | None) -> dict:
+    """The finding a draft is about. `--run-dir` is the fast path — the
+    sink is always called with the run that owns the finding — the other
+    two are for a manual or offline call: any run still on disk, then the
+    committed trail for one whose run is already gone."""
+    paths = []
+    if run_dir:
+        paths.append(Path(run_dir) / "findings.json")
+    runs_dir = Path(".agency/runs")
+    if runs_dir.is_dir():
+        paths += sorted(runs_dir.glob("*/findings.json"))
+    for path in paths:
+        if not path.is_file():
+            continue
+        try:
+            findings = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            continue
+        for f in findings:
+            if f.get("id") == finding_id:
+                return f
+
+    trail_path = Path(".agency/knowledge/trail.jsonl")
+    if trail_path.is_file():
+        last = None
+        for line in trail_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if row.get("id") == finding_id:
+                last = row
+        if last is not None:
+            return {"id": finding_id, "title": last.get("title"), "body": None,
+                    "severity": last.get("severity"), "dimension": last.get("dimension"),
+                    "pack": last.get("pack"), "anchor": last.get("anchor") or {}, "evidence": []}
+
+    raise BacklogError(f"Finding “{finding_id}” was not found in any run or in the trail.")
+
+
+def _finding_body(f: dict) -> tuple[str, str]:
+    """Title and body for a finding's draft. The core gate already verified
+    the anchor and the evidence — this only lays the agent's own words out,
+    it does not add a claim of its own."""
+    a = f.get("anchor") or {}
+    where = f"{a.get('file')}:{a.get('line')}" if a.get("file") else None
+    sym = a.get("symbol")
+    sym = sym.get("name") if isinstance(sym, dict) else None
+    commit = (a.get("commit") or "")[:8]
+
+    lines = [FINDING_MARKER.format(id=f.get("id")), "",
+            f"# {f.get('title') or f.get('id')}", "",
+            " · ".join(x for x in (f.get("severity"), f.get("dimension"), f.get("pack")) if x)]
+    if where:
+        lines.append(f"**Kde:** `{where}`" + (f" @ `{commit}`" if commit else "")
+                     + (f" — `{sym}`" if sym else ""))
+    lines += ["", "**Tvrzení:**",
+             f.get("body") or "_(bez těla — záznam pochází ze stopy, ne z živého běhu)_"]
+    ev = f.get("evidence") or []
+    if ev:
+        lines += ["", "**Evidence:**"]
+        for e in ev:
+            src = f"  \n  _{e['source']}_" if e.get("source") else ""
+            lines.append(f"- `{e.get('kind')}` — {e.get('detail')}{src}")
+
+    return f.get("title") or f.get("id"), "\n".join(lines).rstrip() + "\n"
+
+
 def cmd_draft(args) -> dict:
+    if args.finding:
+        f = _load_finding(args.finding, args.run_dir)
+        key = f"finding:{args.finding.lower()}"
+        title, extra = _finding_body(f)
+        text = compose(extra, key, run_id_of(args.run_dir))
+        if args.dry_run:
+            # No `gh` call at all here — the whole point of --dry-run is to
+            # see the body a gated finding would post, offline.
+            return {"action": "would-create", "key": key, "title": title,
+                    "finding": args.finding, "body": text}
+
+        board = Board()
+        existing = board.by_key(key)
+        if existing:
+            return append(args.run_dir, {"kind": "draft", "action": "exists", "key": key,
+                                         "finding": args.finding, **existing})
+        data = gh_json("project", "item-create", str(PROJECT_NUMBER), "--owner", OWNER,
+                       "--title", title[:250], "--body", text)
+        item_id = data.get("id")
+        res = {"action": "created", "kind": "draft", "key": key, "item": item_id,
+              "title": title, "finding": args.finding,
+              "status": _set_status(board, item_id, "New", False)}
+        return append(args.run_dir, res)
+
+    if not args.title or not args.body_file:
+        raise BacklogError("draft needs either --finding, or both --title and --body-file.")
     board = Board()
     key = args.key or key_for(args.title)
     existing = board.by_key(key)
@@ -412,21 +538,7 @@ def cmd_decide(args) -> dict:
     # Move `Stav` to match the disposition, for a draft or an issue alike —
     # both are board items and both carry the field.
     status_name = DISPOSITION_STATUS[args.disposition]
-    if ref.get("item"):
-        meta = board.meta()
-        fld = meta["fields"].get(STATUS_FIELD)
-        opt = option_id(fld, status_name)
-        if args.dry_run:
-            result["status"] = {"action": "would-move", "to": status_name}
-        elif opt:
-            gh("project", "item-edit", "--id", ref["item"], "--project-id", meta["id"],
-              "--field-id", fld["id"], "--single-select-option-id", opt)
-            result["status"] = {"action": "moved", "to": status_name}
-        else:
-            result["status"] = {"action": "skipped",
-                                "why": f"“{STATUS_FIELD}” has no option “{status_name}”"}
-    else:
-        result["status"] = {"action": "skipped", "why": "not on the board"}
+    result["status"] = _set_status(board, ref.get("item"), status_name, args.dry_run)
 
     # BUILD-NOW / FIX-REMOVE-NOW get a priority label once they are (or become) an issue.
     priority = DISPOSITION_PRIORITY.get(args.disposition)
@@ -463,9 +575,13 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(fn=cmd_comment)
 
     s = sub.add_parser("draft", parents=[common])
-    s.add_argument("--title", required=True)
+    group = s.add_mutually_exclusive_group(required=True)
+    group.add_argument("--title")
+    group.add_argument("--finding",
+                       help="a finding id — draft its board item straight from findings.json "
+                            "or the trail, instead of --title/--body-file")
     s.add_argument("--key")
-    s.add_argument("--body-file", required=True)
+    s.add_argument("--body-file")
     s.set_defaults(fn=cmd_draft)
 
     s = sub.add_parser("promote", parents=[common])

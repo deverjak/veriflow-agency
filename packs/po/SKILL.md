@@ -18,6 +18,8 @@ A backlog does not suffer from having too few ideas. It suffers from nobody bein
 
 A decision is about one request. A finding is about the system that produced it. Conflating them gives you a comment nobody can measure and a finding nobody can act on.
 
+**Findings still go to the board through the core, decisions do not.** A finding is anchored, passes the deterministic gate, and `agency ingest` sends it out through this pack's own `sink` — `backlog.py draft --finding`, the same script below, called by the core, not by you. Do not call `backlog.py draft` yourself for a finding, and do not create a board item for one directly — that duplicates what the sink already does. A decision is different: sign it and post it yourself, through `backlog.py comment` / `decide` / `promote`, exactly as described below.
+
 ## Project facts
 
 Read this section instead of a configuration file — there isn't one. These facts are NaLekci's, hardcoded, because this pack is written for one project.
@@ -89,11 +91,10 @@ When `context.json` is missing you are running outside `agency run`. Say so and 
 ```bash
 agency triage accept <finding-id> --by <context.json → by>
 agency triage reject <finding-id> --reason by-design --note "why" --by <context.json → by>
-agency triage defer  <finding-id> --note "what it waits for" --by <context.json → by>
 agency note <finding-id> --text "…" --by <context.json → by>     # when you genuinely cannot tell
 ```
 
-Sign with the `by` value from `context.json`. Do this **before** your own dimensions — arriving at someone else's finding with a head full of your own means judging it in a hurry.
+There is no `defer`: `accept` sends the finding to the board (through this pack's own sink) right away, `reject` remembers not to report it again. Sign with the `by` value from `context.json`. Do this **before** your own dimensions — arriving at someone else's finding with a head full of your own means judging it in a hurry.
 
 **When upstream reported no findings, its handoff is your brief.** Answer what it raises: in `findings.json` where your dimensions cover it, in `summary.md` where they do not.
 

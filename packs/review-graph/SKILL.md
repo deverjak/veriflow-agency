@@ -7,7 +7,9 @@ description: "Use when asked to review a main-panel pull request — open or alr
 
 A pull request review with **evidence-backed** findings. The structural signal a diff alone cannot give — blast radius, affected stored flows, missing function-level tests — comes from `code-review-graph`.
 
-**The output is not a comment. The output is `findings.json`.** A PR comment or a GitHub Project item is derived from it and optional, produced later by `agency export`, not by this skill. When a sink fails or is never run, the finding is not lost — that is the whole reason this pack exists.
+**The output is not a comment. The output is `findings.json`.** A GitHub Project item is derived from it and optional, produced later through the pack's `sink`, not by this skill. When the sink fails or the project has none, the finding is not lost — it stays `candidate` in the committed knowledge, and that is the whole reason this pack exists.
+
+**Findings go to the board through the core.** Write findings to `RUN_DIR/findings.json`. Do not create board items, PR comments or issues for a finding yourself — `agency ingest` sends what passes the gate through `backlog.py draft --finding`. In a chain, judge the upstream findings with `agency triage accept <id>` (it goes to the board) or `agency triage reject <id> --reason <r>` (it is remembered, never reported again). There is no `defer`: what you do not reject goes to the board when the chain ends.
 
 ## Project facts
 
@@ -157,9 +159,11 @@ Do not repeat the findings — they arrive as data (`evidence/upstream.json`). W
 
 **When you have no findings at all, the handoff matters more, not less.** An empty `findings.json` means "I looked and there is nothing there" — that is a result, not silence. What you learned along the way about the product, the scope, or the risk belongs to the next member; otherwise they get a zero and nothing else.
 
-## 6. Publishing happens later, and by hand
+## 6. What gets published, and how
 
-This skill's job ends at `findings.json`. Nothing here posts a PR comment or writes to a GitHub Project — that happens after a human triages the findings (`agency triage`), through `agency export --project <n>`, which is one-way and safe to run more than once (it updates by finding id, never duplicates). Do not call `gh pr comment` or `gh api` yourself.
+Findings reach the board on their own. `agency ingest` runs the gate right after this run finishes, and a finding that passes it goes out through the pack's `sink` (`backlog.py draft --finding`) automatically — nothing here has to trigger that, and nothing here should. Do not call `gh api` yourself, and do not create a GitHub Project item or an issue for a finding — that would duplicate what the sink already does and confuse its idempotence marker.
+
+A summary PR comment stays yours to post (`gh pr comment`, already in `needs`): write it about the review as a whole, referencing finding ids from `findings.json` — not one comment per finding.
 
 ## 7. Cleanup
 

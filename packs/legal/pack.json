@@ -12,6 +12,7 @@
     "git", "gh issue view", "gh issue list"
   ],
   "minScore": 85,
+  "sink": "python .claude/skills/agency-po/scripts/backlog.py draft --finding {id} --run-dir {runDir}",
   "dimensions": [
     { "id": "terms", "title": "Terms, their incorporation and their changes" },
     { "id": "consumer", "title": "Consumer contracts and distance selling duties" },
