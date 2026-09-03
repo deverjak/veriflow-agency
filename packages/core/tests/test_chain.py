@@ -1,67 +1,50 @@
-"""`agency chain`: specialisté za sebou, s předáním mezi nimi.
+"""`agency chain`: specialists in sequence, handing over between them.
 
-`teams.md` Krok 3. Chain není konverzace — je to sekvence běhů, kde si členové
-předávají soubory. Tenhle soubor jede celou cestu přes CLI (`cli.cmd_chain`),
-protože právě spojení dílů je to, co se rozbíjí: jednotlivě fungovaly `--wait`,
-`knowledge.upstream()` i triage už před ním.
+This file runs the whole way through the CLI (`cli.cmd_chain`), because it is
+the wiring between the pieces that breaks: `--wait`, `knowledge.upstream()`
+and triage all worked individually before this existed.
 
-Co se tady zamyká:
+What is locked down here:
 
-  * řetěz je v datech (`run.chain`), ne v pořadí adresářů — bez toho nejde
-    zpětně poznat, které rozhodnutí padlo nad cizím nálezem v rámci předání,
-  * zadání pro druhého člena **nemá strop** (na rozdíl od pozadí), jinak by
-    řetěz tiše vyráběl nálezy, o kterých nikdo nerozhodl,
-  * vzkaz předchůdce jsou jeho slova, ne převyprávění jádra,
-  * odmítnutý nebo spadlý krok chain zastaví a řekne, co doběhlo.
+  * the chain lives in data (`run.chain`), not in directory order — without
+    that there is no telling afterwards which decision was made over
+    someone else's finding as part of a handover,
+  * the brief for the second member has NO cap (unlike the background), or
+    the chain would quietly manufacture findings nobody decided on,
+  * a predecessor's message is its own words, not the core's retelling,
+  * a refused or crashed step stops the chain and says what finished.
 """
 
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from pathlib import Path
-
-from agency import chain, cli, hires, knowledge, packs, proc, runs
+from agency import chain, cli, knowledge, proc, runs
 from agency.util import posix, write_json
 
-from conftest import make_finding
-
-
-# ------------------------------------------------------------------ pomůcky
-
-def install(project, *names: str) -> None:
-    """Instalace tak, jak ji dělá `agency add` — včetně zápisu pracovníka.
-
-    Samotné `packs.apply` nechá projekt s metodou, na které nikdo nedělá.
-    Od zrušení odvozených pracovníků (1. 9. 2026) to znamená prázdný roster,
-    takže by chain neměl koho spustit a fixture by testovala něco jiného než
-    skutečný projekt.
-    """
-    for n in names:
-        pack = packs.load(n)
-        packs.apply(pack, project, packs.plan(pack, project))
-        hires.ensure_default(project, n, project.pack_config(n) or {})
+from conftest import install_pack, make_finding
 
 
 def args(project, *members, **over) -> SimpleNamespace:
     base = dict(repo=str(project.root), json=False, members=list(members),
-                pr=None, latest_merged=False, prompt="reconsent po expiraci",
-                scenario=None, since=None, model=None, provider=None, force=False,
-                focus=None)
+                pr=None, latest_merged=False, prompt="reconsent after expiry",
+                since=None, model=None, provider=None, bypass=False, force=False,
+                keep_worktree=False, focus=None)
     base.update(over)
     return SimpleNamespace(**base)
 
 
 def specialist(project, monkeypatch, *, findings=1, handoff: str | None = None,
                code: int = 0, fails_on: int = 0):
-    """Agent, který doopravdy něco nechá po sobě.
+    """An agent that genuinely leaves something behind.
 
-    Běh si najde sám podle stavu `running` — skutečný agent to má z RUN_DIR
-    v promptu, ale fake ho v `proc.attend` nedostane. Zapisuje to, na čem stojí
-    předání: nálezy a `handoff.md`.
+    It finds its own run by the `running` status — a real agent has RUN_DIR
+    from the prompt, but the fake does not get it through `proc.attend`. It
+    writes what a handover stands on: findings and `handoff.md`.
     """
     seen = {"steps": 0, "argv": [], "env": []}
 
@@ -72,9 +55,9 @@ def specialist(project, monkeypatch, *, findings=1, handoff: str | None = None,
         run = next(r for r in runs.load_runs(project)
                    if r.record().get("status") == "running")
         write_json(run.findings_path,
-                   [make_finding(project, run.id, title=f"Nález kroku {seen['steps']}")
+                   [make_finding(project, run.id, title=f"Finding of step {seen['steps']}")
                     for _ in range(findings)])
-        (run.dir / "summary.md").write_text(f"Shrnutí kroku {seen['steps']}.", encoding="utf-8")
+        (run.dir / "summary.md").write_text(f"Summary of step {seen['steps']}.", encoding="utf-8")
         if handoff:
             (run.dir / "handoff.md").write_text(handoff, encoding="utf-8")
         if fails_on and seen["steps"] == fails_on:
@@ -82,15 +65,15 @@ def specialist(project, monkeypatch, *, findings=1, handoff: str | None = None,
         return code
 
     def fake_stream(argv, cwd=None, env=None, on_line=None, timeout=None):
-        # Člen řetězu jede neattended, takže jádro čte proud událostí místo
-        # terminálu. Fake mluví tímtéž jazykem — jinak by testy zamykaly cestu,
-        # kterou skutečný řetěz nepoužívá.
+        # A chain member runs unattended, so the core reads a stream of
+        # events instead of a terminal. The fake speaks the same dialect —
+        # otherwise the tests would lock a path the real chain never takes.
         rc = work(argv, cwd=cwd, env=env)
         if on_line:
             on_line('{"type":"system","subtype":"init","session_id":"test-session"}')
             on_line('{"type":"result","subtype":"success","is_error":false,'
                     '"num_turns":3,"total_cost_usd":0.01,"session_id":"test-session",'
-                    '"result":"Hotovo.","permission_denials":[]}')
+                    '"result":"Done.","permission_denials":[]}')
         return rc
 
     monkeypatch.setattr(proc, "attend", work)
@@ -98,14 +81,14 @@ def specialist(project, monkeypatch, *, findings=1, handoff: str | None = None,
     return seen
 
 
-def test_pojistka_hlida_obe_cesty_ke_skutecnemu_agentovi():
-    """Pojistka, ne kosmetika.
+def test_the_guard_watches_both_paths_to_a_real_agent():
+    """A safety net, not cosmetics.
 
-    Pojistka bydlí v `conftest.py` a hlídá `proc.attend` i `proc.stream`.
-    Původně stála tady a hlídala jen `attend` — a přesně to se vymstilo ve chvíli,
-    kdy řetěz přešel na `stream`: testy začaly pouštět skutečného `claude` a
-    čekat na něj. Tenhle prázdný test drží důvod pohromadě s místem, kde se to
-    stalo.
+    The guard lives in `conftest.py` and watches `proc.attend` and
+    `proc.stream` alike. It used to live here and watch only `attend` — and
+    that backfired exactly when the chain switched to `stream`: tests started
+    launching a real `claude` and waiting for it. This empty test keeps the
+    reason next to the place it happened.
     """
     with pytest.raises(AssertionError, match="real agent"):
         proc.attend(["claude", "-p"])
@@ -115,43 +98,33 @@ def test_pojistka_hlida_obe_cesty_ke_skutecnemu_agentovi():
 
 @pytest.fixture
 def team(project):
-    """Dva workspace packy — právník a product owner, dvojice z plánu."""
-    install(project, "legal", "po")
+    """Two workspace packs — legal and product-owner, the plan's pair."""
+    install_pack(project, "legal", {"target": "workspace", "worktree": False, "prompt": "optional"})
+    install_pack(project, "po", {"target": "workspace", "worktree": False, "prompt": "optional"})
     return project
 
 
-# ------------------------------------------------------------------ složení
+# ------------------------------------------------------------------ composition
 
-def test_retez_potrebuje_aspon_dva_cleny(team):
-    """Pro jednoho je příkaz `agency run`. Chain s jedním členem by byl jen
-    dražší způsob, jak napsat totéž."""
+def test_a_chain_needs_at_least_two_members(team):
+    """For one, the command is `agency run`. A chain of one would just be a
+    more expensive way to write the same thing."""
     with pytest.raises(SystemExit, match="at least two"):
         cli.cmd_chain(args(team, "legal"))
 
 
-def test_mix_provideru_se_odmitne_hned(team):
-    """Vědomé zúžení v1 — jeden binár, jeden credential, jedna sada quirků.
-    Podstatné je „hned": uživatel, kterému to spadne po prvním běhu, už zaplatil."""
-    # Jménem hire, ne packu: instalace zapsala `po@claude` a tohle přidá
-    # druhého, takže holé „po" by sáhlo po tom prvním — a mix by se neprojevil.
-    second = hires.add(team, pack="po", provider="codex")
-
-    with pytest.raises(SystemExit, match="one provider at a time"):
-        cli.cmd_chain(args(team, "legal", second.id))
-
-
-def test_preklep_ve_tretim_jmenu_nestoji_dva_behy(team):
-    """Ověření členů je před prvním spuštěním, ne za pochodu."""
+def test_a_typo_in_the_third_name_does_not_cost_two_runs(team):
+    """Members are verified before the first run, not along the way."""
     with pytest.raises(SystemExit):
-        cli.cmd_chain(args(team, "legal", "po", "neexistuje"))
+        cli.cmd_chain(args(team, "legal", "po", "does-not-exist"))
     assert runs.load_runs(team) == []
 
 
-# ------------------------------------------------------------------ průchod
+# ------------------------------------------------------------------ the run
 
-def test_retez_dobehne_a_je_v_datech(team, monkeypatch, capsys):
-    """Kontrola hotovosti Kroku 3: dva běhy, oba nesou týž `chain.id`, druhý má
-    prvního v `upstream`."""
+def test_the_chain_finishes_and_is_in_the_data(team, monkeypatch, capsys):
+    """Step 3's acceptance check: two runs, both carrying the same
+    `chain.id`, the second one holding the first in `upstream`."""
     specialist(team, monkeypatch)
 
     code = cli.cmd_chain(args(team, "legal", "po"))
@@ -167,13 +140,14 @@ def test_retez_dobehne_a_je_v_datech(team, monkeypatch, capsys):
     assert (second["chain"]["position"], second["chain"]["of"]) == (2, 2)
     assert first["chain"]["upstream"] == []
     assert second["chain"]["upstream"] == [done[0].id]
-    # Oba doběhly branou — chain nečeká na ruční `agency ingest`.
+    # Both ran through the gate — the chain does not wait on a manual `agency ingest`.
     assert first["status"] == "ok" and second["status"] == "ok"
 
 
-def test_druhy_clen_dostane_upstream_bez_stropu(team, monkeypatch, capsys):
-    """Strop 300 patří pozadí. Zadání se ořezávat nesmí: nález, který se do něj
-    nevejde, je nález, o kterém druhý specialista nerozhodl."""
+def test_the_second_member_gets_upstream_with_no_cap(team, monkeypatch, capsys):
+    """The cap of 300 belongs to the background. The brief must not be
+    trimmed: a finding that does not fit is a finding the second specialist
+    never decided on."""
     specialist(team, monkeypatch, findings=5)
 
     cli.cmd_chain(args(team, "legal", "po"))
@@ -185,12 +159,12 @@ def test_druhy_clen_dostane_upstream_bez_stropu(team, monkeypatch, capsys):
     assert upstream["counts"]["findings"] == 5
     assert upstream["counts"]["undecided"] == 5
     assert len(upstream["findings"]) == 5
-    assert upstream["runs"][0]["summary"].startswith("Shrnutí kroku 1")
+    assert upstream["runs"][0]["summary"].startswith("Summary of step 1")
 
 
-def test_context_rekne_packu_ze_je_v_retezu(team, monkeypatch, capsys):
-    """Pack se o své roli dozví z `context.json`, ne z promptu — prompt agent
-    přečte jednou, context.json má po celý běh."""
+def test_context_tells_the_pack_it_is_in_a_chain(team, monkeypatch, capsys):
+    """A pack learns its role from `context.json`, not from the prompt — the
+    agent reads the prompt once, but context.json lasts the whole run."""
     specialist(team, monkeypatch)
 
     cli.cmd_chain(args(team, "legal", "po"))
@@ -207,12 +181,12 @@ def test_context_rekne_packu_ze_je_v_retezu(team, monkeypatch, capsys):
     assert json.loads((first.dir / "context.json").read_text(encoding="utf-8"))["chain"]["position"] == 1
 
 
-# ------------------------------------------------------------------ předání
+# ------------------------------------------------------------------ handover
 
-def test_vzkaz_predchudce_jsou_jeho_slova(team, monkeypatch, capsys):
-    """`handoff.md` jde do promptu doslova. Kdyby ho jádro převyprávělo, byla by
-    to věta, za kterou se nikdo nepodepsal."""
-    specialist(team, monkeypatch, handoff="Reconsent stojí na domněnce o účtech — potvrď ji.")
+def test_a_predecessors_message_is_its_own_words(team, monkeypatch, capsys):
+    """`handoff.md` goes into the prompt verbatim. If the core retold it, it
+    would be a sentence nobody signed."""
+    specialist(team, monkeypatch, handoff="Reconsent rests on an assumption about accounts — confirm it.")
 
     cli.cmd_chain(args(team, "legal", "po"))
     capsys.readouterr()
@@ -220,26 +194,27 @@ def test_vzkaz_predchudce_jsou_jeho_slova(team, monkeypatch, capsys):
     second = sorted(runs.load_runs(team), key=lambda r: r.id)[1]
     prompt = (second.dir / "prompt.txt").read_text(encoding="utf-8")
 
-    assert "Reconsent stojí na domněnce o účtech — potvrď ji." in prompt
+    assert "Reconsent rests on an assumption about accounts — confirm it." in prompt
     assert "step 2/2" in prompt
     assert "evidence/upstream.json" in prompt
     assert "First judge those findings" in prompt
 
 
-def test_bez_handoffu_se_preda_summary(team, monkeypatch, capsys):
-    """`handoff.md` je volitelný. Když chybí, popisné shrnutí je pořád lepší
-    vstup než holé počty."""
+def test_without_a_handoff_the_summary_is_passed_on(team, monkeypatch, capsys):
+    """`handoff.md` is optional. When it is missing, a descriptive summary is
+    still a better input than bare counts."""
     specialist(team, monkeypatch, handoff=None)
 
     cli.cmd_chain(args(team, "legal", "po"))
     capsys.readouterr()
 
     second = sorted(runs.load_runs(team), key=lambda r: r.id)[1]
-    assert "Shrnutí kroku 1." in (second.dir / "prompt.txt").read_text(encoding="utf-8")
+    assert "Summary of step 1." in (second.dir / "prompt.txt").read_text(encoding="utf-8")
 
 
-def test_prvni_clen_nedostane_upstream(team, monkeypatch, capsys):
-    """Prvnímu nikdo nic nepředal — a prompt to má říct, místo aby mlčel."""
+def test_the_first_member_gets_no_upstream(team, monkeypatch, capsys):
+    """Nobody handed the first member anything — the prompt has to say so
+    instead of staying silent."""
     specialist(team, monkeypatch)
 
     cli.cmd_chain(args(team, "legal", "po"))
@@ -253,15 +228,14 @@ def test_prvni_clen_nedostane_upstream(team, monkeypatch, capsys):
     assert not (first.dir / "evidence" / "upstream.json").exists()
 
 
-def test_mlceni_agenta_se_nenahrazuje(team, monkeypatch, capsys):
-    """Když člen nenechá ani handoff, ani summary, prompt se opře o počty.
-    Vymyslet za něj vzkaz by bylo tvrzení, za které se nikdo nepodepsal."""
+def test_an_agents_silence_is_not_invented_for_it(team, monkeypatch, capsys):
+    """When a member leaves neither a handoff nor a summary, the prompt falls
+    back on counts. Inventing a message on its behalf would be a claim
+    nobody signed."""
     def fake(argv, cwd=None, env=None, on_line=None, timeout=None):
         run = next(r for r in runs.load_runs(team) if r.record().get("status") == "running")
         write_json(run.findings_path, [make_finding(team, run.id)])
         return 0
-    # Člen řetězu jde přes `stream`, ne přes `attend` — pojistka z conftestu na
-    # to upozorní hlášením, ne desetiminutovým čekáním na skutečného agenta.
     monkeypatch.setattr(proc, "stream", fake)
 
     cli.cmd_chain(args(team, "legal", "po"))
@@ -273,14 +247,14 @@ def test_mlceni_agenta_se_nenahrazuje(team, monkeypatch, capsys):
     assert "1 findings" in prompt
 
 
-def test_agent_smi_cist_celou_pamet_projektu(team, monkeypatch, capsys):
-    """Autorizace musí pokrýt to, co jádro samo předalo.
+def test_the_agent_may_read_the_whole_project_memory(team, monkeypatch, capsys):
+    """Authorization must cover what the core itself handed over.
 
-    `context.json` posílá specialistu do `knowledge` bundlu, do stránek packu
-    a v řetězu do `evidence/upstream.json` s odkazy na cizí běhy. Dlouho se
-    přitom povoloval jen RUN_DIR, takže běh ve worktree narazil na „Read
-    outside the working directories" u adresáře, na který ho poslalo jádro.
-    Dát cestu a nedat k ní přístup je chyba autorizace, ne otravnost.
+    `context.json` sends the specialist into the `knowledge` bundle, into the
+    pack's pages, and in a chain into `evidence/upstream.json` with links to
+    other runs. Only RUN_DIR used to be allowed, so a run in a worktree hit
+    "Read outside the working directories" on a directory the core itself
+    pointed it at.
     """
     seen = specialist(team, monkeypatch)
 
@@ -291,12 +265,12 @@ def test_agent_smi_cist_celou_pamet_projektu(team, monkeypatch, capsys):
         assert "--add-dir" in step
         allowed = step[step.index("--add-dir") + 1]
         assert allowed == posix(team.agency_dir), (
-            f"agent dostal povolený {allowed}, ale čte celou paměť projektu")
+            f"the agent was granted {allowed}, but it reads the whole project memory")
 
 
-def test_povoleny_adresar_pokryva_upstream_i_bundle(team, monkeypatch, capsys):
-    """Konkrétně: run dir druhého člena, běh prvního člena a knowledge bundle
-    leží všechny pod tím jedním povoleným adresářem."""
+def test_the_granted_directory_covers_upstream_and_bundle(team, monkeypatch, capsys):
+    """Specifically: the second member's run dir, the first member's run,
+    and the knowledge bundle all sit under that one granted directory."""
     seen = specialist(team, monkeypatch)
 
     cli.cmd_chain(args(team, "legal", "po"))
@@ -305,28 +279,29 @@ def test_povoleny_adresar_pokryva_upstream_i_bundle(team, monkeypatch, capsys):
     allowed = Path(seen["argv"][1][seen["argv"][1].index("--add-dir") + 1])
     first, second = sorted(runs.load_runs(team), key=lambda r: r.id)
     for path in (second.dir, first.dir, team.agency_dir / knowledge.BUNDLE):
-        assert allowed in path.parents or allowed == path, f"{path} je mimo povolený adresář"
+        assert allowed in path.parents or allowed == path, f"{path} is outside the granted directory"
 
 
-# ------------------------------------------------------------------ zastavení
+# ------------------------------------------------------------------ stopping
 
-def test_spadly_krok_retez_zastavi(team, monkeypatch, capsys):
-    """Pokračovat potichu by znamenalo, že product owner soudí nálezy, které
-    nevznikly."""
+def test_a_failed_step_stops_the_chain(team, monkeypatch, capsys):
+    """Going on quietly would mean the product owner judges findings that
+    never came into being."""
     specialist(team, monkeypatch, fails_on=1)
 
     code = cli.cmd_chain(args(team, "legal", "po"))
     printed = capsys.readouterr().out
 
     assert code != 0
-    assert len(runs.load_runs(team)) == 1, "druhý člen se neměl spustit"
+    assert len(runs.load_runs(team)) == 1, "the second member should not have started"
     assert "the chain stops at step 1/2" in printed
     assert runs.load_runs(team)[0].record()["status"] == "failed"
 
 
-def test_zastaveny_retez_rekne_co_dobehlo(team, monkeypatch, capsys):
-    """Přerušený řetěz je pořád výsledek, jen kratší — a musí být vidět, kde
-    se dá navázat ručně."""
+def test_a_stopped_chain_says_what_finished(team, monkeypatch, capsys):
+    """An interrupted chain is still a result, only a shorter one — and it
+    has to show where to pick it up by hand."""
+    install_pack(team, "qa", {"target": "workspace", "worktree": False, "prompt": "optional"})
     specialist(team, monkeypatch, fails_on=2)
 
     cli.cmd_chain(args(team, "legal", "po", "qa"))
@@ -336,16 +311,15 @@ def test_zastaveny_retez_rekne_co_dobehlo(team, monkeypatch, capsys):
     assert "not started" in printed
 
 
-# ------------------------------------------------------------- autonomie
+# ------------------------------------------------------------------ autonomy
 
-def test_clen_retezu_bezi_neattended(team, monkeypatch, capsys):
-    """Tohle je rozdíl mezi řetězem a seznamem příkazů.
+def test_a_chain_member_runs_unattended(team, monkeypatch, capsys):
+    """This is the difference between a chain and a list of commands.
 
-    `claude` i `codex` startují ve výchozím stavu interaktivní sezení, které po
-    dokončení úkolu NEKONČÍ — sedí na promptu a čeká na další vstup.
-    Orchestrátor pak nikdy nedostane exit code a druhý člen se nespustí. Přesně
-    to se stalo na prvním reálném řetězu: recenzent dopsal závěr v 10:31 a pak
-    se nestalo nic, dokud uživatel nezasáhl ručně.
+    `claude` and `codex` both start an interactive session by default that
+    does NOT end when the task is done — it sits on the prompt waiting for
+    more input. The orchestrator would then never get an exit code and the
+    next member would never start.
     """
     seen = specialist(team, monkeypatch)
 
@@ -353,21 +327,21 @@ def test_clen_retezu_bezi_neattended(team, monkeypatch, capsys):
     capsys.readouterr()
 
     for step in seen["argv"]:
-        assert "-p" in step, f"člen řetězu musí běžet neattended: {step}"
-        assert step.index("-p") == 1, "u codexu je to podpříkaz, takže hned za binárkou"
+        assert "-p" in step, f"a chain member must run unattended: {step}"
+        assert step.index("-p") == 1, "for codex it is a subcommand, right after the binary"
 
 
-def test_samostatny_beh_zustava_attended(project, make_run):
-    """`--wait` nemění attended charakter: uživatel sezení vidí a může do něj
-    vstoupit. Neattended je vlastnost ČLENA ŘETĚZU, ne čekání na konec."""
-    cfg = {"agent": {"provider": "claude", "model": "sonnet"}}
-    assert "-p" not in runs.launch_argv(cfg, "/mem", "P")[0]
-    assert "-p" in runs.launch_argv(cfg, "/mem", "P", unattended=True)[0]
+def test_a_standalone_run_stays_attended():
+    """`--wait` does not change the attended character: the user sees the
+    session and can step into it. Unattended is a property of a CHAIN
+    MEMBER, not of waiting for the end."""
+    assert "-p" not in runs.launch_argv("/mem", "P")[0]
+    assert "-p" in runs.launch_argv("/mem", "P", unattended=True)[0]
 
 
-def test_zaznam_rekne_ze_beh_nebyl_attended(team, monkeypatch, capsys):
-    """`cost.credential` se z toho odvozuje. Tvrdit „attended" o běhu, do kterého
-    nikdo vstoupit nemohl, znamená účtovat ho ke špatnému kreditu."""
+def test_the_record_says_the_run_was_not_attended(team, monkeypatch, capsys):
+    """`cost.credential` is derived from this. Claiming "attended" about a
+    run nobody could step into means billing it to the wrong credential."""
     specialist(team, monkeypatch)
 
     cli.cmd_chain(args(team, "legal", "po"))
@@ -377,10 +351,11 @@ def test_zaznam_rekne_ze_beh_nebyl_attended(team, monkeypatch, capsys):
         assert run.record()["trigger"]["attended"] is False
 
 
-def test_zaznam_retezu_sedi_na_run_v1(team, monkeypatch, capsys):
-    """Blok `chain` má v `run.v1` zavřený seznam klíčů. Orchestrátor si v tomtéž
-    dictu vozí vzkaz předchůdce a příznak zadání — do záznamu nesmí ani jedno."""
-    specialist(team, monkeypatch, handoff="Vzkaz.")
+def test_the_chain_record_matches_run_v1(team, monkeypatch, capsys):
+    """The `chain` block has a closed key list in `run.v1`. The orchestrator
+    carries a predecessor's message and a prompt flag in that same dict —
+    neither belongs in the record."""
+    specialist(team, monkeypatch, handoff="Message.")
 
     cli.cmd_chain(args(team, "legal", "po"))
     capsys.readouterr()
@@ -392,57 +367,57 @@ def test_zaznam_retezu_sedi_na_run_v1(team, monkeypatch, capsys):
         assert code == 0
 
 
-# ------------------------------------------------------------- zadání per člen
+# ------------------------------------------------------------- per-member prompt
 
-def test_zadani_pro_jednoho_clena_nedostanou_ostatni(team, monkeypatch, capsys):
-    """Bez tohohle dostávali všichni týž `--prompt`. Věta adresovaná někomu
-    jinému není kontext, je to matoucí instrukce — recenzent na prvním reálném
-    řetězu poslušně odpovídal na produktové otázky psané product ownerovi."""
+def test_a_prompt_for_one_member_does_not_reach_the_others(team, monkeypatch, capsys):
+    """Without this, everyone got the same `--prompt`. A sentence addressed
+    to somebody else is not context, it is a confusing instruction."""
     specialist(team, monkeypatch)
 
     cli.cmd_chain(args(team, "legal", "po",
-                       prompt="projdi VOP", focus=["po@claude:dává to produktový smysl?"]))
+                       prompt="review the terms", focus=["po:does this make product sense?"]))
     capsys.readouterr()
 
     first, second = sorted(runs.load_runs(team), key=lambda r: r.id)
     legal_prompt = (first.dir / "prompt.txt").read_text(encoding="utf-8")
     po_prompt = (second.dir / "prompt.txt").read_text(encoding="utf-8")
 
-    assert "projdi VOP" in legal_prompt
-    assert "produktový smysl" not in legal_prompt, "cizí zadání se k recenzentovi nesmí dostat"
-    assert "dává to produktový smysl?" in po_prompt
-    assert "projdi VOP" not in po_prompt
+    assert "review the terms" in legal_prompt
+    assert "product sense" not in legal_prompt, "someone else's prompt must not reach the reviewer"
+    assert "does this make product sense?" in po_prompt
+    assert "review the terms" not in po_prompt
 
 
-def test_spolecne_zadani_rekne_ze_je_spolecne(team, monkeypatch, capsys):
-    """Když se zadání nerozdělí, musí být aspoň vidět, že mluví i k ostatním."""
+def test_a_shared_prompt_says_it_is_shared(team, monkeypatch, capsys):
+    """When the prompt is not split, it must at least be visible that it also
+    speaks to the others."""
     specialist(team, monkeypatch)
 
-    cli.cmd_chain(args(team, "legal", "po", prompt="udělej review a zjisti smysl"))
+    cli.cmd_chain(args(team, "legal", "po", prompt="do a review and work out whether it makes sense"))
     capsys.readouterr()
 
     prompt = (sorted(runs.load_runs(team), key=lambda r: r.id)[0]
               .dir / "prompt.txt").read_text(encoding="utf-8")
-    assert "Brief for the chain as a whole" in prompt
+    assert "Prompt for the chain as a whole" in prompt
     assert "do only your part" in prompt
 
 
-def test_zadani_pro_neznameho_clena_se_odmitne(team):
-    """Tiše zahozené zadání je horší než chybová hláška."""
+def test_a_prompt_for_an_unknown_member_is_refused(team):
+    """A silently discarded prompt is worse than an error message."""
     with pytest.raises(SystemExit, match="not in this chain"):
-        cli.cmd_chain(args(team, "legal", "po", focus=["qa:cokoli"]))
+        cli.cmd_chain(args(team, "legal", "po", focus=["qa:anything"]))
 
 
 @pytest.mark.parametrize("bad", ["po", ":text", "po:", ""])
-def test_spatny_tvar_zadani_se_odmitne(team, bad):
+def test_a_malformed_focus_is_refused(team, bad):
     with pytest.raises(SystemExit, match="Expected <who>:<text>"):
         cli.cmd_chain(args(team, "legal", "po", focus=[bad]))
 
 
-# ------------------------------------------------------------------ přehled
+# ------------------------------------------------------------------ overview
 
-def test_status_ukaze_prislusnost_k_retezu(team, monkeypatch, capsys):
-    """Bez toho vypadá tým jako několik nesouvisejících běhů."""
+def test_status_shows_chain_membership(team, monkeypatch, capsys):
+    """Without it a team looks like several unrelated runs."""
     specialist(team, monkeypatch)
     cli.cmd_chain(args(team, "legal", "po"))
     capsys.readouterr()
@@ -452,43 +427,43 @@ def test_status_ukaze_prislusnost_k_retezu(team, monkeypatch, capsys):
     assert "chain" in printed and "1/2" in printed and "2/2" in printed
 
 
-def test_status_json_nese_cely_blok(team, monkeypatch, capsys):
+def test_status_json_carries_the_whole_block(team, monkeypatch, capsys):
     specialist(team, monkeypatch)
     cli.cmd_chain(args(team, "legal", "po"))
     capsys.readouterr()
 
     cli.cmd_status(SimpleNamespace(repo=str(team.root), json=True, limit=10))
     data = json.loads(capsys.readouterr().out)
-    blocks = [r["chain"] for r in data]
+    blocks = [r["chain"] for r in data["runs"]]
     assert {b["position"] for b in blocks} == {1, 2}
     assert len({b["id"] for b in blocks}) == 1
 
 
-# ------------------------------------------------------------------ jednotky
+# ------------------------------------------------------------------ units
 
-def test_handoff_jde_dal_cely(project, make_run):
-    """Strop je v bajtech a velkorysý, protože handoff není vykopávací věta,
-    ale zadání.
+def test_a_handoff_goes_through_whole(project, make_run):
+    """The cap is generous and in bytes, because a handoff is not a kick-off
+    line, it is the brief.
 
-    Předchozí strop 40 řádků vypadal rozumně a nebyl: první skutečný handoff měl
-    120 řádků a jeho jediná adresná sekce — „doporučení pro PO agenta" — byla
-    dole, za řezem. Další člen dostal technickou rekapitulaci a `… (80 more
-    lines in the file)` bez cesty k souboru.
+    The earlier 40-line cap looked reasonable and was not: the first real
+    handoff ran to 120 lines and its only addressed section — "recommendation
+    for the PO agent" — sat at the bottom, past the cut. The next member got
+    the technical recap and "… (80 more lines in the file)" with no path to
+    the file.
     """
     run = make_run()
-    (run.dir / "handoff.md").write_text("\n".join(f"řádek {i}" for i in range(120)),
+    (run.dir / "handoff.md").write_text("\n".join(f"line {i}" for i in range(120)),
                                         encoding="utf-8")
     text, source, where = chain.handoff_text(run)
 
     assert source == "handoff.md"
-    assert "řádek 119" in text, "adresná část bývá na konci"
-    assert where.endswith("handoff.md"), "cesta k souboru jde do promptu vždycky"
+    assert "line 119" in text, "the addressed part tends to be at the end"
+    assert where.endswith("handoff.md"), "the file's path always goes into the prompt"
 
 
-def test_opravdu_velky_handoff_se_zkrati_a_rekne_o_tom(project, make_run):
-    """Strop pořád existuje — jen je tam kvůli velikosti promptu, ne kvůli
-    čitelnosti. A když se řeže, musí být vidět, kam se pro zbytek jít podívat.
-    """
+def test_a_genuinely_large_handoff_is_clipped_and_says_so(project, make_run):
+    """The cap still exists — for the prompt's size, not for readability —
+    and when it clips, it has to show where the rest is."""
     run = make_run()
     (run.dir / "handoff.md").write_text("\n".join("x" * 200 for _ in range(200)),
                                         encoding="utf-8")
@@ -499,20 +474,20 @@ def test_opravdu_velky_handoff_se_zkrati_a_rekne_o_tom(project, make_run):
     assert where.endswith("handoff.md")
 
 
-def test_prazdny_handoff_se_chova_jako_zadny(project, make_run):
+def test_an_empty_handoff_behaves_like_none(project, make_run):
     run = make_run()
     (run.dir / "handoff.md").write_text("   \n\n", encoding="utf-8")
-    (run.dir / "summary.md").write_text("Shrnutí.", encoding="utf-8")
+    (run.dir / "summary.md").write_text("Summary.", encoding="utf-8")
 
     text, source, _ = chain.handoff_text(run)
-    assert (text, source) == ("Shrnutí.", "summary.md")
+    assert (text, source) == ("Summary.", "summary.md")
 
 
-def test_ingest_zaznamena_ze_handoff_existuje(project, make_run):
-    """Brána soubor nečte ani nedopisuje — jen zaznamená, že je."""
+def test_ingest_records_that_a_handoff_exists(project, make_run):
+    """The gate neither reads nor edits the file — it only records that it exists."""
     from agency import ingest
     run = make_run()
-    (run.dir / "handoff.md").write_text("Vzkaz.", encoding="utf-8")
+    (run.dir / "handoff.md").write_text("Message.", encoding="utf-8")
 
     ingest.ingest(project, run)
     assert run.record()["outputs"]["handoff"] is True

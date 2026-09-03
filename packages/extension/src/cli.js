@@ -1,28 +1,31 @@
-// Klient CLI — jediná cesta, kterou extension sahá na data.
+// CLI client — the only path through which the extension touches data.
 //
-// Extension nečte `.agency/` ze souborů, i když by mohla. Kdyby to dělala,
-// vznikly by dva výklady téhož stavu a agent by přestal být rovnocenný klient:
-// jeho `agency triage` by šel jinudy než klik v editoru. Tohle je ta hranice
-// z ui-surface-decision.md §4 — extension je viewer a zadavatel příkazů,
-// nikdy vlastník stavu.
+// The extension does not read `.agency/` from files, even though it could. If
+// it did, there would be two interpretations of the same state and an agent
+// would stop being an equal client: its `agency triage` would take a
+// different path than a click in the editor. This is the boundary from
+// ui-surface-decision.md §4 — the extension is a viewer and a command
+// issuer, never an owner of state.
 //
-// Cena je spawn procesu na dotaz (~150–300 ms), což triage UI ustojí. Až to
-// začne vadit, vymění se transport za dlouho žijící proces; kontrakt zůstane.
+// The cost is a process spawn per query (~150-300 ms), which the triage UI
+// tolerates. If that ever becomes a problem, the transport changes to a
+// long-lived process; the contract stays.
 
 const cp = require('child_process');
 const vscode = require('vscode');
 
-/** Cesta k binárce. Nastavení, protože `uv tool install` ji umí položit mimo PATH. */
+/** Path to the binary. A setting, because `uv tool install` can place it
+ *  outside PATH. */
 function bin() {
   return vscode.workspace.getConfiguration('agency').get('cliPath') || 'agency';
 }
 
 /**
- * Spustí `agency … --json`.
+ * Runs `agency … --json`.
  *
- * Vrací vždy `{ok, error, data}` a NIKDY nevyhazuje — chyba CLI je normální
- * stav (není projekt, chybí `gh`, neproběhl běh) a UI ji má umět ukázat, ne
- * na ni spadnout.
+ * Always returns `{ok, error, data}` and NEVER throws — a CLI error is a
+ * normal state (no project, missing `gh`, no run yet) and the UI has to be
+ * able to show it, not crash on it.
  */
 function call(cwd, args, { timeout = 60000 } = {}) {
   return new Promise((resolve) => {
@@ -46,15 +49,15 @@ function call(cwd, args, { timeout = 60000 } = {}) {
   });
 }
 
-/** Pomocník pro čtení: při chybě vrátí `fallback`, ne výjimku. */
+/** Read helper: returns `fallback` on error instead of throwing. */
 async function read(cwd, args, fallback) {
   const r = await call(cwd, args);
   return r.ok ? (r.data ?? fallback) : fallback;
 }
 
-// ---------------------------------------------------------------- diagnostika
+// ---------------------------------------------------------------- diagnostics
 
-/** Je CLI dostupné a jsme v projektu? Odpověď krmí uvítací obrazovky. */
+/** Is the CLI available and are we in a project? Feeds the welcome screens. */
 async function probe(cwd) {
   const r = await call(cwd, ['status', '--limit', '1'], { timeout: 15000 });
   if (r.ok) return { ok: true, reason: null, error: null };
@@ -66,86 +69,79 @@ async function probe(cwd) {
   };
 }
 
-const init = (cwd) => read(cwd, ['init'], null);
-
 /**
- * Kontroly předpokladů. `agency doctor --json` je balí do `{checks: […]}`,
- * protože k nim časem přibude souhrn; klient to rozbalí tady, na jednom místě,
- * a zbytek extension vidí prosté pole.
+ * Prerequisite checks. `agency doctor --json` wraps them in `{checks: […]}`
+ * because a summary may join them later; the client unwraps that here, once,
+ * so the rest of the extension sees a plain array.
  */
 async function doctor(cwd) {
   const d = await read(cwd, ['doctor'], []);
   return Array.isArray(d) ? d : (d && d.checks) || [];
 }
+
+/** The specialists in this project — skills in `.claude/skills/agency-<name>/`. */
 const packs = (cwd) => read(cwd, ['packs'], []);
 
-/**
- * Who is hired in this project. One row per worker, not per method — the same
- * pack can be hired once per provider, and the panel lists workers.
- */
-const roster = (cwd) => read(cwd, ['roster'], []);
+/** Runs, with the project's own name/slug/installed packs alongside them —
+ *  `agency status --json` carries both so the extension does not need a
+ *  second call just to know whose repository this is. */
+const status = (cwd) => read(cwd, ['status', '--limit', '25'], { project: null, runs: [] });
 
-/** AI runners on this machine. A property of the machine, so it is asked for
- *  separately from anything the project knows. */
-const providers = (cwd) => read(cwd, ['providers'], []);
-const status = (cwd) => read(cwd, ['status', '--limit', '25'], []);
 const metrics = (cwd) => read(cwd, ['metrics'], null);
-const projects = (cwd) => read(cwd, ['projects'], []);
 
-/** Nálezy napříč běhy — s kotvou, driftem a historií. Ty jsou jen v `--json`. */
+/** Findings across runs — with anchor, drift and history. Those are `--json` only. */
 const findings = (cwd) => read(cwd, ['findings', '--all'], []);
 
-/** PR k recenzi, otevřené i prošlé. Podklad pro klikací výběr. */
+/** PRs to review, open and past. Backs the clickable picker. */
 const prs = (cwd, { state = 'all', limit = 30 } = {}) =>
   read(cwd, ['prs', '--state', state, '--limit', String(limit)], []);
 
-// ---------------------------------------------------------------- zápis
+// ---------------------------------------------------------------- writes
 
 /**
- * Rozhodnutí. Jde touž cestou jako `agency triage` z terminálu nebo od agenta —
- * extension není vlastník, jen jeden ze tří rovnocenných klientů.
+ * A decision. Goes through the same path as `agency triage` from the
+ * terminal or from an agent — the extension is not an owner, just one of
+ * three equal clients.
  */
 function triage(cwd, findingId, action, { reason, note } = {}) {
-  // `human`, ne `vscode`: identita odpovídá na „kdo rozhodl", ne „kterými
-  // dveřmi". Člověk, který klikne v editoru, je týž člověk, co píše do
-  // terminálu — a rozdíl, na kterém záleží, je proti `hire:<id>` agenta.
+  // `human`, not `vscode`: identity answers "who decided", not "through
+  // which door". A person clicking in the editor is the same person who
+  // types in the terminal — and the distinction that matters is against an
+  // agent's `hire:<id>`.
   const args = ['triage', action, findingId, '--by', 'human'];
   if (reason) args.push('--reason', reason);
   if (note) args.push('--note', note);
   return call(cwd, args);
 }
 
-/** Poznámka. Vlastní příkaz, protože poznámka NENÍ rozhodnutí. */
+/** A note. Its own command, because a note is NOT a decision. */
 const note = (cwd, findingId, text) =>
   call(cwd, ['note', findingId, text, '--by', 'human']);
 
-/** Brána: kontrakt, existence, práh, dedup. Pouští se po doběhnutí agenta. */
+/** The gate: contract, existence, threshold, dedup. Run after the agent finishes. */
 const ingest = (cwd, runId) =>
   call(cwd, runId ? ['ingest', '--run', runId] : ['ingest'], { timeout: 180000 });
 
 /**
- * Deterministická příprava běhu. Vrací, kde běh leží, kde je worktree a jakým
- * příkazem ho dokončit — tvar spouštění vlastní CLI, ne klient. Kdyby si ho
- * skládala i extension, vznikne druhé místo, kde se dá nastavit model, a
- * run record by lhal.
+ * The deterministic preparation of a run. Returns where it lives, where its
+ * worktree is, and the exact command to finish it with — the shape of that
+ * command belongs to the CLI, not to this client. If the client assembled it
+ * too, there would be a second place to set the model, and the run record
+ * would then be lying about one of them.
  */
-async function run(cwd, who, { pr, latestMerged, force, model, provider,
-  prompt, scenario, since } = {}) {
-  // `who` is a hire id when the project has a roster, a pack name otherwise.
-  // Resolving it belongs to the core: the extension would otherwise have to
-  // decide what happens when a pack has three workers, and that decision would
-  // then differ between the panel and the terminal.
-  const args = ['run', who];
+async function run(cwd, pack, { pr, latestMerged, force, model, provider,
+  bypass, prompt, since } = {}) {
+  const args = ['run', pack];
   if (pr) args.push('--pr', String(pr));
   if (latestMerged) args.push('--latest-merged');
   if (force) args.push('--force');
   if (model) args.push('--model', model);
   if (provider) args.push('--provider', provider);
-  // Zadání jde do CLI jako argument, ne do promptu poskládaného tady. Kdyby si
-  // ho skládala extension, vzniklo by druhé místo, kde běh vzniká, a run record
-  // by o tom, s čím agent běžel, lhal.
+  if (bypass) args.push('--bypass');
+  // The prompt goes to the CLI as an argument, not assembled here. If the
+  // extension composed it, there would be a second place a run comes into
+  // being, and the run record would lie about what the agent actually ran with.
   if (prompt) args.push('--prompt', prompt);
-  if (scenario) args.push('--scenario', scenario);
   if (since) args.push('--since', since);
   const r = await call(cwd, args, { timeout: 15 * 60 * 1000 });
   if (r.ok && r.data && r.data.ok === false) {
@@ -158,8 +154,8 @@ async function run(cwd, who, { pr, latestMerged, force, model, provider,
  * Close a run whose terminal is gone, or delete it outright.
  *
  * Nothing in the extension can tell whether an agent is still alive: the run
- * happens in a terminal, and closing that terminal leaves no signal behind. So
- * this is never automatic — it is the user saying the run is over.
+ * happens in a terminal, and closing that terminal leaves no signal behind.
+ * So this is never automatic — it is the user saying the run is over.
  */
 const cleanup = (cwd, { run, unfinished, discard, force } = {}) => {
   const args = ['cleanup'];
@@ -170,63 +166,8 @@ const cleanup = (cwd, { run, unfinished, discard, force } = {}) => {
   return call(cwd, args, { timeout: 120000 });
 };
 
-const addPack = (cwd, pack) => call(cwd, ['add', pack]);
-
-/**
- * Hire a specialist. With a provider it adds another worker to a pack that may
- * already have one — that is how “Reviewer · sonnet” and “Reviewer · codex”
- * come to exist side by side over one configuration and one finding queue.
- */
-const hire = (cwd, pack, { provider, model, as, title } = {}) => {
-  const args = ['hire', pack];
-  if (provider) args.push('--provider', provider);
-  if (model) args.push('--model', model);
-  if (as) args.push('--as', as);
-  if (title) args.push('--title', title);
-  return call(cwd, args);
-};
-
-/** Remove a worker. The pack, its configuration and past runs stay. */
-const fire = (cwd, hireId) => call(cwd, ['fire', hireId]);
-
-/** Register a runner this machine has, e.g. a freshly installed `grok`. */
-const addProvider = (cwd, id, { bin, title, models } = {}) => {
-  const args = ['providers', '--add', id];
-  if (bin) args.push('--bin', bin);
-  if (title) args.push('--title', title);
-  if (models) args.push('--models', models);
-  return call(cwd, args);
-};
-
-/**
- * Konfigurace packu i s tím, co si nástroj o projektu domyslel.
- *
- * Zápis jde touž cestou jako `agency config` z terminálu — nastavení bydlí
- * v projektu, ne v editoru, takže co nastavíš klikem, platí i pro běh
- * z terminálu a pro agenta.
- */
-const packConfig = (cwd, pack) => call(cwd, ['config', pack]);
-
-const setConfig = (cwd, pack, values) => {
-  const args = ['config', pack];
-  for (const [key, value] of Object.entries(values || {})) {
-    args.push('--set', `${key}=${JSON.stringify(value)}`);
-  }
-  return call(cwd, args);
-};
-
-/** Trvalé zadání packu a jeho pojmenované scénáře — čtení i zápis. */
-const brief = (cwd, pack, { set, scenario, remove } = {}) => {
-  const args = ['brief', pack];
-  if (scenario) args.push('--scenario', scenario);
-  if (remove) args.push('--remove');
-  else if (set !== undefined && set !== null) args.push('--set', set);
-  return call(cwd, args);
-};
-
 module.exports = {
   bin, call, probe,
-  init, doctor, packs, roster, providers, status, metrics, projects, findings, prs,
-  triage, note, ingest, run, cleanup, addPack, hire, fire, addProvider,
-  brief, packConfig, setConfig,
+  doctor, packs, status, metrics, findings, prs,
+  triage, note, ingest, run, cleanup,
 };

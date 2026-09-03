@@ -1,18 +1,19 @@
-// Agency — aktivace a zapojení.
+// Agency — activation and wiring.
 //
-// Tenhle soubor NEMÁ obsahovat logiku. Je to jen místo, kde se potkají:
+// This file is NOT meant to hold logic. It is where these meet:
 //
-//   cli.js      volání `agency` — jediná cesta k datům
-//   state.js    jeden snímek, ze kterého čtou všechny pohledy
-//   views.js    čtyři stromy v postranním panelu
-//   panel.js    detail nálezu, metriky a předpoklady v editoru
-//   threads.js  nálezy jako inline komentáře u řádku
-//   review.js   výběr cíle (PR nebo zadání) a spuštění agenta
-//   git.js      kód v den analýzy (`agency:` scheme)
+//   cli.js      calls into `agency` — the only path to data
+//   state.js    one snapshot every view reads from
+//   views.js    the four trees in the side panel
+//   panel.js    finding detail, metrics and prerequisites in the editor
+//   threads.js  findings as inline comments on the line
+//   review.js   picking a target (PR or prompt) and starting an agent
+//   git.js      the code as of the day of the analysis (`agency:` scheme)
 //
-// Hranice, která to celé drží: extension je viewer a zadavatel příkazů, nikdy
-// vlastník stavu. Rozhodnutí vzniká v `.agency/runs/<id>/decisions.jsonl` a
-// zapisuje ho `agency triage` — ať už ho zavolá klik tady, terminál, nebo agent.
+// The boundary that holds it all together: the extension is a viewer and a
+// command issuer, never an owner of state. A decision comes into being in
+// `.agency/runs/<id>/decisions.jsonl`, written by `agency triage` — whether
+// a click here called it, or the terminal, or an agent.
 
 const vscode = require('vscode');
 const path = require('path');
@@ -32,11 +33,12 @@ let log;
 let threads;
 /** @type {vscode.StatusBarItem} */
 let status;
-/** Panely v editoru — jeden na druh, aby se tab neklonoval při každém kliknutí. */
+/** Panels open in the editor — one per kind, so a tab does not clone itself
+ *  on every click. */
 const panels = new Map();
 const trees = {};
 
-// ---------------------------------------------------------------- panely
+// ---------------------------------------------------------------- panels
 
 function showPanel(key, title, html, onMessage) {
   let p = panels.get(key);
@@ -71,12 +73,13 @@ async function openFinding(findingId) {
   });
 }
 
-// ------------------------------------------------------------ rozhodnutí
+// ------------------------------------------------------------ decisions
 
 /**
- * JEDINÁ cesta, jak uvnitř extension vzniká rozhodnutí. Jde přes `agency triage`,
- * tedy tutéž vrstvu, kterou volá agent — kdyby to byl příkaz editoru, agent by
- * triage neuměl a nebyl by rovnocenný klient.
+ * The ONLY path by which a decision comes into being inside the extension.
+ * It goes through `agency triage`, the same layer an agent calls — if it
+ * were an editor command instead, an agent could not triage and would not
+ * be an equal client.
  */
 async function decide(findingId, action, opts = {}) {
   const res = await cli.triage(state.snapshot.cwd, findingId, action, opts);
@@ -87,7 +90,7 @@ async function decide(findingId, action, opts = {}) {
   }
   log.appendLine(`[decision] ${findingId} → ${action}`
     + (opts.reason ? ` · ${opts.reason}` : ''));
-  // Plné načtení, ne light: rozhodnutím se mění i precision v přehledu.
+  // A full reload, not a light one: a decision changes precision in the overview too.
   await refresh();
   const f = state.findingById(findingId);
   if (f && panels.has(`finding:${findingId}`)) {
@@ -115,7 +118,7 @@ async function addNote(findingId, text) {
   }
 }
 
-// -------------------------------------------------------------- navigace
+// -------------------------------------------------------------- navigation
 
 async function revealFinding(findingId, prefer) {
   const f = state.findingById(findingId);
@@ -160,7 +163,7 @@ async function diffFinding(findingId) {
     `${path.basename(a.file)} — ${String(a.commit).slice(0, 8)} ↔ working tree`);
 }
 
-// ------------------------------------------------------------- překreslení
+// ------------------------------------------------------------- redraw
 
 function updateStatusBar() {
   const s = state.snapshot;
@@ -182,9 +185,9 @@ function updateStatusBar() {
 async function refresh(opts = {}) {
   await state.refresh(opts);
   updateStatusBar();
-  // Kontext řídí, která uvítací obrazovka se ukáže. Prázdný panel bez
-  // vysvětlení je nejhorší stav, ve kterém nástroj může být — uživatel nepozná,
-  // jestli nic nenašel, nebo jestli se něco nespustilo.
+  // Context drives which welcome screen shows. An empty panel with no
+  // explanation is the worst state this tool can be in — the user cannot
+  // tell whether nothing was found or nothing ran.
   const ctx = vscode.commands.executeCommand.bind(vscode.commands);
   ctx('setContext', 'agency.ready', state.snapshot.probe.ok);
   ctx('setContext', 'agency.reason', state.snapshot.probe.reason);
@@ -199,7 +202,7 @@ async function refresh(opts = {}) {
   }
 }
 
-// ------------------------------------------------------------------ aktivace
+// ------------------------------------------------------------------ activation
 
 function activate(context) {
   log = vscode.window.createOutputChannel('Agency');
@@ -225,8 +228,8 @@ function activate(context) {
     vscode.window.registerTreeDataProvider('agency.runs', trees.runs),
     findingsView);
 
-  // Odznak s počtem čekajících nálezů. Zácpa musí být vidět bez rozkliknutí —
-  // je to prokazatelně nejdražší místo celého systému.
+  // A badge with the number waiting. The backlog has to be visible without a
+  // click — it is provably the most expensive place in the whole system.
   state.onDidChange(() => {
     const q = state.queue().length;
     findingsView.badge = q
@@ -238,7 +241,7 @@ function activate(context) {
 
   const reg = (id, fn) => context.subscriptions.push(vscode.commands.registerCommand(id, fn));
 
-  // --- hlavní akce
+  // --- main actions
   reg('agency.refresh', () => refresh());
 
   reg('agency.review.pick', async () => {
@@ -253,9 +256,10 @@ function activate(context) {
     if (d) setTimeout(() => refresh(), 2000);
   });
 
-  // Tým: specialisté za sebou, každý soudí, co našel předchozí. Orchestruje
-  // pořád CLI — `agency chain` si běhy pouští sám, takže tady se jen skládá
-  // příkaz do terminálu. Orchestrace v JS by byla druhé místo, kde vzniká běh.
+  // A team: specialists in sequence, each judging what the previous one
+  // found. Orchestration stays with the CLI — `agency chain` runs the steps
+  // itself, so this only assembles the command for the terminal.
+  // Orchestrating it in JS would be a second place a run comes into being.
   reg('agency.chain.run', async () => {
     if (!state.snapshot.cwd) {
       vscode.window.showWarningMessage('Agency: open a project folder first.');
@@ -264,13 +268,14 @@ function activate(context) {
     if (!state.snapshot.probe.ok) return showNotReady();
 
     const team = await review.pickAndChain(state.snapshot.cwd, log);
-    // Delší prodleva než u jednoho běhu: chain nevrátí nic, dokud nedoběhne
-    // první člen, a než se objeví, nemá se co obnovovat.
+    // A longer delay than for a single run: a chain returns nothing until
+    // its first member finishes, and there is nothing to reload before that.
     if (team) setTimeout(() => refresh(), 5000);
   });
 
-  // QA a další packy, které pracují nad projektem, ne nad pull requestem.
-  // Příkaz je jeden a obecný — co se pouští, rozhoduje běhová politika packu.
+  // QA and other packs that work over the project, not over a pull request.
+  // One general command — which pack actually runs is decided by its own
+  // run policy.
   reg('agency.qa.run', async () => {
     if (!state.snapshot.cwd) {
       vscode.window.showWarningMessage('Agency: open a project folder first.');
@@ -278,96 +283,13 @@ function activate(context) {
     }
     if (!state.snapshot.probe.ok) return showNotReady();
 
-    if (!review.workspaceHires().length) {
-      const hire = await vscode.window.showInformationMessage(
-        'Agency: no specialist that works over the running project is hired here yet.',
-        'Hire the QA engineer');
-      if (hire) await vscode.commands.executeCommand('agency.hire.add');
+    if (!review.workspacePacks().length) {
+      vscode.window.showInformationMessage(
+        'Agency: no specialist that works over the running project is in this repository yet.');
       return;
     }
-    // Which worker takes it is asked inside — a method hired on two providers
-    // gives two candidates, and picking between them is the same question here
-    // as it is for a review.
     const d = await review.runOverWorkspace(state.snapshot.cwd, null, log);
     if (d) setTimeout(() => refresh(), 2000);
-  });
-
-  // Nastavení prohlížeče pro QA. Formulář, protože tohle je jediné místo, kde
-  // uživatel mění chování běhu a nemá důvod znát jména klíčů v konfiguraci.
-  reg('agency.qa.playwright', async (arg) => {
-    if (!state.snapshot.probe.ok) return showNotReady();
-    const pack = packNameOf(arg) || pickBrowserPack();
-    if (!pack) {
-      vscode.window.showWarningMessage(
-        'Agency: no installed specialist drives a browser — hire the QA engineer first.');
-      return;
-    }
-    const res = await cli.packConfig(state.snapshot.cwd, pack);
-    if (!res.ok) {
-      vscode.window.showErrorMessage(`Agency: ${res.error}`);
-      return;
-    }
-    const render = (data) => showPanel(`playwright:${pack}`, `${pack} — browser`,
-      panel.playwrightHtml({ pack, config: data.config, detected: data.detected }),
-      async (msg) => {
-        if (msg.cmd === 'open') {
-          await vscode.commands.executeCommand('agency.pack.openConfig', pack);
-          return;
-        }
-        if (msg.cmd !== 'save') return;
-        const saved = await cli.setConfig(state.snapshot.cwd, pack, msg.values);
-        if (!saved.ok) {
-          vscode.window.showErrorMessage(`Agency: ${saved.error}`);
-          return;
-        }
-        log.appendLine(`[config] ${pack}: ${(saved.data.changed || []).join(', ')}`);
-        const p = panels.get(`playwright:${pack}`);
-        if (p) p.webview.postMessage({ saved: 'saved to .agency/' + pack + '.json' });
-        await refresh();
-      });
-    render(res.data);
-  });
-
-  // Trvalé zadání packu. Žije v konfiguraci projektu, takže platí i pro běh
-  // z terminálu a pro agenta — editor je jen jedno ze tří míst, odkud se mění.
-  reg('agency.pack.brief', async (arg) => {
-    const withBrief = (state.snapshot.packs || []).filter(
-      (p) => p.installed && p.run && p.run.prompt && p.run.prompt.accepts);
-    let pack = packNameOf(arg);
-    if (!pack) {
-      if (!withBrief.length) {
-        vscode.window.showWarningMessage('Agency: no installed specialist takes a brief.');
-        return;
-      }
-      if (withBrief.length === 1) pack = withBrief[0].name;
-      else {
-        const pick = await vscode.window.showQuickPick(
-          withBrief.map((x) => ({
-            label: x.title || x.name,
-            detail: (x.brief && x.brief.standing) || 'no standing brief yet',
-            pack: x.name,
-          })), { title: 'Whose standing brief should be changed?' });
-        if (!pick) return;
-        pack = pick.pack;
-      }
-    }
-    const info = (state.snapshot.packs || []).find((x) => x.name === pack) || {};
-    const current = (info.brief && info.brief.standing) || '';
-    const text = await vscode.window.showInputBox({
-      title: `Standing brief — ${pack}`,
-      value: current,
-      prompt: 'Applies to every run of this specialist on this project. A one-off '
-        + 'assignment belongs in the run itself, not here.',
-      ignoreFocusOut: true,
-    });
-    if (text === undefined) return;
-    const res = await cli.brief(state.snapshot.cwd, pack, { set: text.trim() });
-    if (!res.ok) {
-      vscode.window.showErrorMessage(`Agency: ${res.error}`);
-      return;
-    }
-    log.appendLine(`[brief] ${pack} standing brief updated`);
-    await refresh();
   });
 
   reg('agency.ingest', async () => {
@@ -412,8 +334,9 @@ function activate(context) {
       .sort((a, b) => a.chain.position - b.chain.position);
     if (!members.length) return;
 
-    // Týž zákaz jako u jednoho běhu, jen se sčítá přes celý řetěz: rozhodnutí
-    // je práce, kterou někdo odvedl, a čísla přesnosti se počítají z něj.
+    // The same rule as for one run, summed across the whole chain: a
+    // decision is work somebody did, and the precision numbers are computed
+    // from it.
     const decided = members.reduce(
       (n, r) => n + Math.max((r.findings || 0) - (r.undecided || 0), 0), 0);
     if (decided) {
@@ -428,7 +351,7 @@ function activate(context) {
     const yes = await vscode.window.showWarningMessage(
       `Discard the whole team — ${members.length} run(s)?`,
       { modal: true,
-        detail: members.map((r) => `${r.chain.position}/${r.chain.of}  ${r.hire || r.pack}`
+        detail: members.map((r) => `${r.chain.position}/${r.chain.of}  ${r.pack}`
           + ` — ${r.targetLabel || ''}`).join('\n')
           + `\n\nThe records, their evidence and ${findings} finding(s) are deleted.`
           + (running ? `\n${running} of them is still marked running.` : '') },
@@ -438,8 +361,8 @@ function activate(context) {
     for (const r of members) {
       const res = await cli.cleanup(state.snapshot.cwd, { run: r.id, discard: true });
       if (!res.ok) {
-        // Zastavit se na prvním nezdaru: dopočítat zbytek naslepo by nechalo
-        // řetěz rozpůlený a uživatel by nevěděl, co ještě existuje.
+        // Stop at the first failure: finishing the rest blindly would leave
+        // the chain half-discarded and the user would not know what remains.
         vscode.window.showErrorMessage(
           `Agency: ${r.id.slice(0, 10)} — ${res.error}. The rest of the team was left alone.`);
         await refresh();
@@ -456,9 +379,6 @@ function activate(context) {
     const r = (state.snapshot.runs || []).find((x) => x.id === id) || {};
     const decided = Math.max((r.findings || 0) - (r.undecided || 0), 0);
     if (decided) {
-      // A decision is work somebody did, and the precision numbers are computed
-      // from it. Losing that silently would corrupt the one measurement this
-      // whole tool exists to produce.
       vscode.window.showWarningMessage(
         `Agency: ${r.targetLabel || id.slice(0, 10)} carries ${decided} decision(s) — `
         + 'discarding it would take the numbers with it. Close the run instead.');
@@ -500,180 +420,19 @@ function activate(context) {
   reg('agency.view.tools.focus', () =>
     vscode.commands.executeCommand('agency.tools.focus'));
 
-  // Hiring is method + runner, asked in that order.
-  //
-  // Two questions rather than one, because they are answered from different
-  // knowledge: which method you want is about the work, which runner you want
-  // is about what is installed on this machine. Hiring the same method a second
-  // time on another provider is the same command with a different second answer.
-  reg('agency.hire.add', async (arg) => {
+  // One specialist, started from its own row in the Specialists view.
+  reg('agency.pack.run', async (arg) => {
     if (!state.snapshot.probe.ok) return showNotReady();
-    const packs = state.snapshot.packs || [];
-    let pack = packNameOf(arg);
-
-    if (!pack) {
-      const pick = await vscode.window.showQuickPick(
-        packs.map((p) => {
-          const mine = state.hiresOf(p.name);
-          return {
-            label: p.title || p.name,
-            description: mine.length
-              ? `already hired: ${mine.map((h) => h.label).join(', ')}` : undefined,
-            detail: p.description,
-            pack: p.name,
-          };
-        }),
-        { title: 'Which method should be hired?', matchOnDetail: true });
-      if (!pick) return;
-      pack = pick.pack;
-    }
-
-    const taken = new Set(state.hiresOf(pack).map((h) => `${h.provider}/${h.model || ''}`));
-    const runners = (state.snapshot.providers || []);
-    const chosen = await vscode.window.showQuickPick(
-      runners.map((p) => ({
-        label: `${p.installed ? '$(rocket)' : '$(warning)'} ${p.title}`,
-        description: p.installed ? p.id : `${p.id} — \`${p.bin}\` is not on PATH`,
-        detail: p.models && p.models.length ? p.models.join(' · ') : undefined,
-        provider: p,
-      })).concat([
-        { label: '', kind: vscode.QuickPickItemKind.Separator },
-        { label: '$(add) Register another runner…', fresh: true },
-      ]),
-      {
-        title: `Hire ${pack} — which runner does the work?`,
-        placeHolder: 'Hiring the same method on a second runner gives you two opinions '
-          + 'on the same code',
-        matchOnDescription: true,
-      });
-    if (!chosen) return;
-    if (chosen.fresh) {
-      await vscode.commands.executeCommand('agency.provider.add');
-      return;
-    }
-
-    // Only offer models the runner declares. An empty list means the runner
-    // never told us any, and guessing a name here would produce a launch flag
-    // that fails on the first run.
-    let model;
-    const models = chosen.provider.models || [];
-    if (models.length) {
-      const pickModel = await vscode.window.showQuickPick(
-        models.map((m) => ({ label: m, model: m, description: taken.has(
-          `${chosen.provider.id}/${m}`) ? 'already hired' : undefined }))
-          .concat([{ label: '$(circle-slash) provider default', model: null }]),
-        { title: `Hire ${pack} on ${chosen.provider.id} — which model?` });
-      if (!pickModel) return;
-      model = pickModel.model || undefined;
-    }
-
-    const res = await cli.hire(state.snapshot.cwd, pack, {
-      provider: chosen.provider.id, model,
-    });
-    if (!res.ok) {
-      vscode.window.showErrorMessage(`Agency: ${res.error}`);
-      return;
-    }
-    const made = res.data && res.data.hire;
-    log.appendLine(`[hire] ${made ? made.id : pack}`);
-    vscode.window.showInformationMessage(
-      made ? `Agency: hired ${made.id}.` : `Agency: ${pack} installed.`);
-    await refresh();
-  });
-
-  // Kept under the old id so existing keybindings and the welcome screens
-  // still work — hiring is what "add a specialist" always meant.
-  reg('agency.pack.add', (arg) =>
-    vscode.commands.executeCommand('agency.hire.add', packNameOf(arg) || undefined));
-
-  reg('agency.hire.remove', async (arg) => {
-    const id = hireIdOf(arg);
-    if (!id) return;
-    const yes = await vscode.window.showWarningMessage(
-      `Dismiss ${id}?`,
-      { modal: true, detail: 'The method, its configuration and every past run stay. '
-        + 'Findings this specialist produced keep counting towards the metrics.' },
-      'Dismiss');
-    if (yes !== 'Dismiss') return;
-    const res = await cli.fire(state.snapshot.cwd, id);
-    if (!res.ok) {
-      vscode.window.showErrorMessage(`Agency: ${res.error}`);
-      return;
-    }
-    log.appendLine(`[hire] fired ${id}`);
-    await refresh();
-  });
-
-  reg('agency.hire.run', async (arg) => {
-    if (!state.snapshot.probe.ok) return showNotReady();
-    const id = hireIdOf(arg);
-    const h = (state.snapshot.hires || []).find((x) => x.id === id);
-    if (!h) return;
-    if (!h.available) {
-      vscode.window.showErrorMessage(
-        `Agency: \`${h.bin}\` is not on PATH — ${h.id} cannot run on this machine.`);
-      return;
-    }
-    // The worker is already decided — this command IS their row. Only the
-    // target is still open, so that is the only thing either branch asks about.
-    const pack = state.packOf(h);
-    const d = (pack && pack.run && pack.run.target === 'workspace')
-      ? await review.runOverWorkspace(state.snapshot.cwd, h, log)
-      : await runOneOverPr(h);
+    const name = packNameOf(arg);
+    const p = (state.snapshot.packs || []).find((x) => x.name === name);
+    if (!p) return;
+    const d = (p.run && p.run.target === 'workspace')
+      ? await review.runOverWorkspace(state.snapshot.cwd, p, log)
+      : await runOneOverPr(p);
     if (d) setTimeout(() => refresh(), 2000);
   });
 
-  // A runner is a property of the machine, so registering one is not a project
-  // change: once `grok` is on PATH and registered, it is hireable everywhere.
-  reg('agency.provider.add', async () => {
-    const id = await vscode.window.showInputBox({
-      title: 'Register a runner',
-      prompt: 'Its id, e.g. grok. Anything with a command-line agent fits: the id is '
-        + 'the name, the command is what actually runs.',
-      placeHolder: 'grok',
-      ignoreFocusOut: true,
-    });
-    if (!id || !id.trim()) return;
-    const bin = await vscode.window.showInputBox({
-      title: `Register ${id.trim()} — the command to run`,
-      value: id.trim(),
-      prompt: 'What you would type in a terminal. It has to be on PATH.',
-      ignoreFocusOut: true,
-    });
-    if (bin === undefined) return;
-    const models = await vscode.window.showInputBox({
-      title: `Register ${id.trim()} — models to offer (optional)`,
-      placeHolder: 'fast, heavy',
-      prompt: 'Comma-separated. They only fill the picker; leave it empty to always '
-        + 'use the runner default.',
-      ignoreFocusOut: true,
-    });
-    if (models === undefined) return;
-    const res = await cli.addProvider(state.snapshot.cwd, id.trim(),
-      { bin: bin.trim() || id.trim(), models: models.trim() || undefined });
-    if (!res.ok) {
-      vscode.window.showErrorMessage(`Agency: ${res.error}`);
-      return;
-    }
-    log.appendLine(`[provider] registered ${id.trim()}`);
-    await refresh();
-    const now = await vscode.window.showInformationMessage(
-      `Agency: ${id.trim()} registered.`, 'Hire a specialist on it');
-    if (now) await vscode.commands.executeCommand('agency.hire.add');
-  });
-
-  reg('agency.pack.openConfig', async (arg) => {
-    const packName = packNameOf(arg);
-    const p = packName && path.join(state.snapshot.cwd, '.agency', `${packName}.json`);
-    if (!p || !fs.existsSync(p)) {
-      vscode.window.showWarningMessage(
-        `There is no ${packName || 'pack'} configuration yet — hire a specialist for it first.`);
-      return;
-    }
-    await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(p));
-  });
-
-  // --- nálezy
+  // --- findings
   reg('agency.finding.open', (arg) => {
     const id = typeof arg === 'string' ? arg : findingIdOf(arg);
     if (id) openFinding(id);
@@ -714,8 +473,8 @@ function activate(context) {
     if (id) diffFinding(id);
   });
 
-  // Programatická cesta pro cokoli uvnitř extension hostu. Agent mimo VS Code
-  // volá `agency triage` — obojí končí ve stejném úložišti.
+  // A programmatic path for anything inside the extension host. An agent
+  // outside VS Code calls `agency triage` — both end up in the same store.
   reg('agency.decision.apply', (p) => {
     if (!p || !p.findingId || !p.action) {
       throw new Error('agency.decision.apply expects { findingId, action, reason?, note? }');
@@ -723,9 +482,9 @@ function activate(context) {
     return decide(p.findingId, p.action, p);
   });
 
-  // --- sledování změn zvenčí. Zápis z terminálu nebo od agenta se musí
-  //     projevit v UI bez reloadu; je to zároveň jediný poctivý důkaz, že
-  //     vlastníkem rozhodnutí není extension.
+  // --- watching for outside changes. A write from the terminal or from an
+  //     agent must show up in the UI without a reload; it is also the most
+  //     honest proof that the extension does not own decisions.
   if (vscode.workspace.getConfiguration('agency').get('autoRefresh') !== false) {
     const watcher = vscode.workspace.createFileSystemWatcher('**/.agency/runs/**');
     let debounce = null;
@@ -756,50 +515,32 @@ function activate(context) {
   });
 }
 
-// ---------------------------------------------------------------- pomocníci
+// ---------------------------------------------------------------- helpers
 
 // A command reached from a tree row is handed the NODE, not a name.
 //
-// Everything under `view/item/context` in package.json goes through these two.
-// Without them the node object reaches the CLI, `execFile` stringifies it, and
-// the run dies on `Unknown pack "[object Object]"` — an error that says nothing
-// about where it came from.
+// Everything under `view/item/context` in package.json goes through these.
+// Without them the node object reaches the CLI, `execFile` stringifies it,
+// and the run dies on `Unknown pack "[object Object]"` — an error that says
+// nothing about where it came from.
 
-/** Id of a hire out of a tree item, a plain string, or the run picker. */
-function hireIdOf(arg) {
-  if (typeof arg === 'string') return arg;
-  const id = arg && arg.item && arg.item.id;         // node id: "hire:<id>"
-  if (id && String(id).startsWith('hire:')) return String(id).slice(5);
-  return null;
-}
-
-/**
- * Name of the pack behind a command argument.
- *
- * A hire row resolves to the method it follows: brief, browser and
- * configuration belong to the method, so acting on them from a worker's row is
- * the same act as from the method's own.
- */
+/** Name of the pack behind a command argument. */
 function packNameOf(arg) {
   if (typeof arg === 'string') return arg;
   const id = arg && arg.item && arg.item.id;
   if (!id) return null;
-  if (String(id).startsWith('pack:')) return String(id).slice(5);
-  if (String(id).startsWith('hire:')) {
-    const h = (state.snapshot.hires || []).find((x) => x.id === String(id).slice(5));
-    return h ? h.pack : null;
-  }
-  return null;
+  return String(id).startsWith('pack:') ? String(id).slice(5) : null;
 }
 
 /**
- * One worker over a pull request, started from the Specialists view.
+ * One specialist over a pull request, started from the Specialists view.
  *
- * It goes through the same picker and the same `runEach` as the button does —
- * a second path that assembled the run itself would be a second place where a
- * model could be chosen, and the run record would then be lying about one of them.
+ * It goes through the same picker and the same `runEach` as the button
+ * does — a second path that assembled the run itself would be a second
+ * place where a model could be chosen, and the run record would then be
+ * lying about one of them.
  */
-async function runOneOverPr(hire) {
+async function runOneOverPr(pack) {
   const prs = await cli.prs(state.snapshot.cwd, { state: 'all', limit: 30 });
   if (!prs.length) {
     vscode.window.showWarningMessage(
@@ -807,19 +548,13 @@ async function runOneOverPr(hire) {
     return null;
   }
   const picked = await vscode.window.showQuickPick(review.items(prs), {
-    title: `${hire.display} — which pull request?`,
+    title: `${pack.title || pack.name} — which pull request?`,
     matchOnDescription: true,
     matchOnDetail: true,
   });
   if (!picked || !picked.pr) return null;
-  return review.runEach(state.snapshot.cwd, [hire],
-    { pr: picked.pr.number, force: picked.pr.reviewed || undefined }, log);
-}
-
-/** Který pack má v konfiguraci prohlížeč. Jméno packu se nikde nehádá. */
-function pickBrowserPack() {
-  const withBrowser = (state.snapshot.packs || []).filter((p) => p.installed && p.playwright);
-  return withBrowser.length ? withBrowser[0].name : null;
+  return review.runEach(state.snapshot.cwd, [pack],
+    { pr: picked.pr.number, force: picked.pr.reviewed || undefined }, null);
 }
 
 /** Id of a run out of a tree item or a plain string. */
@@ -842,7 +577,7 @@ function findingIdOf(arg) {
   return t && t._agency ? t._agency.finding.id : null;
 }
 
-/** Akce z vlákna: id nálezu + text z pole odpovědi, když zrovna dorazil. */
+/** An action from a thread: finding id + the reply box text, when one just arrived. */
 function withFinding(arg, fn) {
   const id = findingIdOf(arg) || (typeof arg === 'string' ? arg : null);
   if (!id) return;

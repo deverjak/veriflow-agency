@@ -2,43 +2,43 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://veriflow.dev/schemas/finding.v1.json",
   "title": "finding.v1",
-  "description": "Jeden nález z běhu packu. Zdrojem pravdy je soubor findings.json v .agency/runs/<run-id>/; agency.db je jen index, který z něj jde kdykoli přestavět.",
+  "description": "One finding from a pack's run. The source of truth is findings.json in .agency/runs/<run-id>/; anything derived from it can be thrown away and rebuilt at any time.",
   "type": "object",
   "additionalProperties": false,
   "required": ["id", "runId", "pack", "severity", "title", "body", "anchor", "evidence", "state"],
   "properties": {
     "id": {
       "type": "string",
-      "description": "ULID. Nikdy autoincrement — jinak vzniknou kolize při slučování dvou historií.",
+      "description": "ULID. Never autoincrement — otherwise merging two histories collides.",
       "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
     },
     "runId": { "type": "string" },
     "pack": {
       "type": "string",
-      "description": "name@version packu, který nález vyrobil",
-      "pattern": "^[a-z0-9-]+@[0-9]+\\.[0-9]+\\.[0-9]+$"
+      "description": "Name of the pack that produced this finding — a skill in .claude/skills/agency-<name>/.",
+      "pattern": "^[a-z][a-z0-9-]*$"
     },
     "dimension": {
       "type": ["string", "null"],
-      "description": "Která dimenze packu nález našla. Umožňuje měřit precision po dimenzích."
+      "description": "Which of the pack's dimensions found this. Lets precision be measured per dimension."
     },
     "severity": { "enum": ["low", "medium", "high", "blocker"] },
     "title": { "type": "string", "minLength": 8, "maxLength": 200 },
     "body": {
       "type": "string",
       "minLength": 20,
-      "description": "Markdown. Tvrzení + konkrétní scénář selhání (vstupy/stav → špatný výstup)."
+      "description": "Markdown. The claim plus a concrete failure scenario (inputs/state → wrong output)."
     },
 
     "anchor": {
       "type": "object",
-      "description": "Čtyřvrstvá kotva. Rozlišuje se shora dolů, zastaví se na první vrstvě, která uspěje. Bez ní nález po pár týdnech ukáže na nevinný kód a nijak to nepozná.",
+      "description": "A four-layer anchor. Resolved top to bottom, stopping at the first layer that succeeds. Without it a finding points at innocent code after a few weeks and has no way to know it.",
       "additionalProperties": false,
       "required": ["file", "line", "commit"],
       "properties": {
         "file": {
           "type": "string",
-          "description": "POSIX cesta relativní ke kořeni projektu. Nikdy absolutní — jinak se run record nedá sdílet ani commitovat.",
+          "description": "POSIX path relative to the project root. Never absolute — otherwise the run record could not be shared or committed.",
           "pattern": "^[^/].*",
           "not": { "pattern": "^[A-Za-z]:|\\\\\\\\" }
         },
@@ -46,16 +46,16 @@
         "endLine": { "type": "integer", "minimum": 1 },
         "commit": {
           "type": "string",
-          "description": "Plných 40 znaků. Zkrácený SHA může později tiše ukázat jinam.",
+          "description": "The full 40 characters. A shortened SHA can later point somewhere else without warning.",
           "pattern": "^[0-9a-f]{40}$"
         },
         "snippet": {
           "type": ["string", "null"],
-          "description": "Vrstva 2. Text bloku line..endLine v den analýzy. Hledá se v něm nejcharakterističtější řádek — jednořádkový snippet selže na '/**' a podobné boilerplatě."
+          "description": "Layer 2. The text of the line..endLine block on the day of the analysis. The most distinctive line in it is what gets searched for — a one-line snippet fails on '/**' and similar boilerplate."
         },
         "symbol": {
           "type": ["object", "null"],
-          "description": "Vrstva 3, ze symbolu v grafu. Přežije refaktor a přesun bloku tam, kde číslo řádku ne.",
+          "description": "Layer 3, from the symbol in the graph. Survives a refactor and a moved block where a line number does not.",
           "additionalProperties": false,
           "required": ["name"],
           "properties": {
@@ -71,14 +71,14 @@
         "body": {
           "type": ["string", "null"],
           "maxLength": 8192,
-          "description": "Vrstva 4. Tělo symbolu v den analýzy. Záchranná síť pro případ, kdy commit v klonu už není — squash-merge se smazanou větví je na GitHubu default."
+          "description": "Layer 4. The symbol's body on the day of the analysis. A safety net for when the commit no longer exists in the clone — a squash-merge with the branch deleted is GitHub's default."
         }
       }
     },
 
     "evidence": {
       "type": "array",
-      "description": "Deterministická brána: nález bez evidence se nestane kandidátem. Není to filtr kvality textu, je to schéma — takový nález prostě nevaliduje.",
+      "description": "The deterministic gate: a finding with no evidence never becomes a candidate. This is not a text-quality filter, it is a schema — such a finding simply does not validate.",
       "minItems": 1,
       "items": {
         "type": "object",
@@ -87,12 +87,12 @@
         "properties": {
           "kind": {
             "enum": ["graph", "rule", "test-gap", "diff", "runtime", "doc"],
-            "description": "graph = fakt z grafového driveru (`agency graph`), rule = pravidlo z projektové dokumentace, test-gap = chybějící pokrytí, diff = obsah změny, runtime = pozorované chování, doc = rozpor s dokumentací"
+            "description": "graph = a fact from the code-graph driver (`agency graph`), rule = a rule from the project's own documentation, test-gap = missing coverage, diff = content of the change, runtime = observed behaviour, doc = contradicts the documentation"
           },
           "detail": { "type": "string", "minLength": 3 },
           "source": {
             "type": ["string", "null"],
-            "description": "Odkud to pochází — např. 'agency graph impact --depth 2' nebo 'CLAUDE.md#rules-that-will-bite-you'"
+            "description": "Where this came from — e.g. 'agency graph impact --depth 2' or 'CLAUDE.md#rules-that-will-bite-you'"
           }
         }
       }
@@ -102,20 +102,20 @@
       "type": ["integer", "null"],
       "minimum": 0,
       "maximum": 100,
-      "description": "Jistota po FP filtru. Pod prahem projektu se nález nezveřejňuje, ale v run recordu zůstává."
+      "description": "Confidence after the false-positive filter. Below the project's threshold a finding is not published, but it stays in the run record."
     },
     "fingerprint": {
       "type": "string",
-      "description": "Deterministický otisk pro dedup napříč běhy. Počítá se ze symbolu a normalizovaného tvrzení, NE z čísla řádku ani z titulku — titulek přežije korekci diagnózy, obsah ne."
+      "description": "Deterministic fingerprint for dedup across runs. Computed from the symbol and the normalized claim, NOT from the line number or the title — a title survives a corrected diagnosis, the content does not."
     },
     "state": {
       "enum": ["candidate", "duplicate", "accepted", "published"],
-      "description": "Čtyři stavy, ne sedm. Rozhodnutí člověka/agenta žije zvlášť v decisions.jsonl, tohle je stav nálezu v pipeline."
+      "description": "Four states, not seven. A human's or an agent's decision lives separately, in decisions.jsonl — this is the finding's state in the pipeline."
     },
     "duplicateOf": { "type": ["string", "null"] },
     "sinks": {
       "type": "object",
-      "description": "Kam se nález propsal. Odvozené cíle, ne pravda — když sink selže, nález se neztratí.",
+      "description": "Where the finding propagated to. Derived destinations, not the source of truth — when a sink fails, the finding is not lost.",
       "additionalProperties": false,
       "properties": {
         "prComment": { "type": ["string", "null"] },

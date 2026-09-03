@@ -1,94 +1,24 @@
 {
   "name": "review-graph",
-  "version": "0.1.0",
   "title": "Reviewer",
   "description": "Walks a pull request — open or merged — cross-checks the changes against the real structure of the code from code-review-graph (blast radius, missing tests, dead code) and backs every finding with evidence.",
-  "requires": {
-    "tools": [
-      "git",
-      "gh",
-      "code-review-graph"
-    ],
-    "provider": [
-      "claude",
-      "codex"
-    ]
-  },
-  "run": {
-    "target": "pull-request",
-    "worktree": true,
-    "graph": {
-      "required": [
-        "changes",
-        "impact"
-      ],
-      "optional": [
-        "unreferenced",
-        "tests-for"
-      ]
-    },
-    "prompt": {
-      "accepts": true,
-      "required": false,
-      "label": "Anything this review should focus on?",
-      "placeholder": "e.g. only the changes in the payment module"
-    },
-    "needs": [
-      "agency triage",
-      "agency note",
-      "agency findings",
-      "code-review-graph",
-      "git",
-      "gh pr view",
-      "gh pr diff",
-      "gh pr comment",
-      "gh issue view",
-      "npx vitest",
-      "npm test"
-    ]
-  },
-  "installs": [
-    {
-      "from": "skill/SKILL.md",
-      "to": ".claude/skills/agency-review-graph/SKILL.md"
-    }
+  "requires": ["git", "gh", "code-review-graph"],
+  "target": "pull-request",
+  "worktree": true,
+  "graph": { "required": ["changes", "impact"], "optional": [] },
+  "prompt": "optional",
+  "needs": [
+    "agency triage", "agency note", "agency findings",
+    "code-review-graph", "git",
+    "gh pr view", "gh pr diff", "gh pr comment", "gh issue view",
+    "npx vitest", "npm test"
   ],
-  "config": {
-    "file": ".agency/review-graph.json",
-    "template": "config.template.json",
-    "required": [
-      "repo.slug"
-    ]
-  },
-  "outputs": {
-    "findings": "finding.v1",
-    "run": "run.v1"
-  },
+  "minScore": 80,
   "dimensions": [
-    {
-      "id": "correctness",
-      "title": "Correctness and blast radius",
-      "projectSpecific": false
-    },
-    {
-      "id": "tests",
-      "title": "Test coverage",
-      "projectSpecific": false
-    },
-    {
-      "id": "reuse",
-      "title": "Reuse and dead code",
-      "projectSpecific": false
-    },
-    {
-      "id": "errors",
-      "title": "Error handling",
-      "projectSpecific": false
-    },
-    {
-      "id": "repo-rules",
-      "title": "Adherence to project rules",
-      "projectSpecific": true
-    }
+    { "id": "correctness", "title": "Correctness and blast radius" },
+    { "id": "tests", "title": "Test coverage" },
+    { "id": "reuse", "title": "Reuse and dead code" },
+    { "id": "errors", "title": "Error handling" },
+    { "id": "repo-rules", "title": "Adherence to project rules" }
   ]
 }

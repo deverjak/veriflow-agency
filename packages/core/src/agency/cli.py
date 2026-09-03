@@ -1,23 +1,21 @@
-"""`agency` — příkazová řádka.
+"""`agency` — the command line.
 
-Každý příkaz umí `--json`, protože jeho druhým uživatelem je VS Code extension
-a třetím agent. Kdyby výstup uměl jen člověk, byli by ti dva druhořadí.
+Every command understands `--json`, because its second user is the VS Code
+extension and its third is an agent. If only a human could read the output,
+those two would be second-class.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from pathlib import Path
 
-from . import (anchor, backlog, chain as chains, config, dedup, export, graph,
-               hires, ingest, knowledge, metrics, packs, proc, providers,
-               registry, runs)
-from .util import bundled, out, posix, read_json, strip_comments, ulid, write_json
+from . import anchor, chain as chains, config, export, graph, ingest, knowledge, metrics, packs, proc, providers, runs
+from .util import bundled, out, posix, read_json, ulid
 
-# ---------------------------------------------------------------- pomůcky
+# ---------------------------------------------------------------- helpers
 
 
 def _emit(args, data, human) -> int:
@@ -29,310 +27,31 @@ def _emit(args, data, human) -> int:
 
 
 def _project(args) -> config.Project:
-    project = config.require(getattr(args, "repo", None))
-    # Registr je ukazatel, ne uloziste — plni se tim, ze v projektu neco delas.
-    # Podminka na .agency drzi z registru projekty, kde jsi jen omylem spustil
-    # `agency status`; ukazatel na nic je horsi nez chybejici ukazatel.
-    if project.agency_dir.is_dir():
-        try:
-            registry.remember(project)
-        except OSError:
-            pass  # registr je postradatelny, prace kvuli nemu nespadne
-    return project
-
-
-def _pack_cfg(project: config.Project, pack_name: str, asked: str | None = None) -> dict:
-    """Configuration of the pack a run is about to use.
-
-    The name the user typed may have been a hire id, so the error has to answer
-    both readings of "not found here" — nobody hired under that name, and no
-    method installed under it either.
-    """
-    cfg = project.pack_config(pack_name)
-    if cfg is not None:
-        return cfg
-
-    known = ", ".join(h.id for h in hires.load(project))
-    installed = ", ".join(project.installed().get("packs") or {})
-    lines = [f"Nothing here is called “{asked or pack_name}”."]
-    if known:
-        lines.append(f"Hired: {known}")
-    if installed:
-        lines.append(f"Methods installed: {installed}")
-    lines.append(f"Hire one: `agency hire {pack_name}`")
-    raise SystemExit("\n".join(lines))
-
-
-# ---------------------------------------------------------------- init
-
-def cmd_init(args) -> int:
-    project = _project(args)
-    facts = config.detect(project)
-    facts["root"] = posix(project.root)
-
-    def human():
-        print(f"\n{out.bold(project.name)}  {out.dim(posix(project.root))}\n")
-        rows = [
-            ("git remote", facts["slug"] or out.warn("missing — the pack will need repo.slug set by hand")),
-            ("default branch", facts["defaultBranch"] or out.warn("not detected")),
-            ("code graph", out.ok("built") if facts["hasGraph"]
-             else out.warn("missing — the first run builds it (`code-review-graph build`)")),
-            ("CI command", facts["verifyCommand"] or out.dim("none — findings that CI catches will not be dropped")),
-            ("project rules", facts["rules"] or out.dim("not found — 4 of 5 dimensions will run")),
-            ("doc map", facts["docMap"] or out.dim("not found")),
-            ("existing skills", ", ".join(facts["existingSkills"]) or out.dim("none")),
-            ("playwright", f"{pw['configFile'] or 'no config'} · {pw['specs']} "
-                           f"spec{'' if pw['specs'] == 1 else 's'} in {pw['testDir'] or '?'}"
-             if (pw := facts["playwright"])["present"]
-             else out.dim("none — QA can set one up inside the run directory")),
-        ]
-        for k, v in rows:
-            print(f"  {k:20} {v}")
-        print(f"\n  Next: {out.bold('agency add review-graph')}\n")
-
-    return _emit(args, facts, human)
+    return config.require(getattr(args, "repo", None))
 
 
 # ---------------------------------------------------------------- packs
 
 def cmd_packs(args) -> int:
-    project = config.discover(getattr(args, "repo", None))
-    roster = hires.describe(project, _packs_by_name()) if project else []
+    project = _project(args)
     data = []
-    for p in packs.available():
-        entry = {"name": p.name, "version": p.version, "title": p.manifest.get("title"),
-                 "description": p.manifest.get("description"),
-                 # Dimenze a predpoklady jsou soucast odpovedi na „co ten
-                 # specialista umi" — klient je jinak nema odkud vzit a musel by
-                 # cist pack.json sam, cimz by obesel hranici.
-                 "dimensions": p.manifest.get("dimensions") or [],
-                 "requires": p.manifest.get("requires") or {},
-                 # Behova politika patri do odpovedi „co ten specialista umi":
-                 # bez ni by klient nevedel, jestli se ma ptat na pull request,
-                 # nebo na zadani — a musel by jmena packu znat napevno.
-                 "run": p.run_policy,
-                 "installed": packs.installed_ref(project, p.name) if project else None}
-        # Who works by this method here. A pack can have several workers, so
-        # "which provider handles it" is no longer one field on the pack — the
-        # client renders one row per hire and must get them from the core.
-        entry["hires"] = [h for h in roster if h["pack"] == p.name]
-        cfg = project.pack_config(p.name) if project else None
-        if cfg:
-            a = cfg.get("agent") or {}
-            entry["agent"] = {"provider": a.get("provider"), "model": a.get("model")}
-            entry["configPath"] = posix(project.pack_config_path(p.name))
-            pw = cfg.get("playwright")
-            if isinstance(pw, dict):
-                entry["playwright"] = {
-                    "enabled": bool(pw.get("enabled")),
-                    "configFile": pw.get("configFile"),
-                    "specTarget": pw.get("specTarget"),
-                    "scaffold": pw.get("scaffold"),
-                }
-            board = cfg.get("board")
-            if isinstance(board, dict):
-                # The panel needs it for the same reason it needs `playwright`:
-                # a specialist that writes outside the repository has to say so
-                # on its own row, not in a configuration file nobody opens.
-                w = cfg.get("writes") or {}
-                entry["backlog"] = {
-                    "repo": (cfg.get("repo") or {}).get("slug"),
-                    "projectNumber": board.get("projectNumber"),
-                    "roadmap": (cfg.get("roadmap") or {}).get("file"),
-                    "cycle": (cfg.get("roadmap") or {}).get("cycle"),
-                    "writes": [k for k, v in w.items() if v is True and k != "dryRun"],
-                    "dryRun": bool(w.get("dryRun")),
-                }
-            b = cfg.get("brief") or {}
-            entry["brief"] = {
-                "standing": b.get("default"),
-                "scenarios": [{"name": k, "text": v} for k, v in
-                              sorted((b.get("scenarios") or {}).items())],
-            }
-        data.append(entry)
+    for p in packs.available(project):
+        data.append({
+            "name": p.name, "title": p.title,
+            "description": p.manifest.get("description"),
+            "skill": p.skill_name,
+            "dimensions": p.dimensions,
+            "requires": p.requires,
+            "run": p.run_policy,
+            "minScore": p.min_score,
+        })
 
     def human():
         print()
         for e in data:
-            mark = out.ok("installed " + e["installed"]) if e["installed"] else out.dim("not installed")
-            print(f"  {out.bold(e['name']):28} {e['version']:8} {mark}")
+            print(f"  {out.bold(e['name']):28} {out.dim(e['skill'])}")
             print(f"  {'':28} {out.dim(e['description'] or '')}")
-            for h in e["hires"]:
-                dot = out.ok("●") if h["available"] else out.err("●")
-                print(f"  {'':26} {dot} {h['id']:30} {out.dim(h['label'])}")
         print()
-
-    return _emit(args, data, human)
-
-
-def cmd_add(args) -> int:
-    """Install a pack and put one worker on it.
-
-    Two things that used to be one. Installing brings the METHOD into the
-    project; hiring says who will work by it. They stayed one command as long
-    as a pack could have exactly one worker — the roster is what separated
-    them, and `agency add` keeps doing both so nothing that worked before has
-    to change.
-    """
-    project = _project(args)
-    pack = packs.load(args.pack, args.from_path)
-    steps = packs.plan(pack, project)
-    blocked = [s for s in steps if s["action"] == "blocked"]
-
-    provider = getattr(args, "provider", None)
-    model = getattr(args, "model", None)
-    hire = None
-
-    if not args.dry_run and not blocked:
-        packs.apply(pack, project, steps, detected=config.detect(project))
-        registry.remember(project)  # .agency vzniklo az ted
-
-        cfg = project.pack_config(pack.name) or {}
-        if provider or model or getattr(args, "as_id", None):
-            # An explicit provider means "another worker", even when the pack
-            # already has one — that is the whole point of `agency hire`.
-            agent = cfg.get("agent") or {}
-            chosen = provider or agent.get("provider") or "claude"
-            # A model is only inherited from the configuration when it was
-            # written for this provider. Handing codex a claude model name
-            # would be a launch flag that fails on the first run.
-            chosen_model = model or (agent.get("model") if chosen == (
-                agent.get("provider") or "claude") else None)
-            hire = hires.add(project, pack.name, provider=chosen, model=chosen_model,
-                             hire_id=getattr(args, "as_id", None),
-                             title=getattr(args, "title", None))
-        else:
-            hire = hires.ensure_default(project, pack.name, cfg)
-
-    data = {"pack": pack.ref, "dryRun": args.dry_run,
-            "hire": hire.as_dict() if hire else None,
-            "steps": [{k: v for k, v in s.items() if k != "src"} for s in steps]}
-
-    def human():
-        print(f"\n  {out.bold(pack.ref)} → {project.name}\n")
-        icon = {"create": out.ok("+"), "update": out.ok("~"), "keep": out.dim("="),
-                "blocked": out.err("!")}
-        for s in steps:
-            print(f"  {icon[s['action']]} {s['to']:52} {out.dim(s['why'])}")
-        if blocked:
-            print(f"\n  {out.err('Installation stopped.')} The files above were modified by hand.")
-            print(out.dim("  Editing a pack by hand usually means a field is missing from the"))
-            print(out.dim("  configuration — add it to .agency/, not to the method. Overwrite anyway: --force."))
-        elif args.dry_run:
-            print(f"\n  {out.dim('Dry run, nothing was written.')}")
-        else:
-            if hire:
-                where = providers.installed(hire.provider)
-                mark = out.ok("hired") if where else out.warn("hired, but not on PATH")
-                print(f"\n  {mark} {out.bold(hire.id)}  "
-                      f"{out.dim(hire.provider + (' · ' + hire.model if hire.model else ''))}")
-                print(f"  {out.dim('Run it:')} agency run {hire.id}")
-                print(f"  {out.dim('Another provider:')} "
-                      f"agency hire {pack.name} --provider <name>")
-            else:
-                # Nobody new was hired, and silence here reads like a failure.
-                # Re-running the command is how you refresh the method, so say
-                # who is already doing the work instead of saying nothing.
-                existing = hires.for_pack(project, pack.name)
-                print(f"\n  {out.dim('Already hired:')} "
-                      f"{', '.join(f'{h.id} ({h.label})' for h in existing)}")
-                print(f"  {out.dim('Add another:')} "
-                      f"agency hire {pack.name} --provider <name>")
-            print(f"\n  Next: {out.bold('agency doctor')}")
-        print()
-
-    _emit(args, data, human)
-    return 1 if blocked and not args.force else 0
-
-
-# ---------------------------------------------------------------- roster
-
-def _packs_by_name() -> dict:
-    return {p.name: p for p in packs.available()}
-
-
-def cmd_roster(args) -> int:
-    """Who is hired here. One row per worker, not per method.
-
-    The list is the answer to “can I run two providers on this?” — if a
-    provider is missing from PATH, it says so here rather than at launch.
-    """
-    project = _project(args)
-    data = hires.describe(project, _packs_by_name())
-
-    def human():
-        print(f"\n  {out.bold(project.name)}  {out.dim(posix(project.root))}\n")
-        if not data:
-            print(f"  {out.dim('Nobody hired yet.')}  agency hire review-graph\n")
-            return
-        for h in data:
-            mark = out.ok("●") if h["available"] else out.err("●")
-            model = h["model"] or out.dim("provider default")
-            print(f"  {mark} {out.bold(h['id']):34} {h['display'][:30]:32} "
-                  f"{h['provider']:10} {model}")
-            if not h["available"]:
-                print("    " + out.dim(
-                    f"`{h['bin']}` is not on PATH — this one cannot run here"))
-            if not h["packInstalled"]:
-                print("    " + out.dim(
-                    f"pack {h['pack']} is not installed — `agency add {h['pack']}`"))
-        print(f"\n  {out.dim('Run one:')} agency run <id>   "
-              f"{out.dim('Add one:')} agency hire <pack> --provider <name>\n")
-
-    return _emit(args, data, human)
-
-
-def cmd_fire(args) -> int:
-    """Remove a roster entry. The pack, its configuration and every past run
-    stay — firing a worker is not deleting their work."""
-    project = _project(args)
-    gone = hires.remove(project, args.hire)
-    if not gone:
-        known = ", ".join(h.id for h in hires.roster(project)) or "(nobody)"
-        raise SystemExit(f"There is no hire “{args.hire}” here. Hired: {known}")
-
-    data = {"fired": gone.as_dict(), "remaining": [h.as_dict() for h in hires.load(project)]}
-
-    def human():
-        print(f"\n  {out.ok('fired')} {out.bold(gone.id)}\n")
-        print(out.dim("  The pack, its configuration and every past run stay where they were."))
-        print(out.dim("  Findings this hire produced keep counting towards the metrics.\n"))
-
-    return _emit(args, data, human)
-
-
-def cmd_providers(args) -> int:
-    """What AI runners this machine has.
-
-    A property of the machine, not of the project — which is why adding one is
-    a command and not a commit. Once `grok` is on PATH, one `providers add`
-    makes it hireable for every pack in every project.
-    """
-    if args.remove:
-        if not providers.forget(args.remove):
-            raise SystemExit(
-                f"“{args.remove}” is not registered. Built-in providers cannot be removed.")
-    elif args.add:
-        providers.register(
-            args.add, bin=args.bin, title=args.title, modelFlag=args.model_flag,
-            dirFlag=args.dir_flag, promptFlag=args.prompt_flag,
-            defaultModel=args.default_model,
-            models=[m.strip() for m in args.models.split(",") if m.strip()]
-            if args.models else None)
-
-    data = providers.detected()
-
-    def human():
-        print()
-        for p in data:
-            mark = out.ok("●") if p["installed"] else out.dim("○")
-            tag = out.dim("built in") if p["builtin"] else out.dim("added by you")
-            print(f"  {mark} {out.bold(p['id']):14} {p['title'][:24]:26} {tag}")
-            print("    " + out.dim(p["path"] or f"`{p['bin']}` is not on PATH"))
-            if p["models"]:
-                print(f"    {out.dim('models: ' + ', '.join(p['models']))}")
-        print(f"\n  {out.dim('Add one:')} agency providers --add grok --bin grok")
-        print(f"  {out.dim('Hire it:')} agency hire review-graph --provider grok\n")
 
     return _emit(args, data, human)
 
@@ -344,7 +63,7 @@ def _run_hint(pack) -> str:
     policy = pack.run_policy
     if policy["target"] == "pull-request":
         return " --pr <n>"
-    return ' --prompt "…"' if policy["prompt"].get("required") else ""
+    return ' --prompt "…"' if policy["prompt"] == "required" else ""
 
 
 def cmd_doctor(args) -> int:
@@ -354,15 +73,10 @@ def cmd_doctor(args) -> int:
     def check(name, ok, detail, fatal=True):
         checks.append({"name": name, "ok": bool(ok), "detail": detail, "fatal": fatal})
 
-    # Nástroj je předpoklad jen tehdy, když ho někdo najatý opravdu chce.
-    # Projekt, který si najal jen QA, nemá svítit červeně kvůli grafu, který
-    # nepoužije — a naopak: dokud není najatý nikdo, platí přísnější výchozí stav.
-    hired = [p for p in packs.available() if packs.installed_ref(project, p.name)]
+    hired = packs.available(project)
     wanted: set[str] = set()
-    required_config: set[str] = set()
     for p in hired:
-        wanted |= set((p.manifest.get("requires") or {}).get("tools") or [])
-        required_config |= set((p.manifest.get("config") or {}).get("required") or [])
+        wanted |= set(p.requires)
 
     def needed(tool: str) -> bool:
         return not hired or tool in wanted
@@ -373,39 +87,25 @@ def cmd_doctor(args) -> int:
         elif needed(tool):
             check(name, False, missing)
         else:
-            check(name, True, "not needed by the specialists hired here", fatal=False)
+            check(name, True, "not needed by the specialists in this project", fatal=False)
 
     check("git", proc.which("git"), proc.which("git") or "not on PATH")
 
-    # One check per hired worker, not one per provider. The roster is shared
-    # through the repository but the binaries are not: a colleague who clones
-    # this project has to be told which of its specialists cannot run here,
-    # and a missing binary is the one prerequisite that only shows up at launch.
-    crew = hires.roster(project)
-    for h in crew:
-        where = providers.installed(h.provider)
-        spec = providers.spec(h.provider)
-        check(f"hire {h.id}", where,
-              f"{where} · {h.label}" if where
-              else f"`{spec.get('bin') or h.provider}` is not on PATH — install it, "
-                   f"or `agency fire {h.id}`",
-              # Not fatal: one unavailable specialist must not make the whole
-              # project look broken when the others can work.
-              fatal=False)
-    if crew and not any(providers.installed(h.provider) for h in crew):
-        check("agent", False,
-              "none of the hired specialists has its runner on PATH — nothing can run here")
+    # Every hired pack can be launched on either provider (`--provider`), so
+    # both are worth showing — but only `claude` is fatal, since it is the
+    # default a bare `agency run` falls back to.
+    for i, name in enumerate(("claude", "codex")):
+        where = providers.installed(name)
+        check(f"provider {name}", where, where or "not on PATH", fatal=(i == 0 and bool(hired)))
 
     tool_check("code-review-graph", "code-review-graph", proc.crg_version(),
                "not on PATH — `uv tool install code-review-graph`")
     login = proc.gh_login()
     tool_check("gh auth", "gh", f"signed in as {login}" if login else None,
                "not signed in — `gh auth login`")
-    slug_needed = not hired or "repo.slug" in required_config
-    check("repo slug", project.slug or not slug_needed,
-          project.slug or ("origin remote missing" if slug_needed
-                           else "no remote — the hired specialists do not need one"),
-          fatal=slug_needed)
+    check("repo slug", project.slug or not hired,
+          project.slug or "no remote — the specialists in this project do not need one",
+          fatal=bool(hired))
 
     if needed("code-review-graph"):
         g = graph.state(project.root).data
@@ -413,71 +113,23 @@ def cmd_doctor(args) -> int:
               f"{g.get('sizeBytes', 0) // 1_000_000} MB"
               + (f" · {g['nodes']} nodes, {g['files']} files"
                  if g.get("nodes") is not None else "")
-              # Index z jiné hlavičky umí nález opřít o kód, který na téhle
-              # větvi neexistuje — a pozná se to jen porovnáním commitů.
               + ("  built on another commit — `code-review-graph update`"
                  if g.get("stale") else "")
               if g["exists"]
               else "missing — build it with `code-review-graph build`", fatal=False)
 
-    # Projektová pravidla jako koncepty. Rozbité pravidlo je horší než žádné:
-    # dimenze by běžela s tichou dírou v zadání a nikdo by nevěděl proč.
-    rules = knowledge.rules_summary(project)
-    if rules["total"] or rules["broken"]:
-        detail = f"{rules['total']} concepts"
-        for label, count in (("expired", rules["expired"]),
-                             ("deprecated", rules["deprecated"])):
-            if count:
-                detail += f" · {count} {label}"
-        for bad in rules["broken"]:
-            detail += f"\n{' ' * 29}{bad['path']}: {bad['error']}"
-        check("project rules", not rules["broken"], detail, fatal=False)
-
-    # Kurátorovaná znalost packů. Stránka bez hlavičky se čte dál — jen neví,
-    # jestli ještě platí, a to je informace pro člověka, ne důvod k selhání.
     pg = knowledge.pages_summary(project)
-    if pg["total"] or pg["broken"]:
+    if pg["total"]:
         detail = " · ".join(f"{pack} {n}" for pack, n in pg["byPack"].items())
-        for label, count in (("expired", pg["expired"]),
-                             ("deprecated", pg["deprecated"]),
-                             ("without frontmatter", pg["plain"])):
-            if count:
-                detail += f" · {count} {label}"
-        for bad in pg["broken"]:
-            detail += f"\n{' ' * 29}{bad['path']}: {bad['error']}"
-        check("pack pages", not pg["broken"], detail, fatal=False)
+        if pg["stale"]:
+            detail += f" · {pg['stale']} stale"
+        check("pack pages", True, detail, fatal=False)
 
-    # Pack nainstalovaný verzí, která roster ještě nezapisovala. Dřív si takový
-    # pack vyrobil „odvozeného" pracovníka a tvářil se, že je všechno v pořádku —
-    # jenže ten pracovník nešel propustit a po propuštění posledního skutečného
-    # se vracel sám. Teď se to řekne nahlas, protože spravit to jde jedním
-    # příkazem.
-    orphaned = [n for n in sorted((project.installed().get("packs") or {}))
-                if not hires.for_pack(project, n)]
-    if orphaned:
-        check("roster", False,
-              f"{', '.join(orphaned)} installed with nobody hired — "
-              f"`agency hire {orphaned[0]}` writes the worker down. Runs still work: "
-              f"they fall back to the pack configuration.", fatal=False)
-
-    for p in packs.available():
-        ref = packs.installed_ref(project, p.name)
-        if not ref:
-            continue
-        cfg = project.pack_config(p.name) or {}
-        missing = [k for k in (p.manifest.get("config", {}).get("required") or [])
-                   if not _dig(cfg, k)]
-        check(f"pack {p.name}", not missing,
-              f"{ref}, configuration complete" if not missing
-              else f"missing required: {', '.join(missing)}")
-        if ref != p.ref:
-            check(f"pack {p.name} version", False,
-                  f"installed {ref}, available {p.ref} — `agency add {p.name}`", fatal=False)
-
-        # Co pack od grafu chce vs. co driver umí. Ptá se to dopředu, protože
-        # chybějící schopnost není chyba — je to dimenze, která poběží bez
-        # grafového signálu. Tiché selhání uprostřed běhu je horší než tahle
-        # věta na začátku.
+    for p in hired:
+        # What a pack wants from the graph vs what the driver can answer. Asked
+        # up front, because a missing capability is not a bug — it is a
+        # dimension that runs without the graph signal, and a silent gap
+        # mid-run is worse than this sentence at the start.
         gp = p.run_policy["graph"]
         if gp:
             caps = set(graph.capabilities())
@@ -492,60 +144,6 @@ def cmd_doctor(args) -> int:
                       f"{graph.DRIVER}, without {', '.join(lacks_optional)} — "
                       f"those dimensions run without the graph signal", fatal=False)
 
-        # Pack, který zkouší běžící aplikaci, se má ptát dřív, než začne běh.
-        # Nedostupná aplikace je nejlevnější způsob, jak přijít o celé sezení.
-        base = (cfg.get("app") or {}).get("baseUrl")
-        if base:
-            ready = (cfg.get("app") or {}).get("readyCheck") or ""
-            ok, detail = proc.reachable(base.rstrip("/") + (ready if ready.startswith("/") else ""))
-            check(f"pack {p.name} app", ok, detail, fatal=False)
-
-        if (cfg.get("playwright") or {}).get("enabled"):
-            for name, ok, detail, is_fatal in _playwright_checks(project, cfg["playwright"]):
-                check(f"pack {p.name} {name}", ok, detail, fatal=is_fatal)
-
-        # Cesty, na které konfigurace ukazuje. Vyžadované pole může být
-        # vyplněné a přesto ukazovat na soubor, který v projektu není — a to
-        # se pozná až uprostřed běhu, kdy už agent přemýšlí nad prázdnem.
-        for dotted in ((p.manifest.get("config") or {}).get("files") or []):
-            rel = _dig(cfg, dotted)
-            if not rel:
-                continue  # už to hlásí kontrola „missing required"
-            here = (project.root / str(rel)).is_file()
-            check(f"pack {p.name} {dotted}", here,
-                  str(rel) if here else
-                  f"{rel} is not in the project — point `{dotted}` at a file that is")
-
-        # Pack, který píše na cizí plochu, potřebuje na to oprávnění. Chybějící
-        # scope se projeví až prvním zápisem — tedy potom, co agent hodinu
-        # přemýšlel, co napsat.
-        if (cfg.get("board") or {}).get("projectNumber"):
-            scopes = proc.gh_scopes()
-            can = "project" in scopes
-            detail = (f"board #{cfg['board']['projectNumber']} · scopes: "
-                      + (", ".join(scopes) or "unknown")) if can else (
-                "the gh token has no `project` scope — `gh auth refresh -s project`")
-            check(f"pack {p.name} board", can, detail)
-
-        # Co ten pack smí udělat ven. Není to porucha, je to věc, kterou má
-        # člověk vidět dřív, než ho překvapí ticket v cizí schránce.
-        writes = cfg.get("writes")
-        if isinstance(writes, dict):
-            on = [k for k, v in writes.items() if v is True and k != "dryRun"]
-            check(f"pack {p.name} writes",
-                  True,
-                  ("rehearsal only — writes.dryRun is on" if writes.get("dryRun")
-                   else ("may " + ", ".join(on) if on else "reads only")),
-                  fatal=False)
-
-        # Zadání je u packu, který ho vyžaduje, taky předpoklad — jen se nedá
-        # nainstalovat, musí ho napsat člověk.
-        if p.run_policy["prompt"]["required"]:
-            standing = ((cfg.get("brief") or {}).get("default") or "").strip()
-            check(f"pack {p.name} brief", True,
-                  standing[:60] if standing
-                  else "no standing brief — every run will need --prompt", fatal=False)
-
     fatal = [c for c in checks if not c["ok"] and c["fatal"]]
 
     def human():
@@ -557,9 +155,6 @@ def cmd_doctor(args) -> int:
         if fatal:
             print(f"  {out.err('A run would fail.')} Fix the items marked ✗.\n")
         else:
-            # Build the hint from what is actually installed. A hardcoded pair
-            # of packs leaves the third specialist invisible right after
-            # doctor — which is exactly when the user is looking for it.
             hints = [f"agency run {p.name}{_run_hint(p)}" for p in hired] or ["agency packs"]
             print(f"  {out.ok('Ready.')}  " +
                   f"  {out.dim('·')}  ".join(out.dim(h) for h in hints) + "\n")
@@ -568,65 +163,12 @@ def cmd_doctor(args) -> int:
     return 1 if fatal else 0
 
 
-def _playwright_checks(project: config.Project, pw: dict) -> list[tuple]:
-    """Co musí platit, aby sezení dojelo prohlížečem.
-
-    Selhání Playwrightu přijde uprostřed sezení, po přihlášení a po deseti
-    krocích průchodu — a celé sezení tím padá. Zeptat se dopředu stojí
-    milisekundy.
-    """
-    rows: list[tuple] = []
-
-    npx = proc.which("npx") or proc.which("npx.cmd")
-    rows.append(("node", bool(npx),
-                 npx or "npx is not on PATH — Playwright is started through it", True))
-
-    local = (project.root / "node_modules" / "@playwright" / "test").is_dir()
-    scaffold = pw.get("scaffold") or "run-dir"
-    if local:
-        ok, detail, fatal = True, "@playwright/test is installed in the project", False
-    elif pw.get("configFile"):
-        # Konfigurace projektu se opírá o jeho fixtures, a ty bez node_modules
-        # nejsou. Náhradní konfigurace v běhovém adresáři to nezachrání —
-        # zachrání to `npm install`, tak to řekni rovnou.
-        ok, detail, fatal = (False,
-                             f"{pw['configFile']} is here, but @playwright/test is not "
-                             f"installed — `npm install`", False)
-    elif scaffold == "run-dir":
-        ok, detail, fatal = (True,
-                             "the project has no Playwright; the session sets one up inside "
-                             "the run directory", False)
-    else:
-        ok, detail, fatal = (False,
-                             "the project has no Playwright and scaffolding is off — turn it "
-                             "on or install Playwright", True)
-    rows.append(("playwright", ok, detail, fatal))
-
-    cache = proc.browser_cache()
-    rows.append(("browsers", bool(cache),
-                 cache or "not downloaded — `npx playwright install "
-                          + " ".join(pw.get("browsers") or ["chromium"]) + "`", False))
-    return rows
-
-
-def _dig(d: dict, dotted: str):
-    cur = d
-    for part in dotted.split("."):
-        if not isinstance(cur, dict):
-            return None
-        cur = cur.get(part)
-    return cur
-
-
 # ---------------------------------------------------------------- prs
 
 def cmd_prs(args) -> int:
-    """Seznam PR k recenzi.
-
-    Existuje kvůli extension: výběr PR má být klikací, ne opisování čísla.
-    Mergnuté jsou v seznamu záměrně — retrospektivní audit je plnohodnotný
-    režim, ne výjimka.
-    """
+    """The list of PRs to review. Exists for the extension: picking a PR
+    should be a click, not copying a number. Merged ones are in the list on
+    purpose — a retrospective audit is a full mode, not an exception."""
     project = _project(args)
     rows = []
     seen: set[int] = set()
@@ -664,7 +206,7 @@ def cmd_prs(args) -> int:
 
 
 def _reviewed(project: config.Project, head: str | None) -> bool:
-    """Byl tenhle přesný commit už recenzovaný? Klíč je (repo, PR, headRefOid)."""
+    """Was this exact commit already reviewed? The key is (repo, PR, headRefOid)."""
     if not head:
         return False
     for run in runs.load_runs(project):
@@ -676,16 +218,14 @@ def _reviewed(project: config.Project, head: str | None) -> bool:
 # ---------------------------------------------------------------- run
 
 def _one_line(text: str, limit: int = 400) -> str:
-    """Zadání do spouštěcího příkazu. Víceřádkový text by terminál rozsekal."""
+    """A prompt going into the launch command. A multi-line one would be cut
+    up by the terminal."""
     flat = " ".join((text or "").split())
     return flat if len(flat) <= limit else flat[:limit].rstrip() + "…"
 
 
 def cmd_run(args, chain: dict | None = None) -> int:
     if getattr(args, "wait", False) and getattr(args, "json", False):
-        # Agent píše do téhož stdout jako tenhle proces. Slíbit u toho, že na
-        # výstupu bude jeden JSON dokument, nejde — a kontrakt, který se dá
-        # rozbít cizím výpisem, je horší než chybějící kombinace přepínačů.
         raise SystemExit(
             "--wait and --json do not go together: the agent writes to this same "
             "stdout, so nothing could promise the output is a single JSON document. "
@@ -694,16 +234,12 @@ def cmd_run(args, chain: dict | None = None) -> int:
     # owns — no terminal, no authorization, and a record that lies about both.
     runs.refuse_nested("agency run")
     project = _project(args)
-    # The positional argument names a WORKER, or a method when the project has
-    # only one worker for it. Resolving it here is what lets two providers be
-    # started over the same pull request without either of them being special.
-    pack_name, hire = hires.resolve(project, args.pack)
-    cfg = _pack_cfg(project, pack_name, asked=args.pack)
-    pack = packs.load(pack_name)
+    pack = packs.load(args.pack, project)
     policy = pack.run_policy
+    provider = getattr(args, "provider", None) or "claude"
 
-    # V --json režimu se průběh potlačí, jinak by se mísil s výstupem
-    # a extension by ho neuparsovala.
+    # In --json mode progress output is suppressed, or it would mix with the
+    # output and the extension would fail to parse it.
     out.quiet = bool(getattr(args, "json", False))
 
     def refuse(reason: str, code: str) -> int:
@@ -713,33 +249,23 @@ def cmd_run(args, chain: dict | None = None) -> int:
                              ensure_ascii=False, indent=2))
         return 1
 
-    who = hire.display(pack.manifest.get("title")) if hire else pack.ref
-    out.say(f"\n  {out.bold(who)}  {out.dim(pack.ref)} → {project.name}\n")
+    out.say(f"\n  {out.bold(pack.title)}  {out.dim(pack.name + '@' + provider)} → {project.name}\n")
 
-    # Zadání se řeší první. U packu, který ho vyžaduje, by běh bez něj jen
-    # spálil přípravu a skončil na agentovi, který neví, co má dělat.
-    asked = getattr(args, "prompt", None) or getattr(args, "scenario", None)
-    if asked and not policy["prompt"]["accepts"]:
+    prompt_text = (getattr(args, "prompt", None) or "").strip() or None
+    if prompt_text and policy["prompt"] == "none":
         raise SystemExit(
-            f"Pack “{pack.name}” does not take a brief — --prompt and --scenario have "
-            f"nothing to do here."
-        )
-    brief = runs.resolve_brief(cfg, getattr(args, "prompt", None), getattr(args, "scenario", None))
-    if policy["prompt"]["required"] and not (brief["focus"] or brief["standing"]):
+            f"Pack “{pack.name}” does not take a prompt — --prompt has nothing to do here.")
+    if policy["prompt"] == "required" and not prompt_text:
         return refuse(
-            f"{pack.manifest.get('title') or pack.name} needs to know what to work on. "
-            f"Pass --prompt \"…\", pick a --scenario, or write a standing brief into "
-            f"brief.default in {posix(project.pack_config_path(pack.name))}.",
-            "no-brief")
+            f"{pack.title} needs to know what to work on. Pass --prompt \"…\".",
+            "no-prompt")
 
     shared_target = (chain or {}).get("target")
     if shared_target is not None:
         # The chain resolved the target once, before its first step, and every
-        # member gets that same one. Until 2026-09-02 each member resolved its
-        # own, and because `--pr` only reaches a pack whose target is a pull
-        # request, a `review-graph → po` chain over PR #479 had the product owner
-        # judging whatever branch happened to be checked out — PR #474, as it
-        # turned out. Two members, two different pull requests, one chain id.
+        # member gets that same one — otherwise a workspace pack in the same
+        # chain quietly resolves its own target from whatever branch happens
+        # to be checked out.
         target = dict(shared_target)
         if target["kind"] == "workspace":
             out.done(f"{target['ref']} @ {target['headRefOid'][:8]}  "
@@ -760,53 +286,40 @@ def cmd_run(args, chain: dict | None = None) -> int:
 
         if target["_isDraft"] and not args.force:
             return refuse("The pull request is a draft. Continue with --force if that is intended.", "draft")
-        if (runs.already_reviewed(target, pack.name, hire.id if hire else None)
-                and not args.force):
+        if runs.already_reviewed(target, pack.name, provider) and not args.force:
             return refuse(
                 f"Commit {target['headRefOid'][:8]} has already been reviewed by "
-                f"{hire.id if hire else pack.name} — the marker is on the PR. "
-                "Another specialist may still review it. Again: --force.",
+                f"{pack.name}@{provider} — the marker is on the PR. "
+                "Another provider may still review it. Again: --force.",
                 "already-reviewed")
 
-    skip = (cfg.get("review") or {}).get("skipPatterns") or []
     all_files = target.pop("_files", [])
-    files = [f for f in all_files if not runs._skip(f, skip)]
+    files = [f for f in all_files if not runs._skip(f, runs.SKIP_PATTERNS)]
     skipped = len(all_files) - len(files)
 
-    # How the file list reads depends on what the PACK does with it, not on what
-    # kind of target the chain handed over. A product owner given a pull request
-    # still treats the changes as a place to look first.
     if policy["target"] == "workspace":
-        # An empty change list does not stop the run: QA tries the application,
-        # not the diff. Changes are a hint about where to look first, not the
-        # boundary of the run.
+        # An empty change list does not stop the run: QA tries the
+        # application, not the diff.
         out.done(f"{len(files)} changed files  {out.dim('— where to look first, not a boundary')}")
     else:
         out.done(f"{len(files)} files to review  {out.dim(f'({skipped} filtered out)')}")
         if not files:
             return refuse("No file left after filtering — there is nothing to review.", "no-files")
 
-    # A chain member runs unattended: the orchestrator is waiting for it to end,
-    # so nobody can step into it. A standalone run stays attended even with
-    # `--wait`.
-    run = runs.start(project, pack.ref, cfg, target, hire=hire,
-                     attended=chain is None)
+    # A chain member runs unattended: the orchestrator is waiting for it to
+    # end, so nobody can step into it. A standalone run stays attended even
+    # with `--wait`.
+    run = runs.start(project, pack.name, target, provider=provider, attended=chain is None)
     out.step(f"run {run.id}")
 
     wt = project.root
     wt_owned = bool(policy["worktree"])
-    # A worktree the CHAIN built. The member works in it but does not own it:
-    # removing it would pull the ground out from under the members still to
-    # come, and each member building its own would mean the same pull request
-    # checked out N times and the graph rebuilt N times.
     shared_wt = (chain or {}).get("worktree")
     carried: list[str] = []
     ginfo: dict = {}
     try:
         if shared_wt:
             wt = Path(shared_wt)
-            # `in_worktree` for the method hint and for `context.json`: the
-            # member IS in a worktree, it just is not the one who cleans it up.
             in_worktree = True
             wt_owned = False
             out.done(f"working in the chain’s worktree  {out.dim(posix(wt))}")
@@ -817,15 +330,12 @@ def cmd_run(args, chain: dict | None = None) -> int:
                      else "the pack installs nothing into the project")
         elif wt_owned:
             in_worktree = True
-            # The path is claimed in the record before the directory exists, so
-            # a second specialist starting a moment later sees it taken instead
-            # of force-deleting a review in progress.
             rec = run.record()
-            rec["worktree"] = posix(runs.worktree_path(project, cfg, target, hire))
+            rec["worktree"] = posix(runs.worktree_path(project, target, provider))
             run.save_record(rec)
 
             out.step("building a throwaway worktree")
-            wt = runs.make_worktree(project, cfg, target, hire=hire, run=run)
+            wt = runs.make_worktree(project, target, provider=provider, run=run)
             out.done(posix(wt))
 
             out.step("copying the pack method into the worktree")
@@ -840,42 +350,23 @@ def cmd_run(args, chain: dict | None = None) -> int:
             # RUN_DIR.
             out.done(f"working in the project itself  {out.dim(posix(wt))}")
 
-        # What this run is asking about. A project's memory tends to be larger
-        # than the window, and without a query it gets trimmed by age — which
-        # forgets what matters in favour of what is recent.
-        query = knowledge.query_for(pack.name, brief, target)
-
         if policy["graph"]:
             out.step("updating the graph")
-            ginfo = runs.prepare_graph(project, wt, cfg)
+            ginfo = runs.prepare_graph(project, wt)
             out.done(f"graph: {ginfo['action']}"
                      + (f"  {out.dim(ginfo['tool'] or '')}" if ginfo.get("tool") else ""))
 
             out.step("collecting graph signal")
-            stats = runs.collect_evidence(project, wt, run, target, files, query)
+            stats = runs.collect_evidence(project, wt, run, target, files)
             out.done("evidence/ filled" + (f"  {out.dim(str(stats))}" if stats else ""))
         else:
             out.step("collecting signal from the project")
-            stats = runs.collect_workspace_evidence(project, run, target, files, query)
+            stats = runs.collect_workspace_evidence(project, run, target, files)
             out.done(f"evidence/ filled  {out.dim(str(stats))}")
 
-        if policy.get("backlog"):
-            # Deterministic, so it belongs here and not to the session: the
-            # queue and the roadmap wording get frozen at the moment of the
-            # decision, which is the only way a cut stays reviewable later.
-            out.step("reading the product queue and the roadmap")
-            queue = runs.collect_backlog_evidence(project, run, cfg)
-            stats.update(queue)
-            if queue.get("backlogError"):
-                out.fail(f"the queue could not be read — {queue['backlogError']}")
-            else:
-                out.done(f"{queue.get('openIssues', 0)} open issues · "
-                         f"{queue.get('draftItems', 0)} drafts · "
-                         f"{queue.get('roadmapFiles', 0)} roadmap files")
-
         # The chain: its block into the record and the full upstream into
-        # evidence. The order is fixed — `write_context` points at both, so both
-        # have to exist before it runs.
+        # evidence. The order is fixed — `write_context` points at both, so
+        # both have to exist before it runs.
         upstream_payload = None
         if chain:
             rec = run.record()
@@ -887,24 +378,19 @@ def cmd_run(args, chain: dict | None = None) -> int:
                          f"from {len(chain['upstream'])} run(s), "
                          f"{upstream_payload['counts']['undecided']} undecided")
 
-        runs.write_context(run, cfg, target, wt, files, skipped,
-                           brief=brief, worktree_owned=wt_owned, hire=hire,
-                           in_worktree=in_worktree,
-                           pack_name=pack.name,
-                           provider=getattr(args, "provider", None), chain=chain)
+        runs.write_context(run, pack, target, wt, files, skipped,
+                           prompt=prompt_text, worktree_owned=wt_owned,
+                           provider=provider, chain=chain, in_worktree=in_worktree)
 
         rec = run.record()
-        # Memory is not a graph signal. `graph` has a closed key list in run.v1
-        # and `knownFindings` is not among them — merged together they made every
-        # record an invalid document nobody ever asked about: `agency validate`
-        # checked finding.v1, and run.v1 nobody.
+        # Memory is not a graph signal. `graph` has a closed key list in
+        # run.v1 — merging the two made every graph run an invalid record.
         memory = {k: stats.pop(k) for k in runs.MEMORY_STATS if k in stats}
         if ginfo:
             rec["graph"] = {**ginfo, **stats}
             rec["evidence"] = memory
         else:
             rec["evidence"] = {**stats, **memory}
-        rec["brief"] = brief
         rec["target"]["filesReviewed"] = len(files)
         rec["target"]["filesSkipped"] = skipped
         run.save_record(rec)
@@ -917,67 +403,43 @@ def cmd_run(args, chain: dict | None = None) -> int:
         run.save_record(rec)
         raise
 
-    # Where a pack's method comes from is `runs.method_hint`'s business — inside
-    # a worktree it is there only thanks to materialize_pack, in the project it
-    # is wherever the installation put it.
     prompt = (
         f"{runs.method_hint(pack, project, carried, in_worktree=in_worktree)} "
         f"RUN_DIR={posix(run.dir)} — start from its context.json. "
         f"The required output is RUN_DIR/findings.json following finding.v1."
     )
     if chain:
-        # The core owns the kick-off of a chain member — the template is
-        # testable and ends up whole in `prompt.txt`, so it is readable why a
-        # member understood its role or did not. The sentences with content in
-        # it, though, were written by the upstream agent.
-        member = chains.Member(pack.name, pack.name, hire)
+        member = chains.Member(pack.name)
         prompt = chains.step_prompt(
             prompt, member, chain["position"], chain["of"],
             (upstream_payload or {}).get("runs") or [],
             (upstream_payload or {}).get("counts") or {"findings": 0, "undecided": 0},
             chain.get("handoff"), chain.get("handoffPath"))
-    if brief["focus"]:
-        # The brief goes into the launch command too, not only into
-        # context.json: the user should see on screen what the agent is being
-        # started with.
-        shared = chain is not None and not chain.get("ownBrief")
-        label = ("Brief for the chain as a whole — parts of it may be addressed to other "
+    if prompt_text:
+        shared = chain is not None and not chain.get("ownPrompt")
+        label = ("Prompt for the chain as a whole — parts of it may be addressed to other "
                  "members; do only your part and leave theirs to them"
-                 if shared else "Brief for this run")
-        prompt += f" {label}: " + _one_line(brief["focus"])
+                 if shared else "Prompt for this run")
+        prompt += f" {label}: " + _one_line(prompt_text)
     launch, agent_info = runs.launch_argv(
-        # The project's whole memory, not just RUN_DIR: `context.json` sends the
-        # specialist into the bundle, into the pack's pages and, in a chain,
-        # into upstream runs. Allowing only one of those means asking it for
-        # permission to walk paths we handed it ourselves.
-        cfg, posix(project.agency_dir), prompt, hire=hire, unattended=chain is not None,
-        provider=getattr(args, "provider", None), model=getattr(args, "model", None),
-        # What the method calls is the pack's knowledge. Without this list an
-        # agent is mute in unattended mode: neither `agency triage` nor
-        # `code-review-graph query` is permitted, and the findings end up in the
-        # terminal's scrollback.
-        needs=policy.get("needs"),
-        # A chain member is read as a stream; a standalone run keeps the
-        # terminal. Not a preference — it is whether anyone can answer a
-        # question the agent asks.
-        stream=chain is not None)
+        posix(project.agency_dir), prompt, provider=provider,
+        model=getattr(args, "model", None), unattended=chain is not None,
+        needs=policy.get("needs"), stream=chain is not None,
+        bypass=bool(getattr(args, "bypass", False)))
     rec = run.record()
     rec["agent"] = agent_info
     run.save_record(rec)
     (run.dir / "prompt.txt").write_text(prompt + "\n", encoding="utf-8")
 
     if out.quiet:
-        # Kontrakt pro extension: kde běh leží, kde je worktree a čím ho dokončit.
         print(json.dumps({
             "ok": True,
             "runId": run.id,
             "runDir": posix(run.dir),
             "worktree": posix(wt),
             "worktreeOwned": wt_owned,
-            "hire": hire.as_dict() if hire else None,
-            "brief": brief,
-            "prompt": prompt,
-            # Hotový příkaz — tvar spuštění vlastní CLI, ne klient.
+            "prompt": prompt_text,
+            "launchPrompt": prompt,
             "launch": launch,
             "agent": agent_info,
             "target": {k: v for k, v in target.items() if not k.startswith("_")},
@@ -996,23 +458,20 @@ def cmd_run(args, chain: dict | None = None) -> int:
         out.say(f"  {out.dim(posix(wt))}")
     else:
         out.say(f"  {out.dim('The run works in the project itself — nothing to clean up afterwards.')}")
-    if brief["focus"] or brief["standing"]:
+    if prompt_text:
         out.say()
-        out.say(f"  {out.dim('Brief:')} {_one_line(brief['focus'] or brief['standing'], 120)}")
+        out.say(f"  {out.dim('Prompt:')} {_one_line(prompt_text, 120)}")
     out.say()
 
     if args.wait:
-        # The same source as the flags above, so the two cannot disagree: asking
-        # for a stream and knowing how to read it is one decision.
         dialect = providers.streaming(agent_info["provider"])[1] if chain else None
         return _wait_for_agent(project, run, launch, wt, wt_owned,
                                dialect=dialect, chain=chain)
 
     if args.launch:
+        import os
         os.chdir(wt)
         out.say(f"  {out.bold('launching ' + launch[0] + '…')}\n")
-        # `which` kvůli Windows: spouštění si domyslí jen `.exe`, takže `codex`
-        # — fakticky `codex.CMD` — by jinak spadl na FileNotFoundError.
         os.execvp(proc.which(launch[0]) or launch[0], launch)
 
     print(f"  {out.bold('Start it:')}")
@@ -1028,61 +487,38 @@ def cmd_run(args, chain: dict | None = None) -> int:
 
 
 def cmd_chain(args) -> int:
-    """`agency chain legal po` — specialists in sequence, handing over between them.
+    """`agency chain review-graph po` — specialists in sequence, handing over
+    between them.
 
-    The orchestration is a loop over `cmd_run`, not a second way to start a run.
-    That is deliberate: if the chain prepared runs itself, the project would have
-    two places where a worktree, evidence and a run record come into being, and
-    the second would quietly rot. A chain adds exactly three things a standalone
-    run does not have: assembling the members, passing the output on, and
-    stopping when one of them fails.
+    The orchestration is a loop over `cmd_run`, not a second way to start a
+    run — if the chain prepared runs itself, the project would have two
+    places where a worktree, evidence and a run record come into being.
     """
     runs.refuse_nested("agency chain")
     project = _project(args)
-    members = chains.resolve(project, args.members)
+    members = chains.resolve(args.members)
 
     if len(members) < 2:
         raise SystemExit("A chain needs at least two members — for one, `agency run` is the command.")
 
-    if mixed := chains.one_provider(members):
-        raise SystemExit(mixed)
-
     for m in members:
-        # Better now than after the first run finishes: a user whose chain dies
-        # on a typo in the third name has already paid for two runs.
-        packs.load(m.pack)
+        # Better now than after the first run finishes.
+        packs.load(m.pack, project)
 
-    # A runner with no unattended mode opens an interactive session that does
-    # not end when the task is done — the orchestrator would wait on it forever.
-    # Better to know now than after ten minutes of silence.
-    #
-    # Authorization is the same class of problem and was the more expensive one:
-    # an agent that may not write finishes cleanly, writes nothing, and the run
-    # looks like "found nothing". Both are checked before anything is paid for.
-    for m in members:
-        prov = m.hire.provider if m.hire else None
-        if not prov:
-            continue
-        if not providers.spec(prov).get("unattendedPrefix"):
-            out.fail(f"{prov} has no unattended mode registered — {m.label} will open an "
-                     f"interactive session and the chain will wait for you to close it. "
-                     f"`agency providers --add {prov} --unattended-prefix <flag>`")
-        elif not providers.authorizes(prov):
-            out.fail(f"{prov} has no way to authorize an unattended agent registered — "
-                     f"{m.label} will be refused every write it attempts and the run will "
-                     f"end looking like it found nothing. "
-                     f"`agency providers --add {prov} --edits-grant <flag>`")
+    provider = getattr(args, "provider", None) or "claude"
+    if not providers.spec(provider).get("unattendedPrefix"):
+        out.fail(f"{provider} has no unattended mode — the chain will open an interactive "
+                 f"session and wait for you to close it.")
+    elif not providers.authorizes(provider):
+        out.fail(f"{provider} has no way to authorize an unattended agent — every write "
+                 f"it attempts will be refused and the run will end looking like it "
+                 f"found nothing.")
 
     focus = chains.per_member(members, getattr(args, "focus", None) or [])
     chain_id = ulid()
     out.say(f"\n  {out.bold('chain')}  "
             f"{out.dim(' → '.join(m.label for m in members))}  ·  {chain_id[:10]}\n")
 
-    # The target belongs to the chain, not to its members. `--pr N` used to
-    # reach only a pack whose own target is a pull request; every workspace pack
-    # in the same chain silently judged whatever branch was checked out. On
-    # 2026-09-02 that meant a chain launched over PR #479 whose product owner
-    # reviewed PR #474 — and nothing in the output said so.
     target = chains.target(project, getattr(args, "pr", None),
                            getattr(args, "latest_merged", False),
                            getattr(args, "since", None))
@@ -1094,11 +530,7 @@ def cmd_chain(args) -> int:
         out.done(f"target: PR #{target['pr']} — {(target.get('title') or '')[:52]}  {out.dim(kind)}")
     out.say()
 
-    # One checkout for the whole team, when any member wants one. Each member
-    # building its own meant the same pull request checked out N times and the
-    # graph rebuilt N times — and, worse, a workspace pack sitting in the user's
-    # own branch while the reviewer read the pull request.
-    wants_worktree = any(packs.load(m.pack).run_policy["worktree"] for m in members)
+    wants_worktree = any(packs.load(m.pack, project).run_policy["worktree"] for m in members)
     chain_wt = None
     if wants_worktree and target.get("pr"):
         out.step("building one worktree for the team")
@@ -1108,39 +540,19 @@ def cmd_chain(args) -> int:
     done: list[str] = []
     failed_at: int | None = None
     for position, member in enumerate(members, start=1):
-        # The chain's own flags apply to every step alike; `members` and `fn`
-        # belong to the orchestrator and would mean nothing to a member.
-        # `--json` is hard-off: `--wait` writes into the same stdout the agent
-        # does.
         carried = {k: v for k, v in vars(args).items()
                    if k not in ("members", "fn", "focus")}
-        step = argparse.Namespace(**{**carried, "pack": member.ref,
+        step = argparse.Namespace(**{**carried, "pack": member.pack,
                                      "wait": True, "launch": False, "json": False,
-                                     # A per-member brief beats a shared one.
-                                     # Without it the reviewer reads
-                                     # instructions written for the product
-                                     # owner and dutifully answers them — seen
-                                     # on the first real chain.
                                      "prompt": focus.get(member.label) or carried.get("prompt")})
-        # Did this member get a brief written FOR IT, or one shared by the whole
-        # chain? The difference has to show in the prompt: a shared sentence like
-        # "do a review and use the PO agent to find out…" is addressed to two
-        # people, and the reviewer will dutifully answer the second half unless
-        # somebody tells it that half is not its own.
         own = member.label in focus
         block = chains.block(chain_id, position, len(members), list(done))
-        block["ownBrief"] = own
+        block["ownPrompt"] = own
         block["target"] = chains.member_target(target, {})
-        # A member that wants a worktree gets the chain's. One that does not
-        # (qa needs the running application, with its dependencies and .env)
-        # stays in the working copy — the target in its record is still the
-        # chain's, so what it examined remains legible.
-        if chain_wt and packs.load(member.pack).run_policy["worktree"]:
+        if chain_wt and packs.load(member.pack, project).run_policy["worktree"]:
             block["worktree"] = posix(chain_wt)
 
         if done:
-            # The predecessor's message goes into the prompt as its own words,
-            # not as a retelling.
             previous = chains.find_member(project, chain_id, position - 1)
             text, source, where = (chains.handoff_text(previous) if previous
                                    else (None, None, None))
@@ -1157,9 +569,6 @@ def cmd_chain(args) -> int:
             done.append(run.id)
 
         if code != 0:
-            # Going on quietly would mean the next member judging findings that
-            # never came into being. What did finish is recorded, and finishing
-            # the rest by hand is possible.
             out.say()
             out.fail(f"the chain stops at step {position}/{len(members)} ({member.label})")
             failed_at = position
@@ -1172,9 +581,6 @@ def cmd_chain(args) -> int:
 
     if chain_wt:
         if failed_at is None and not getattr(args, "keep_worktree", False):
-            # The chain owns the checkout, so it is the chain that removes it.
-            # A stopped chain keeps it: the worktree is the only place showing
-            # what the member that failed was working on.
             runs.remove_worktree(project, chain_wt)
             out.say(f"  {out.dim('worktree removed')}")
         else:
@@ -1186,16 +592,9 @@ def cmd_chain(args) -> int:
 
 def _chain_report(chain_id: str, members, done: list[str], reached: int,
                   project=None) -> None:
-    """What finished, what it stands on, and what it cost.
-
-    Printed after completion and after a stop alike — an interrupted chain is
-    still a result, only a shorter one.
-
-    It used to print two ids and nothing else, which is why a chain that
-    produced no findings at all still read as a success. What a member left
-    behind, what it was refused and what it cost are the three things that tell
-    "found nothing" from "was not allowed to write anything".
-    """
+    """What finished, what it stands on, and what it cost. Printed after
+    completion and after a stop alike — an interrupted chain is still a
+    result, only a shorter one."""
     out.say()
     for i, member in enumerate(members, start=1):
         run_id = done[i - 1] if i <= len(done) else None
@@ -1241,8 +640,7 @@ def _duration(seconds: float) -> str:
 
 #: How many wrapped lines of one reasoning block reach the terminal. Enough to
 #: see what the agent is thinking about, not enough to bury the chain's own
-#: output — a thinking block can run to thousands of tokens, and the whole of it
-#: is kept in `agent.jsonl` either way.
+#: output — the full text is kept in `agent.jsonl` either way.
 THINKING_LINES = 3
 
 
@@ -1257,18 +655,7 @@ def _wrapped(text: str, limit: int) -> list[str]:
 
 
 def _progress(event) -> None:
-    """One line per thing the agent does — and a glimpse of why.
-
-    This is what a chain member was missing entirely. `launching claude…`
-    followed by twelve minutes of silence is indistinguishable from a hung
-    process, and a user reported it as exactly that while the agent was in fact
-    working and being refused one write after another.
-
-    Reasoning is shown, clipped. The first version of this deliberately hid it
-    to keep the output clean, which turned out to be the wrong trade: a list of
-    tool calls says what the agent touched, never what it is trying to do. The
-    full text stays in `agent.jsonl`, and the closing message in `agent.md`.
-    """
+    """One line per thing the agent does — and a glimpse of why."""
     if event.kind == "tool":
         label = event.tool or "?"
         out.say(f"  {out.dim('·')} {out.bold(label)}  {out.dim(event.detail or '')}")
@@ -1279,24 +666,13 @@ def _progress(event) -> None:
         for i, line in enumerate(_wrapped(event.detail or "", THINKING_LINES)):
             out.say(f"  {out.dim('~' if i == 0 else ' ')} {out.dim(line)}")
     elif event.kind == "text":
-        # The agent talking, as opposed to thinking. Worth a touch more contrast
-        # — it is the closest thing to it reporting progress in its own words.
         for i, line in enumerate(_wrapped(event.detail or "", THINKING_LINES)):
             out.say(f"  {out.dim('›' if i == 0 else ' ')} {line}")
 
 
 def _wait_for_agent(project, run, launch: list[str], wt: Path, wt_owned: bool,
                     dialect: str | None = None, chain: dict | None = None) -> int:
-    """`--wait`: start the agent, wait for it, and run the gate right away.
-
-    An attended run keeps its character — the agent writes into this terminal
-    and can be stepped into. What changed is who holds the end: the user used to
-    have to type `agency ingest` afterwards, and forgetting left the run
-    `running` forever — no findings, no numbers, and a worktree too.
-
-    A chain member goes the other way (`dialect`): nobody can step into it, so
-    its output is read as a stream and turned into progress instead.
-    """
+    """`--wait`: start the agent, wait for it, and run the gate right away."""
     out.say(f"  {out.bold('launching ' + launch[0] + '…')}  "
             f"{out.dim('Ctrl-C stops the run')}\n")
     try:
@@ -1304,9 +680,6 @@ def _wait_for_agent(project, run, launch: list[str], wt: Path, wt_owned: bool,
                              dialect=dialect, chain=chain,
                              on_event=_progress if dialect else None)
     except KeyboardInterrupt:
-        # An interruption is not a crash. The run closes as abandoned — and
-        # because this process, unlike `--launch`, is still alive, it also
-        # cleans up the worktree the user would otherwise have to find alone.
         info = runs.abandon(project, run, "stopped with Ctrl-C while the agent was running")
         out.say()
         out.note(f"stopped — {run.id[:10]} closed as abandoned"
@@ -1320,38 +693,26 @@ def _wait_for_agent(project, run, launch: list[str], wt: Path, wt_owned: bool,
             + (f"  {out.dim('·')}  {result['turns']} turns" if result.get("turns") else "")
             + (f"  {out.dim('·')}  ${result['usd']:.2f}" if result.get("usd") else ""))
 
-    # Co agent stihl zapsat, projde branou i po nenulovém konci. Zahodit hotové
-    # nálezy kvůli chybě na konci sezení by byla ztráta, ne přísnost.
     gated = ingest.ingest(project, run)
     _ingest_report(run, gated)
 
     denied = (run.record().get("agent") or {}).get("denied") or {}
 
     if code != 0:
-        # A non-zero exit outranks an empty output, because it EXPLAINS it: an
-        # agent that crashed wrote nothing for a reason already named. Whatever
-        # it did manage to write went through the gate above as always — the
-        # record just must not look successful.
         runs.failed(run, f"the agent exited with {code}")
         out.fail(f"the agent exited with {code} — the run is recorded as failed")
         if proc.which(launch[0]) is None:
             out.say(f"  {out.dim(launch[0] + ' is not on PATH; `agency doctor` checks that up front')}")
         out.say()
     elif gated.get("noOutput"):
-        # Exit 0 and still nothing. Until 2026-09-02 the gate turned this into
-        # `no-findings` — the claim "it looked and found nothing" about an agent
-        # the system had refused every write. The chain then built on top of it.
         runs.failed(run, "the agent wrote no findings.json")
         out.fail("nothing was written — the run is recorded as failed, not as “no findings”")
         out.say()
 
     if denied.get("count"):
-        # Printed whichever way the run ended: a refused call means the run
-        # measured its own authorization, not the pack's method, and comparing
-        # it with another run would be comparing different things.
         out.say(f"  {out.err(str(denied['count']) + ' tool calls were denied')}"
                 f"  {out.dim(', '.join(denied.get('tools') or []))}")
-        out.say(f"  {out.dim('The pack needs those — widen agent.allow, or check agent.unattended, in its configuration.')}")
+        out.say(f"  {out.dim('The pack needs those — widen `needs` in pack.json, or pass --bypass.')}")
         out.say()
     elif gated.get("noOutput") and code == 0:
         out.say(f"  {out.dim('The agent finished cleanly and still wrote nothing — RUN_DIR/agent.md has what it said.')}")
@@ -1359,26 +720,11 @@ def _wait_for_agent(project, run, launch: list[str], wt: Path, wt_owned: bool,
 
     if wt_owned:
         print(f"  {out.dim('Cleanup:')}  agency cleanup --run {run.id[:8]}\n")
-    # Prázdný běh je pro řetěz totéž co spadlý: další člen by soudil nálezy,
-    # které nevznikly. Návratový kód to musí říct, jinak se `cmd_chain` nemá
-    # o co zastavit.
     return 0 if (code == 0 and not gated.get("noOutput")) else 1
 
 
 def cmd_cleanup(args) -> int:
-    """Close a run that is not coming back, and take its worktree with it.
-
-    Killing the terminal leaves two things behind: a record that still says
-    `running`, and a worktree nobody will ever look at. Neither closes itself
-    when the run was prepared and handed over: the CLI prints a command, and
-    whatever runs it lives in a terminal this process knows nothing about. No
-    pid to watch, no exit code to catch — closing the run is the same act as
-    closing the terminal, and it belongs to the person who did it.
-
-    `agency run --wait` is the way around it: that one owns the process, so it
-    closes its own run. This command is for everything else — and for the runs
-    that were left behind before it existed.
-    """
+    """Close a run that is not coming back, and take its worktree with it."""
     project = _project(args)
 
     targets: list = []
@@ -1404,9 +750,6 @@ def cmd_cleanup(args) -> int:
         if rec.get("status") == "running":
             results.append({**runs.abandon(project, run), "action": "abandoned"})
         elif ctx.get("worktreeOwned") is False:
-            # Běh bez vlastního worktree jel v pracovní kopii uživatele. Smazat ji
-            # by bylo to nejhorší, co tenhle nástroj může udělat — proto se to hlídá
-            # záznamem v kontextu, ne porovnáním cest.
             results.append({"run": run.id, "action": "nothing",
                             "why": "the run worked in the project itself"})
         else:
@@ -1446,9 +789,6 @@ def cmd_validate(args) -> int:
         raise SystemExit("No run found.")
 
     if getattr(args, "fix", False):
-        # Records already on disk that no longer match their own contract.
-        # `validate` is otherwise a read, and stays one — this is an explicit
-        # request, not a repair that happens behind the user's back.
         removed = runs.repair_record(run)
         if removed:
             out.done(f"removed keys run.v1 does not know: {', '.join(removed)}")
@@ -1466,10 +806,6 @@ def cmd_validate(args) -> int:
             for e in v.iter_errors(f):
                 errors.append({"index": i, "id": f.get("id"),
                                "path": "/".join(str(p) for p in e.path), "message": e.message})
-        # And the run record against run.v1. Until 2026-09-01 nobody checked it,
-        # and it had managed to drift from its own contract in three places
-        # without anything noticing. A contract that is not verified is not a
-        # contract.
         rv = jsonschema.Draft202012Validator(read_json(bundled("schemas", "run.v1.json")))
         for e in rv.iter_errors(run.record()):
             record_errors.append({"path": "/".join(str(p) for p in e.path) or "(root)",
@@ -1481,8 +817,6 @@ def cmd_validate(args) -> int:
                 if key not in f:
                     errors.append({"index": i, "id": f.get("id"), "path": key, "message": "missing"})
 
-    # An anchor is checked against the working copy — a finding that cannot be
-    # placed is a finding nobody will find again in a month.
     resolved = []
     for f in findings:
         a = f.get("anchor") or {}
@@ -1493,10 +827,6 @@ def cmd_validate(args) -> int:
                          "resolvedLine": r.line, "via": r.via, "note": r.note,
                          "drift": anchor.drift(project.root, a)})
 
-    # `validate` is a READ. The run's status is changed by `ingest` — if both
-    # paths wrote it, there would be no telling from the record whether the
-    # findings went through the gate or whether somebody merely checked them.
-    # (`--fix` above is the one exception, and it is asked for explicitly.)
     data = {"run": run.id, "findings": len(findings), "errors": errors,
             "recordErrors": record_errors, "anchors": resolved}
 
@@ -1527,14 +857,11 @@ def cmd_validate(args) -> int:
 # ---------------------------------------------------------------- graph
 
 def cmd_graph(args) -> int:
-    """Jedny dveře ke grafu — pro jádro i pro agenta.
+    """One door to the graph — for the core and for the agent.
 
-    Půlka použití grafu žije v promptu (`SKILL.md`) a Python fasáda ji nepokryje.
-    Vedlejší efekt je ten důležitý: šev se testuje každým během, ne až teoreticky
-    v den výměny driveru.
-
-    Výstup je vždycky JSON. Konzument je agent nebo skript; člověk, který se ptá
-    na stav grafu, má `agency doctor`.
+    Half of the graph's use lives in the prompt (`SKILL.md`), a Python
+    facade does not cover it. The side effect is the important one: the seam
+    is tested by every run, not theoretically on the day the driver changes.
     """
     project = _project(args)
     root = project.root
@@ -1570,8 +897,9 @@ def _emit_json(data: dict) -> int:
 # ---------------------------------------------------------------- ingest
 
 def _ingest_report(run, data: dict) -> None:
-    """Výstup brány. Tiskne ho `agency ingest` i `agency run --wait` — týž běh
-    má vypadat stejně, ať branou prošel hned, nebo o hodinu později."""
+    """The gate's output. Printed by `agency ingest` and `agency run --wait`
+    alike — the same run should look the same, whether the gate ran right
+    away or an hour later."""
     if data.get("noOutput"):
         print(f"\n  run {out.bold(run.id)}\n")
         print(f"  {out.err('  ×')} the agent wrote no findings.json")
@@ -1605,7 +933,7 @@ def _ingest_report(run, data: dict) -> None:
 
 
 def cmd_ingest(args) -> int:
-    """Brána mezi tím, co napsal agent, a tím, co se stane nálezem."""
+    """The gate between what the agent wrote and what becomes a finding."""
     project = _project(args)
     run = runs.find_run(project, args.run)
     if not run:
@@ -1613,31 +941,21 @@ def cmd_ingest(args) -> int:
 
     data = ingest.ingest(project, run, min_score=args.min_score)
     _emit(args, data, lambda: _ingest_report(run, data))
-    # Ruční brána nad během, po kterém nic nezbylo, nemá co uzavřít. Vrátit 0
-    # by znamenalo tvrdit, že běh je hotový — a skript, který na to čeká, by
-    # šel dál.
     return 1 if data.get("noOutput") else 0
 
 
 # ---------------------------------------------------------------- knowledge
 
 def cmd_knowledge(args) -> int:
-    """Co projekt ví, jako commitovaný markdown.
-
-    Bez `--rebuild` se nic nezapisuje — jen se řekne, jestli je odvozený bundle
-    v souladu s běhy. To je ta otázka, kterou má smysl umět položit: bundle je
-    přestavitelný, takže rozdíl proti `.agency/runs/` je vždycky chyba bundlu.
-    """
+    """What the project knows, as committed markdown."""
     project = _project(args)
     data = knowledge.bundle(project, write=args.rebuild)
-    data["rules"] = knowledge.rules_summary(project)
     data["pages"] = knowledge.pages_summary(project)
 
     def human():
         print(f"\n  {out.bold('knowledge')}  {out.dim(data['path'])}\n")
         pages = data["pages"]
         print(f"  {str(data['findings']).rjust(3)} findings"
-              f"  {out.dim('·')}  {data['rules']['total']} rules"
               f"  {out.dim('·')}  {pages['total']} pages"
               + (f"  {out.dim('(' + ', '.join(f'{k} {v}' for k, v in pages['byPack'].items()) + ')')}"
                  if pages["byPack"] else ""))
@@ -1661,8 +979,9 @@ def cmd_knowledge(args) -> int:
 # ---------------------------------------------------------------- metrics
 
 def _bar(t: dict) -> str:
-    """Precision jako proužek. None není nula — prázdno se kreslí jako pomlčka,
-    protože „nevím" a „nic z toho neplatí" jsou dvě různé zprávy."""
+    """Precision as a bar. `None` is not zero — an empty precision draws as a
+    dash, because "I don't know" and "none of it held up" are two different
+    messages."""
     p = t.get("precision")
     if p is None:
         return out.dim("—".ljust(10)) + "     "
@@ -1672,11 +991,8 @@ def _bar(t: dict) -> str:
 
 
 def cmd_metrics(args) -> int:
-    projects = registry.resolve() if args.all_projects else [_project(args)]
-    if not projects:
-        raise SystemExit("The registry is empty — run `agency metrics` inside a project.")
-    reports = [metrics.collect(p) for p in projects]
-    data = reports if args.all_projects else reports[0]
+    project = _project(args)
+    r = metrics.collect(project)
 
     def table(title: str, rows: dict) -> None:
         rows = {k: v for k, v in (rows or {}).items() if v["accepted"] + v["rejected"]}
@@ -1688,7 +1004,7 @@ def cmd_metrics(args) -> int:
             print(f"    {k[:22]:24} {_bar(v)}  {out.dim(tally)}")
         print()
 
-    def one(r: dict) -> None:
+    def human():
         f, t, q = r["findings"], r["triage"], r["queue"]
         print(f"\n  {out.bold(r['project']['name'])}  {out.dim(str(r['runs']) + ' runs')}\n")
         undec = out.dim(f"  ({t['undecided']} undecided)") if t["undecided"] else ""
@@ -1714,14 +1030,12 @@ def cmd_metrics(args) -> int:
         table("by severity", r["bySeverity"])
         table("by specialist", r["byHire"])
         table("by model", r["byModel"])
-        # Only worth printing once two workers have actually met over the same
-        # code — with one hire the number is always zero and says nothing.
         ag = r.get("agreement") or {}
         if ag.get("hires", 0) > 1 and (ag["crossHire"] or ag["sameHire"]):
             print(f"  {out.dim('agreement')}")
             print(f"    {'found by another specialist too':32} {ag['crossHire']}")
             print(f"    {'found twice by the same one':32} {ag['sameHire']}")
-            print(out.dim("    A high first number means the second runner is buying "
+            print(out.dim("    A high first number means the second provider is buying "
                           "confirmation, not coverage.\n"))
         if r["rejectReasons"]:
             print(f"  {out.dim('reasons for rejection')}")
@@ -1729,23 +1043,13 @@ def cmd_metrics(args) -> int:
                 print(f"    {k[:22]:24} {v}")
             print()
 
-    def human():
-        for r in reports:
-            one(r)
-
-    return _emit(args, data, human)
+    return _emit(args, r, human)
 
 
 # ---------------------------------------------------------------- export
 
 def cmd_export(args) -> int:
     project = _project(args)
-    cfg = _pack_cfg(project, args.pack)
-    number = args.project_number or (cfg.get("sinks") or {}).get("githubProject")
-    if not number:
-        raise SystemExit(
-            "Nowhere to export to. Add `sinks.githubProject` to "
-            f"{posix(project.pack_config_path(args.pack))}, or use --project <number>.")
     owner = args.owner or (project.slug or "/").split("/")[0]
     if not owner:
         raise SystemExit("Cannot tell who owns the Project. Use --owner.")
@@ -1761,14 +1065,14 @@ def cmd_export(args) -> int:
             "Nothing to export. Only decided findings are exported — "
             "triage them, or run with --include-undecided.")
 
-    data = export.push(rows, int(number), owner, dry_run=args.dry_run)
+    data = export.push(rows, int(args.project_number), owner, dry_run=args.dry_run)
 
     def human():
         if data["dryRun"]:
             head = "Dry run — nothing was sent"
         else:
             title = data["project"].get("title")
-            head = f"Project #{number} ({owner})" + (f" — {title}" if title else "")
+            head = f"Project #{args.project_number} ({owner})" + (f" — {title}" if title else "")
         print(f"\n  {out.bold(head)}\n")
         for r in data["created"]:
             print(f"  {out.ok('+')} {(r['title'] or '')[:70]}")
@@ -1784,39 +1088,6 @@ def cmd_export(args) -> int:
 
     _emit(args, data, human)
     return 1 if data["failed"] else 0
-
-
-# ---------------------------------------------------------------- projects
-
-def cmd_projects(args) -> int:
-    rows = []
-    for p in registry.resolve():
-        all_runs = runs.load_runs(p)
-        undecided = 0
-        for r in all_runs:
-            dec = runs.decisions(r)
-            undecided += sum(1 for f in r.findings()
-                             if f.get("state") != "duplicate" and f.get("id") not in dec)
-        rows.append({
-            "name": p.name, "slug": p.slug, "root": posix(p.root),
-            "packs": sorted((p.installed().get("packs") or {}).keys()),
-            "runs": len(all_runs), "undecided": undecided,
-            "lastRun": all_runs[0].record().get("startedAt") if all_runs else None,
-        })
-
-    def human():
-        if not rows:
-            print(f"\n  {out.dim('The registry is empty. It fills up with the first `agency add` in a project.')}\n")
-            return
-        print()
-        for r in rows:
-            badge = out.warn(f"{r['undecided']} to decide") if r["undecided"] else out.dim("clear")
-            packs_ = ", ".join(r["packs"]) or "no pack"
-            print(f"  {out.bold(r['name']):28} {r['runs']:3} runs  {badge:24} {out.dim(packs_)}")
-            print(f"  {'':28} {out.dim(r['root'])}")
-        print()
-
-    return _emit(args, rows, human)
 
 
 # ---------------------------------------------------------------- findings
@@ -1842,12 +1113,8 @@ def cmd_findings(args) -> int:
                 "decision": d["state"] if d else None,
                 "reason": d.get("reason") if d else None,
                 "note": d.get("note") if d else None,
-                # Normalizované, ne surové: starý zápis (`cli`, `vscode`) je
-                # člověk a klient nemá mít dvě jména pro totéž.
                 "by": runs.normalize_by(d.get("by")) if d else None,
             }
-            # Kotva a drift jen do --json: konzumentem je extension, která bez
-            # nich neumí ani proklik, ani pohled na kód v den analýzy.
             if getattr(args, "json", False):
                 row["anchor"] = a
                 row["evidence"] = f.get("evidence") or []
@@ -1905,159 +1172,8 @@ def cmd_triage(args) -> int:
     return _emit(args, ev, human)
 
 
-def _set_path(data: dict, dotted: str, value) -> None:
-    cur = data
-    parts = dotted.split(".")
-    for part in parts[:-1]:
-        nxt = cur.get(part)
-        if not isinstance(nxt, dict):
-            nxt = {}
-            cur[part] = nxt
-        cur = nxt
-    cur[parts[-1]] = value
-
-
-def _unset_path(data: dict, dotted: str) -> bool:
-    cur = data
-    parts = dotted.split(".")
-    for part in parts[:-1]:
-        cur = cur.get(part)
-        if not isinstance(cur, dict):
-            return False
-    return cur.pop(parts[-1], _MISSING) is not _MISSING
-
-
-_MISSING = object()
-
-
-def cmd_config(args) -> int:
-    """Konfigurace packu — čtení i zápis jednou cestou.
-
-    Zapisovat sem smí i klient: nastavení bydlí v projektu, ne v editoru, takže
-    co nastavíš klikem, platí i pro běh z terminálu a pro agenta. Kdyby si
-    extension držela vlastní kopii nastavení, byly by dvě pravdy o jedné věci.
-    """
-    project = _project(args)
-    pack = packs.load(args.pack)
-    path = project.pack_config_path(pack.name)
-    if not path.is_file():
-        raise SystemExit(f"Pack “{pack.name}” is not installed here. Run `agency add {pack.name}`.")
-
-    raw = read_json(path, default={})
-    changed: list[str] = []
-
-    for pair in (args.set_pairs or []):
-        key, sep, value = pair.partition("=")
-        if not sep:
-            raise SystemExit(f"Expected key=value, got “{pair}”.")
-        key = key.strip()
-        if key.split(".")[0] == "pack":
-            raise SystemExit("`pack` is stamped by the installation — change it with `agency add`.")
-        try:
-            parsed = json.loads(value)
-        except json.JSONDecodeError:
-            parsed = value  # holý text je platná hodnota, ne chyba
-        _set_path(raw, key, parsed)
-        changed.append(key)
-
-    for key in (args.unset or []):
-        if _unset_path(raw, key):
-            changed.append(f"-{key}")
-
-    if changed:
-        write_json(path, raw)
-
-    data = {
-        "pack": pack.name,
-        "path": posix(path),
-        "config": strip_comments(raw),
-        # Co si nástroj o projektu domyslí sám. Klient tím umí ukázat „tenhle
-        # projekt už Playwright má" místo prázdného pole k vyplnění.
-        "detected": config.detect(project),
-        "run": pack.run_policy,
-        "changed": changed,
-    }
-
-    def human():
-        print(f"\n  {out.bold(pack.name)}  {out.dim(posix(path))}\n")
-        if changed:
-            print(f"  {out.ok('updated')} {', '.join(changed)}\n")
-        print(json.dumps(data["config"], ensure_ascii=False, indent=2))
-        print()
-
-    return _emit(args, data, human)
-
-
-def cmd_brief(args) -> int:
-    """Co má pack dělat — trvale, nebo pod jménem.
-
-    Zadání je konfigurace projektu, ne argument jednoho spuštění: „na tomhle
-    projektu vždycky zkoušej rezervace a platby“ nemá cenu psát pokaždé znovu.
-    Zapisuje se do `.agency/<pack>.json` k ostatní konfiguraci a čte ho stejně
-    CLI, extension i agent.
-    """
-    project = _project(args)
-    pack = packs.load(args.pack)
-    path = project.pack_config_path(pack.name)
-    if not path.is_file():
-        raise SystemExit(f"Pack “{pack.name}” is not installed here. Run `agency add {pack.name}`.")
-
-    # Čte se surový soubor včetně komentářů — konfiguraci vlastní projekt
-    # a zápis z CLI mu nesmí vymazat dokumentaci šablony.
-    raw = read_json(path, default={})
-    brief = raw.setdefault("brief", {})
-    scenarios = brief.setdefault("scenarios", {})
-    changed = False
-
-    if args.remove:
-        if not args.scenario:
-            raise SystemExit("--remove needs --scenario <name>.")
-        if args.scenario not in scenarios:
-            raise SystemExit(f"There is no scenario “{args.scenario}”.")
-        scenarios.pop(args.scenario)
-        changed = True
-    elif args.set_text is not None:
-        text = args.set_text.strip()
-        if args.scenario:
-            if not text:
-                raise SystemExit("An empty scenario makes no sense — use --remove.")
-            scenarios[args.scenario] = text
-        else:
-            brief["default"] = text or None
-        changed = True
-
-    if changed:
-        write_json(path, raw)
-
-    data = {
-        "pack": pack.name,
-        "configPath": posix(path),
-        "accepts": pack.run_policy["prompt"]["accepts"],
-        "standing": brief.get("default"),
-        "scenarios": [{"name": k, "text": v} for k, v in sorted(scenarios.items())],
-        "changed": changed,
-    }
-
-    def human():
-        print(f"\n  {out.bold(pack.name)}  {out.dim(posix(path))}\n")
-        if not data["accepts"]:
-            print(f"  {out.warn('This pack does not take a brief.')} "
-                  f"{out.dim('The text would be written but never read.')}\n")
-        print(f"  {out.bold('standing')}  {out.dim('— applies to every run of this pack')}")
-        print(f"    {data['standing'] or out.dim('not set')}")
-        print()
-        print(f"  {out.bold('scenarios')} {out.dim('— agency run ' + pack.name + ' --scenario <name>')}")
-        if not data["scenarios"]:
-            print(f"    {out.dim('none')}")
-        for sc in data["scenarios"]:
-            print(f"    {out.ok(sc['name']):20} {out.dim(_one_line(sc['text'], 70))}")
-        print()
-
-    return _emit(args, data, human)
-
-
 def cmd_note(args) -> int:
-    """Poznámka k nálezu. Vlastní příkaz, protože poznámka není rozhodnutí."""
+    """A note on a finding. Its own command, because a note is not a decision."""
     project = _project(args)
     run = _run_with_finding(project, args.finding)
     ev = runs.append_note(run, args.finding, args.text, args.by)
@@ -2069,7 +1185,7 @@ def cmd_note(args) -> int:
 
 
 def _target_label(target: dict) -> str:
-    """Jak se cíl běhu jmenuje na jeden řádek."""
+    """What a run's target is called, in one line."""
     if target.get("pr"):
         return f"PR #{target['pr']}"
     if target.get("kind") == "workspace":
@@ -2080,54 +1196,41 @@ def _target_label(target: dict) -> str:
 def cmd_status(args) -> int:
     project = _project(args)
     all_runs = runs.load_runs(project)
-    data = []
+    rows = []
     for run in all_runs[:args.limit]:
         rec = run.record()
         dec = runs.decisions(run)
         fs = run.findings()
         agent = rec.get("agent") or {}
-        data.append({
+        rows.append({
             "id": run.id, "pack": rec.get("pack"), "status": rec.get("status"),
             "startedAt": rec.get("startedAt"),
-            # Who took it. With several specialists over one pack the pack name
-            # no longer identifies the run — and comparing them is the reason
-            # for hiring more than one.
-            "hire": agent.get("hire"),
             "provider": agent.get("provider"),
             "model": agent.get("model"),
             "target": (rec.get("target") or {}).get("pr"),
             "kind": (rec.get("target") or {}).get("kind"),
-            # Popisek cíle skládá jádro, ne klient — běh bez PR by se v UI
-            # jinak ukazoval jako holé ULID.
             "targetLabel": _target_label(rec.get("target") or {}),
-            "brief": (rec.get("brief") or {}).get("focus")
-                     or (rec.get("brief") or {}).get("standing"),
-            # Chain membership. The client groups runs that belonged together
-            # by it — without it a team looks like several unrelated runs.
+            "prompt": rec.get("prompt"),
             "chain": rec.get("chain"),
-            # Why a run failed, and how much of that was missing permission
-            # rather than missing findings. A panel showing only a red icon
-            # sends the user back to the terminal to find out which.
             "exitReason": rec.get("exitReason"),
             "denied": (agent.get("denied") or {}).get("count") or 0,
-            # What the run left behind besides findings. `agent.md` is where an
-            # unattended agent's own words end up, and for a run that was
-            # refused every write it is the only place they exist.
             "outputs": [n for n in ("summary.md", "handoff.md", "agent.md")
                         if (run.dir / n).is_file()],
             "findings": len(fs), "undecided": sum(1 for f in fs if f.get("id") not in dec),
         })
 
+    installed = [p.name for p in packs.available(project)]
+    payload = {"project": {"name": project.name, "slug": project.slug,
+                           "root": posix(project.root), "packs": installed},
+              "runs": rows}
+
     def human():
         print(f"\n  {out.bold(project.name)}  {out.dim(posix(project.root))}")
-        installed = [f"{n} {v.get('ref')}" for n, v in (project.installed().get("packs") or {}).items()]
-        print(f"  {out.dim('packs:')} {', '.join(installed) or out.dim('none')}")
-        crew = [f"{h.id} ({h.label})" for h in hires.roster(project)]
-        print(f"  {out.dim('hired:')} {', '.join(crew) or out.dim('nobody')}\n")
-        if not data:
+        print(f"  {out.dim('packs:')} {', '.join(installed) or out.dim('none')}\n")
+        if not rows:
             print(f"  {out.dim('No runs yet.')}\n")
             return
-        for d in data:
+        for d in rows:
             icon = {"ok": out.ok("✓"), "no-findings": out.ok("○"), "running": out.warn("…"),
                     "abandoned": out.dim("×"), "failed": out.err("✗")}.get(
                         d["status"], out.dim("·"))
@@ -2137,259 +1240,20 @@ def cmd_status(args) -> int:
             print(f"  {icon} {d['id'][:10]} {pr[:18]:18} {d['findings']:3} findings "
                   f"{out.dim(f'{d['undecided']} undecided'):24} {out.dim(d['startedAt'] or '')}"
                   f"{'  ' + tag if tag else ''}")
-        open_runs = [d for d in data if d["status"] == "running"]
+        open_runs = [d for d in rows if d["status"] == "running"]
         if open_runs:
             print(f"\n  {out.warn('still open:')} "
                   f"{', '.join(d['id'][:10] for d in open_runs)}")
-            print(out.dim("  A run stays open until someone closes it — nothing here can see "
-                          "the terminal it runs in."))
+            print(out.dim("  A run stays open until someone closes it."))
             print(out.dim("  Close them: agency cleanup --unfinished"))
         print()
 
-    return _emit(args, data, human)
-
-
-# ---------------------------------------------------------------- backlog
-
-def _backlog_ctx(args) -> tuple[config.Project, dict, "backlog.Board", runs.Run | None, dict | None]:
-    """Everything a backlog command needs, resolved once.
-
-    The run is optional on purpose. `agency backlog list` has to work before
-    anything has been run, and a write made outside a run is still a legitimate
-    write — it just signs without a run id and leaves no ledger entry.
-    """
-    project = _project(args)
-    pack_name = getattr(args, "pack", None) or "po"
-    cfg = _pack_cfg(project, pack_name)
-
-    run = None
-    if getattr(args, "run", None):
-        run = runs.find_run(project, args.run)
-        if run is None:
-            raise SystemExit(f"Run “{args.run}” is not in this project.")
-    else:
-        # The run still in flight wins over the last finished one: a write made
-        # while a session is open belongs to that session, and its ledger is
-        # what the session will report on at the end.
-        mine = [r for r in runs.load_runs(project)
-                if str(r.record().get("pack", "")).split("@")[0] == pack_name]
-        run = next((r for r in mine if r.record().get("status") == "running"),
-                   mine[0] if mine else None)
-
-    hire = (run.record().get("agent") if run else None) or None
-    try:
-        board = backlog.Board.of(project, cfg)
-    except backlog.BacklogError as e:
-        raise SystemExit(str(e))
-    return project, cfg, board, run, hire
-
-
-def _body_of(args, text_attr: str, file_attr: str, what: str) -> str:
-    """Body from a flag or from a file.
-
-    The file is not a convenience. A ticket body is markdown with newlines and
-    quotes, and passing it through a Windows command line is how it arrives
-    mangled — the agent writes it into the run directory and points at it.
-    """
-    path = getattr(args, file_attr, None)
-    if path:
-        p = Path(path)
-        if not p.is_file():
-            raise SystemExit(f"{what} file “{path}” does not exist.")
-        return p.read_text(encoding="utf-8")
-    text = getattr(args, text_attr, None)
-    if not text:
-        raise SystemExit(f"{what} is missing — pass --{text_attr.replace('_', '-')} "
-                         f"or --{file_attr.replace('_', '-')}.")
-    return text
-
-
-def _backlog_emit(args, data: dict, headline: str) -> int:
-    def human():
-        icon = {"created": out.ok("+"), "promoted": out.ok("↑"),
-                "commented": out.ok("»"), "exists": out.dim("="),
-                "moved": out.ok("→"), "labelled": out.ok("#")}
-        print(f"\n  {icon.get(data.get('action'), out.dim('·'))} {headline}")
-        for key in ("url", "item", "number", "why", "boardError"):
-            if data.get(key):
-                print(f"    {out.dim(f'{key}: {data[key]}')}")
-        for extra in ("status", "labels"):
-            sub = data.get(extra)
-            if isinstance(sub, dict) and sub.get("action") not in (None, "skipped"):
-                what = sub.get("to") or ", ".join(sub.get("labels") or []) or ""
-                print(f"    {out.dim(extra + ': ' + str(sub.get('action')) + ' ' + what)}")
-        if data.get("dryRun"):
-            print(f"    {out.warn('rehearsal — nothing was posted')}")
-        print()
-
-    return _emit(args, data, human)
-
-
-def cmd_backlog(args) -> int:
-    """The product queue: read it, write to it, and record what was written.
-
-    An agent calls this the same way a human does — `agency triage` set that
-    precedent and the reason is the same one. If posting a ticket were
-    something the pack did by shelling out to `gh` itself, the signature, the
-    idempotence marker and the write gate would live in a prompt, which is the
-    one place none of them can be enforced.
-    """
-    needs_ref = {"promote", "comment", "decide"}
-    if args.action in needs_ref and not args.ref:
-        raise SystemExit(f"`agency backlog {args.action}` needs a ticket — an issue "
-                         "number or a board item id.")
-    if args.action in {"issue", "draft"} and not args.title:
-        raise SystemExit(f"`agency backlog {args.action}` needs --title.")
-    if args.action == "decide":
-        if not args.decision:
-            raise SystemExit("Decide what? `agency backlog decide <ref> "
-                             + "|".join(backlog.DECISIONS) + ' --because "…"')
-        if not (args.because or "").strip():
-            # A decision with no reason is the thing this pack exists to stop
-            # producing. It costs one sentence and it is the whole value.
-            raise SystemExit("A decision needs --because. It is posted on the ticket, "
-                             "and a cut nobody can read is how a backlog loses trust.")
-
-    project, cfg, board, run, hire = _backlog_ctx(args)
-    dry = bool(getattr(args, "dry_run", False)) or backlog.is_rehearsal(cfg)
-
-    def refuse(message: str) -> int:
-        if getattr(args, "json", False):
-            print(json.dumps({"ok": False, "reason": "write-gate", "message": message},
-                             ensure_ascii=False, indent=2))
-        else:
-            print(f"\n  {out.warn('!')} {message}\n")
-        return 1
-
-    def gate(action: str) -> str | None:
-        ok, why = backlog.allowed(cfg, action)
-        return None if ok else why
-
-    try:
-        # ------------------------------------------------------------ list
-        if args.action == "list":
-            snap = backlog.snapshot(board, cfg, state=args.state)
-            rows = snap["items"]
-            if args.mine:
-                rows = [r for r in rows if r.get("agencyKey")]
-
-            def human():
-                counts = f"{snap['issues']} issues · {snap['drafts']} drafts"
-                print(f"\n  {out.bold(board.slug)}"
-                      + (f"  {out.dim('board #' + str(board.project_number))}"
-                         if board.has_project else "")
-                      + f"  {out.dim(counts)}\n")
-                if not rows:
-                    print(f"  {out.dim('Nothing on the queue.')}\n")
-                    return
-                for r in rows:
-                    tag = out.dim("draft") if r["kind"] == "draft" else out.ok(
-                        f"#{r.get('number')}")
-                    mine = out.dim(" · agency") if r.get("agencyKey") else ""
-                    print(f"  {tag:16} {(r.get('title') or '')[:60]:62}"
-                          f"{out.dim(','.join(r.get('labels') or []))}{mine}")
-                print()
-
-            return _emit(args, {"board": snap["board"], "items": rows,
-                                "issues": snap["issues"], "drafts": snap["drafts"]}, human)
-
-        # ---------------------------------------------------------- issue
-        if args.action == "issue":
-            if (why := gate("issue")):
-                return refuse(why)
-            body = _body_of(args, "body", "body_file", "The issue body")
-            key = args.key or backlog.key_for(args.title)
-            res = backlog.create_issue(board, cfg, args.title, body, key,
-                                       labels=args.label, run=run, hire=hire,
-                                       dry_run=dry)
-            res["dryRun"] = dry
-            backlog.append(run, {"kind": "issue", **res})
-            return _backlog_emit(args, res, f"{res['action']}  {args.title}")
-
-        # ---------------------------------------------------------- draft
-        if args.action == "draft":
-            if (why := gate("draft")):
-                return refuse(why)
-            body = _body_of(args, "body", "body_file", "The draft body")
-            key = args.key or backlog.key_for(args.title)
-            res = backlog.create_draft(board, cfg, args.title, body, key,
-                                       run=run, hire=hire, dry_run=dry)
-            res["dryRun"] = dry
-            backlog.append(run, {"kind": "draft", **res})
-            return _backlog_emit(args, res, f"{res['action']}  {args.title}")
-
-        # -------------------------------------------------------- promote
-        if args.action == "promote":
-            if (why := gate("promote")):
-                return refuse(why)
-            ref = backlog.resolve_ref(board, args.ref)
-            res = backlog.promote(board, cfg, ref, labels=args.label, dry_run=dry)
-            res["dryRun"] = dry
-            backlog.append(run, {"kind": "promote", **res})
-            return _backlog_emit(args, res,
-                                 f"{res['action']}  {ref.get('title') or args.ref}")
-
-        # -------------------------------------------------------- comment
-        if args.action == "comment":
-            if (why := gate("comment")):
-                return refuse(why)
-            text = _body_of(args, "text", "text_file", "The comment")
-            ref = backlog.resolve_ref(board, args.ref)
-            key = args.key or backlog.key_for_text(text)
-            res = backlog.comment(board, cfg, ref, text, key, run=run, hire=hire,
-                                  dry_run=dry)
-            res["dryRun"] = dry
-            backlog.append(run, {"kind": "comment", "ref": args.ref, **res})
-            return _backlog_emit(args, res,
-                                 f"{res['action']}  {ref.get('title') or args.ref}")
-
-        # --------------------------------------------------------- decide
-        if args.action == "decide":
-            ref = backlog.resolve_ref(board, args.ref)
-            body = backlog.decision_body(cfg, args.decision, args.because,
-                                         commitment=args.commitment, revisit=args.revisit)
-            key = f"decision-{args.decision}-{backlog.key_for(ref.get('title') or args.ref)}"
-
-            res: dict = {"action": "decided", "decision": args.decision,
-                         "ref": args.ref, "number": ref.get("number"),
-                         "item": ref.get("item"), "title": ref.get("title"),
-                         "dryRun": dry}
-
-            # The comment first: a decision that is not written down did not
-            # happen, and a column moved without a reason is the thing that
-            # makes people stop trusting a board.
-            if (cfg.get("policy") or {}).get("cutIsAComment", True):
-                if (why := gate("comment")):
-                    return refuse(why)
-                res["comment"] = backlog.comment(board, cfg, ref, body, key,
-                                                 run=run, hire=hire, dry_run=dry)
-                res["action"] = res["comment"].get("action", "decided")
-
-            if not backlog.allowed(cfg, "status")[0]:
-                res["status"] = {"action": "skipped", "why": "`writes.labels` is off"}
-                res["labels"] = res["status"]
-            else:
-                res["status"] = backlog.set_status(board, cfg, ref, args.decision, dry_run=dry)
-                res["labels"] = backlog.set_labels(board, cfg, ref, args.decision, dry_run=dry)
-
-            backlog.append(run, {"kind": "decide", "key": key,
-                                 "because": args.because,
-                                 "commitment": args.commitment, **res})
-            return _backlog_emit(args, res,
-                                 f"{args.decision}  {ref.get('title') or args.ref}")
-
-    except backlog.BacklogError as e:
-        raise SystemExit(str(e))
-
-    raise SystemExit(f"Unknown backlog action “{args.action}”.")
+    return _emit(args, payload, human)
 
 
 # ---------------------------------------------------------------- parser
 
 def build_parser() -> argparse.ArgumentParser:
-    # Společné přepínače jako rodič, ne jen na kořeni — jinak by `--json` šlo
-    # psát výhradně PŘED subpříkazem a `agency findings --json` by spadlo.
-    # Konzumentem toho výstupu je extension a agent, takže na tom UX záleží.
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--repo", help="project root (default: the current git repo)")
     common.add_argument("--json", action="store_true", help="machine-readable output")
@@ -2397,63 +1261,13 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="agency",
         parents=[common],
-        description="Specialists you hire into your repository. Attended, on your own "
-                    "login, with evidence-backed findings that stay.",
+        description="Specialists for this repository — skills in .claude/skills/agency-<name>/. "
+                    "Attended, on your own login, with evidence-backed findings that stay.",
     )
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    s = sub.add_parser("init", parents=[common], help="detect the project and report what is known about it")
-    s.set_defaults(fn=cmd_init)
-
-    s = sub.add_parser("packs", parents=[common], help="available specialists")
+    s = sub.add_parser("packs", parents=[common], help="the specialists in this project")
     s.set_defaults(fn=cmd_packs)
-
-    # `hire` and `add` are one command under two names on purpose. Installing
-    # the method and putting a worker on it is a single act the first time; the
-    # second time it is only the hire, and the same flags have to work for both.
-    for name, help_text in (
-            ("hire", "hire a specialist — the same pack can be hired once per provider"),
-            ("add", "install a pack into the project (alias of `hire`)")):
-        s = sub.add_parser(name, parents=[common], help=help_text)
-        s.add_argument("pack")
-        s.add_argument("--provider",
-                       help="which runner does the work — `agency providers` lists them. "
-                            "Given explicitly it adds another worker to a pack that "
-                            "already has one.")
-        s.add_argument("--model", help="model for this worker (empty = the provider default)")
-        s.add_argument("--as", dest="as_id",
-                       help="id of the hire, e.g. reviewer-strict (default: <pack>@<provider>)")
-        s.add_argument("--title", help="how this worker is named in the UI")
-        s.add_argument("--from", dest="from_path", help="path to the pack (for development)")
-        s.add_argument("--dry-run", action="store_true")
-        s.add_argument("--force", action="store_true", help="overwrite hand-modified files too")
-        s.set_defaults(fn=cmd_add)
-
-    s = sub.add_parser("roster", parents=[common],
-                       help="who is hired here — one row per worker, not per method")
-    s.set_defaults(fn=cmd_roster)
-
-    s = sub.add_parser("fire", parents=[common],
-                       help="remove a hire; the pack, its configuration and past runs stay")
-    s.add_argument("hire")
-    s.set_defaults(fn=cmd_fire)
-
-    s = sub.add_parser("providers", parents=[common],
-                       help="AI runners available on this machine")
-    s.add_argument("--add", metavar="ID", help="register a runner, e.g. grok")
-    s.add_argument("--remove", metavar="ID")
-    s.add_argument("--bin", help="the command to run (default: the id)")
-    s.add_argument("--title", help="human-readable name")
-    s.add_argument("--model-flag", default=None,
-                   help="flag carrying the model, e.g. --model")
-    s.add_argument("--dir-flag", default=None,
-                   help="flag granting access to a directory outside the working copy; "
-                        "without it the agent has to be told about the run directory itself")
-    s.add_argument("--prompt-flag", default=None,
-                   help="flag carrying the prompt (empty = passed positionally)")
-    s.add_argument("--models", help="comma-separated list of models to offer")
-    s.add_argument("--default-model", help="model used when the hire names none")
-    s.set_defaults(fn=cmd_providers)
 
     s = sub.add_parser("doctor", parents=[common], help="check the prerequisites BEFORE a run starts")
     s.set_defaults(fn=cmd_doctor)
@@ -2464,44 +1278,42 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(fn=cmd_prs)
 
     s = sub.add_parser("run", parents=[common],
-                       help="prepare a pack run — over a pull request, or over the project as it is")
-    s.add_argument("pack", metavar="who",
-                   help="hire id from `agency roster`, or a pack name — a pack name "
-                        "means its first worker")
+                       help="run a pack — over a pull request, or over the project as it is")
+    s.add_argument("pack", help="a pack name, e.g. review-graph")
     s.add_argument("--pr", type=int, help="PR number (default: the PR of the current branch)")
     s.add_argument("--latest-merged", action="store_true",
                    help="the last merged PR — retrospective audit")
-    s.add_argument("--prompt", "-p",
-                   help="what this run should focus on — free text, for packs that take a brief")
-    s.add_argument("--scenario", help="a named brief from the pack configuration (brief.scenarios)")
+    s.add_argument("--prompt", "-p", help="what this run should focus on — free text")
     s.add_argument("--since", help="base ref for a run over the project (default: the default branch)")
     start = s.add_mutually_exclusive_group()
     start.add_argument("--launch", action="store_true",
                        help="start the agent right away and hand this terminal over to it")
     start.add_argument("--wait", action="store_true",
                        help="start the agent, wait for it, and run the gate when it ends")
-    s.add_argument("--model", help="model for this run (overrides the hire and the configuration)")
-    s.add_argument("--provider",
-                   help="run this one on a different runner — `agency providers` lists them")
+    s.add_argument("--model", help="model for this run (default: the provider's default)")
+    s.add_argument("--provider", choices=providers.known(),
+                   help="which runner does the work (default: claude)")
+    s.add_argument("--bypass", action="store_true",
+                   help="no authorization checks at all — the worktree is throwaway, the machine is not")
     s.add_argument("--force", action="store_true", help="a draft or an already reviewed commit too")
     s.set_defaults(fn=cmd_run)
 
     s = sub.add_parser("chain", parents=[common],
                        help="run specialists one after another, each judging what the previous one found")
-    s.add_argument("members", metavar="who", nargs="+",
-                   help="two or more hire ids or pack names, in the order they should run")
+    s.add_argument("members", metavar="pack", nargs="+",
+                   help="two or more pack names, in the order they should run")
     s.add_argument("--pr", type=int, help="PR number (default: the PR of the current branch)")
     s.add_argument("--latest-merged", action="store_true",
                    help="the last merged PR — retrospective audit")
-    s.add_argument("--prompt", "-p",
-                   help="what the chain should focus on — every member gets it")
-    s.add_argument("--focus", action="append", metavar="WHO:TEXT",
-                   help="a brief for one member only, e.g. --focus po:\"is it worth it?\" "
+    s.add_argument("--prompt", "-p", help="what the chain should focus on — every member gets it")
+    s.add_argument("--focus", action="append", metavar="PACK:TEXT",
+                   help="a prompt for one member only, e.g. --focus po:\"is it worth it?\" "
                         "(repeatable; overrides --prompt for that member)")
-    s.add_argument("--scenario", help="a named brief from the pack configuration (brief.scenarios)")
     s.add_argument("--since", help="base ref for a run over the project (default: the default branch)")
-    s.add_argument("--model", help="model for every step (overrides the hire and the configuration)")
-    s.add_argument("--provider", help="runner for every step — a chain runs on one provider")
+    s.add_argument("--model", help="model for every step")
+    s.add_argument("--provider", choices=providers.known(),
+                   help="runner for every step — a chain runs on one provider (default: claude)")
+    s.add_argument("--bypass", action="store_true", help="no authorization checks at all, every step")
     s.add_argument("--force", action="store_true", help="a draft or an already reviewed commit too")
     s.add_argument("--keep-worktree", action="store_true",
                    help="do not remove the team's worktree after a successful chain")
@@ -2513,8 +1325,6 @@ def build_parser() -> argparse.ArgumentParser:
                    help="drop keys from the record that run.v1 does not know")
     s.set_defaults(fn=cmd_validate)
 
-    # Jedny dveře ke grafu. `--repo` míří na worktree běhu, když se agent ptá
-    # odtamtud — index je tam zkopírovaný a doindexovaný přípravou.
     s = sub.add_parser("graph", parents=[common],
                        help="ask the code graph — one door for the core and the agent, JSON out")
     gsub = s.add_subparsers(dest="verb", required=True)
@@ -2541,7 +1351,7 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("ingest", parents=[common],
                        help="the gate: contract, existence, threshold, dedup — BEFORE a finding becomes a finding")
     s.add_argument("--run", help="run id (default: the latest)")
-    s.add_argument("--min-score", type=int, help="overrides review.minScore from the configuration")
+    s.add_argument("--min-score", type=int, help="overrides the pack's minScore")
     s.set_defaults(fn=cmd_ingest)
 
     s = sub.add_parser("knowledge", parents=[common],
@@ -2551,60 +1361,18 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(fn=cmd_knowledge)
 
     s = sub.add_parser("metrics", parents=[common],
-                       help="precision, dedup, queue age — by dimension, severity, "
-                            "specialist and model")
-    s.add_argument("--all-projects", action="store_true", help="across the project registry")
+                       help="precision, dedup, queue age — by dimension, severity and provider")
     s.set_defaults(fn=cmd_metrics)
 
-    s = sub.add_parser("export", parents=[common], help="one-way push into a GitHub Project")
-    s.add_argument("target", choices=["github"])
-    s.add_argument("--pack", default="review-graph")
+    s = sub.add_parser("export", parents=[common], help="one-way push of decided findings into a GitHub Project")
     s.add_argument("--run", help="a single run only (default: all)")
-    s.add_argument("--project", dest="project_number", type=int,
-                   help="Project number (default: sinks.githubProject)")
+    s.add_argument("--project", dest="project_number", type=int, required=True,
+                   help="Project number")
     s.add_argument("--owner", help="Project owner (default: from the git remote)")
     s.add_argument("--include-undecided", action="store_true",
                    help="undecided findings too")
     s.add_argument("--dry-run", action="store_true", help="only show what would be sent")
     s.set_defaults(fn=cmd_export)
-
-    # The product queue. Every write is signed, marked and gated by `writes.*`
-    # in the pack configuration — which is why the pack calls this instead of
-    # calling `gh` itself. An agent is a first-class client here, exactly as it
-    # is for `agency triage`.
-    s = sub.add_parser("backlog", parents=[common],
-                       help="the product queue — issues and board drafts, written signed "
-                            "and only once")
-    s.add_argument("action", choices=["list", "issue", "draft", "promote", "comment", "decide"])
-    s.add_argument("ref", nargs="?",
-                   help="issue number, issue URL or a board item id (PVTI_…) — for "
-                        "promote, comment and decide")
-    s.add_argument("decision", nargs="?", choices=list(backlog.DECISIONS),
-                   help="for `decide`: now, next or not-now")
-    s.add_argument("--pack", default="po", help="whose configuration decides (default: po)")
-    s.add_argument("--run", help="run the write belongs to (default: the latest run of that pack)")
-    s.add_argument("--title", help="title of the issue or draft")
-    s.add_argument("--body", help="body — markdown")
-    s.add_argument("--body-file", help="file holding the body; use this for anything "
-                                       "with newlines")
-    s.add_argument("--text", help="comment text")
-    s.add_argument("--text-file", help="file holding the comment text")
-    s.add_argument("--because", help="for `decide`: why. It is posted on the ticket.")
-    s.add_argument("--commitment",
-                   help="for `decide`: the roadmap line this was measured against")
-    s.add_argument("--revisit", help="for `decide`: when it will be looked at again")
-    s.add_argument("--label", action="append", help="issue label (repeatable)")
-    s.add_argument("--key", help="idempotence key (default: derived from the title) — "
-                                "the same key is never written twice")
-    s.add_argument("--mine", action="store_true",
-                   help="for `list`: only what this pack has written")
-    s.add_argument("--state", choices=["open", "closed", "all"], default="open")
-    s.add_argument("--dry-run", action="store_true",
-                   help="rehearse it: show exactly what would be posted, post nothing")
-    s.set_defaults(fn=cmd_backlog)
-
-    s = sub.add_parser("projects", parents=[common], help="projects where Agency is doing something")
-    s.set_defaults(fn=cmd_projects)
 
     s = sub.add_parser("cleanup", parents=[common],
                        help="close a run that is not coming back and remove its worktree")
@@ -2632,23 +1400,6 @@ def build_parser() -> argparse.ArgumentParser:
                    help="who decides — `hire:<id>` for a specialist (ready-made in context.json), `human` for a person")
     s.set_defaults(fn=cmd_triage)
 
-    s = sub.add_parser("config", parents=[common],
-                       help="pack configuration — show it, or change it with --set")
-    s.add_argument("pack")
-    s.add_argument("--set", dest="set_pairs", action="append", metavar="KEY=VALUE",
-                   help="dotted path, JSON value (repeatable): --set playwright.enabled=true")
-    s.add_argument("--unset", action="append", metavar="KEY", help="remove a key")
-    s.set_defaults(fn=cmd_config)
-
-    s = sub.add_parser("brief", parents=[common],
-                       help="the standing brief of a pack and its named scenarios — show or set")
-    s.add_argument("pack")
-    s.add_argument("--set", dest="set_text",
-                   help="new text; without --scenario it becomes the standing brief")
-    s.add_argument("--scenario", help="name of the scenario the text belongs to")
-    s.add_argument("--remove", action="store_true", help="remove the scenario given by --scenario")
-    s.set_defaults(fn=cmd_brief)
-
     s = sub.add_parser("note", parents=[common], help="a note on a finding — free text, not a decision")
     s.add_argument("finding")
     s.add_argument("text")
@@ -2656,7 +1407,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="who decides — `hire:<id>` for a specialist (ready-made in context.json), `human` for a person")
     s.set_defaults(fn=cmd_note)
 
-    s = sub.add_parser("status", parents=[common], help="overview of the project runs")
+    s = sub.add_parser("status", parents=[common], help="overview of the project's runs")
     s.add_argument("--limit", type=int, default=10)
     s.set_defaults(fn=cmd_status)
 
@@ -2664,9 +1415,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _force_utf8() -> None:
-    """Windows konzole i roura jedou default v cp1250 a `→`, `✓` nebo diakritika
-    z nich vylezou jako UnicodeEncodeError. `reconfigure` na to nestačí, když je
-    stream už navázaný — spolehlivé je obalit rovnou binární buffer."""
+    """Windows console and pipes default to cp1250, and `→`, `✓` or diacritics
+    come out as UnicodeEncodeError. `reconfigure` is not enough once the
+    stream is already bound — wrapping the binary buffer directly is."""
     import io as _io
     for name in ("stdout", "stderr"):
         stream = getattr(sys, name, None)

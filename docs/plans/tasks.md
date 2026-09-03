@@ -203,7 +203,7 @@ Hindsight adaptér byl 1. 9. 2026 postavený (`edbf924`, 19 souborů, 846 řádk
 - [x] **Krok 3** — `proc.stream` + `events.py`, průběh v terminálu, `agent.jsonl` / `agent.md`, `agent.turns/denied`, `cost.usd`; `run.v1` rozšířit napřed
 - [x] **Krok 6** — `trigger.attended` a `cost.credential` z faktů, zpráva řetězu, `validate --fix`
 - [x] **Krok 7** — extension: `failed` krok, otevřít summary/handoff/agent.md
-- [ ] **Krok 8** — přejímka: sedm podmínek nad `main-panel` PR #479, všechny najednou
+- [ ] **Krok 8** — přejímka: sedm podmínek nad `main-panel` PR #479, všechny najednou — **je součást Fáze 10 Kroku 7**: řetěz má běžet nad zjednodušenými packy, ne nad těmi, které se právě ruší
 
 **Hotovo, když:** projde Krok 8. Ne dřív — dnešní opravy byly každá ověřená tím, že se agent spustil, a žádná tím, že něco zapsal.
 
@@ -214,6 +214,42 @@ Hindsight adaptér byl 1. 9. 2026 postavený (`edbf924`, 19 souborů, 846 řádk
 - **`worktree_owned` a „jsem ve worktree" přestaly být totéž.** Člen řetězu pracuje v jednorázovém checkoutu, který nesmí smazat. Dokud to byla jedna proměnná, dostal by buď `pages: null` chybně, nebo by po sobě uklidil worktree ostatním členům pod rukama.
 - **Data, která nikdo nečte, jsou mrtvá data.** `streamArgs` se dostaly do tabulky providera a na příkazovou řádku nikdy — orchestrátor tedy parsoval proud, o který nepožádal, a řetěz mlčel dvacet minut stejně jako předtím. Chytil to až uživatel na reálném běhu; testy krmily JSONL rovnou parseru, takže ověřovaly překladač a ne to, že se o překlad žádá. Flagy a dialekt teď vrací jedno volání (`providers.streaming()`) a test kouká do argv.
 - **Codexí větev zůstává neověřená.** `--sandbox workspace-write`, `--add-dir` i `--json` jsou přečtené z nápovědy 0.144.3, ne odjeté. Roster uživatele je dnes celý `@claude`; první codex řetěz to musí potvrdit. Napsat to jako data a přiznat to v komentáři je lepší než to neuvést vůbec.
+
+---
+
+## Fáze 9 — PO, který svoje rozhodnutí zapíše (~4 h + sonda)
+
+> [`po-writes.md`](po-writes.md). Vzniklo 2. 9. 2026 z prvního reálného běhu `po@codex` nad ostrým backlogem: agent za 41 minut rozhodl o 25 issues a 66 draftech a na nástěnce se nehnulo nic.
+
+- [ ] **Krok 4** — `roadmap.cycle` / `capacity` / `goals` jako podmínka `agency run`, ne jako nález se skóre 99 po 41 minutách
+- [ ] **Krok 1** — `writes.status` jako vlastní přepínač; přesun sloupce přestane viset na povolení editovat štítky
+- [ ] **Krok 2** — `draftId` (`DI_…`) skrz snapshot i `resolve_ref`; 66 z 91 položek fronty přestane být nezapsatelných
+- [ ] **Krok 3** — codex bez dotazů na svolení: sonda nad uv trampolínou, pak jedna oprava, a doctor ověřující entrypoint tak, jak ho zavolá agent
+- [ ] **Krok 5** — `run.json` → `toolIssues[]`; vada nástroje přestane téct do produktové fronty a do precision
+- [ ] **Krok 6** — otisk konfigurace na startu běhu; bránu nepřepíše ani ten, koho brání
+
+**Hotovo, když:** projde přejímka ([`po-writes.md`](po-writes.md) §6) — šest podmínek nad jedním během, a nad nimi jedna lidská: po běhu je na nástěnce vidět, co PO rozhodl, aniž by se otevřel VS Code.
+
+Kroky 1, 2 a 4 jsou na sobě nezávislé a jsou to dohromady čtyři hodiny. Krok 3 se dělá pro celý nástroj, ne pro PO — blokuje každý codexí běh a je to ta codexí větev, kterou si Fáze 8 zapsala jako nepotvrzenou.
+
+> **Sladěno s Fází 10 (2. 9. 2026 odpoledne):** Kroky 1, 4 a 6 opravují psaní uvnitř konfigurace, kterou Fáze 10 ruší — **zanikají**. Krok 2 (`draftId`) se dělá ve skriptu packu (Fáze 10 Krok 3), Kroky 3 a 5 zůstávají v jádru beze změny a jdou udělat kdykoli. Tabulka v [`agency-v1.md`](agency-v1.md) §4.
+
+---
+
+## Fáze 10 — Agency v1: redefinice od začátku (~6 dní)
+
+> [`agency-v1.md`](agency-v1.md). Vzniklo 2. 9. 2026: konfigurace QA agenta se 40 klíči, všechny `null`, a nástroj, který za tři dny dostal tvar platformy. Definice se píše znovu — jeden uživatel, jeden projekt (`main-panel`), čtyři specialisté jako skilly v repu projektu, pět workflow, **žádná konfigurace**. Přestavba je mazání (~6 000 z 21 000 řádků), ne přepis. Ruší Kroky 1, 4 a 6 Fáze 9; nahrazuje smazaný plán packů z téhož dne.
+
+- [x] **Krok 0** — `git tag v0-2026-09-02`
+- [x] **Krok 1** — runner bez konfigurace: pryč šablony, `pack_config`, `brief`, roster, `providers.json`, registr projektů, `agent.*`; `--provider/--model/--bypass` jako flagy; `context.json` podle §3.3 — **161/161 testů**, jádro 5 476 řádků (cíl < 9 000)
+- [x] **Krok 2** — pack je skill v projektu: `packs.available()` čte `.claude/skills/*/pack.json`; pryč instalace, hash, `installed.json`, bundling; main-panel: `pack.json` do čtyř skillů, smazáno `.agency/*.json`, `.gitignore` jen na `runs/` a `*.local.json`
+- [x] **Krok 3** — paměť bez frontmatteru: pryč `okf.py`, `rank.py`; stránky s `Last reviewed:`; `--rebuild` ověřeno na main-panelu (`agency knowledge --rebuild` → `4 pages (po 2, qa 2)`)
+- [x] **Krok 4** — extension jako viewer: pryč formuláře, roster, brief, launch-argv; spuštění = `agency run …` do terminálu; `package.json` 0.6.0, harness přepsaný od nuly (37/37), VSIX zabalený a nainstalovaný
+- [x] **Krok 5** — čtyři packy pro main-panel z původních agentů: PO se `scripts/backlog.py` (živě ověřeno proti reálnému `main-panel` — snapshot 225 issues, 63 draftů) a seedem `decisions.md`, QA se stagingem a personami, právník s Project facts, recenzent; všechny anglicky; `packs/` v tomhle repu je teď kopie těch čtyř adresářů
+- [x] **Krok 6** — README z `agency --help`, product-brief pravidlo 5 a tabulka pojmů, řádek do README obou původních agentů
+- [ ] **Krok 7** — přejímka: pět workflow reálně nad main-panelem (W2 = sedm podmínek Fáze 8 Kroku 8) — **čeká na vědomé spuštění**, protože jde o reálné zápisy na GitHub a reálné běhy agentů, ne o něco, co má smysl pouštět bez dohledu
+
+**Hotovo, když:** projde Krok 7 — všech pět workflow z jedné řádky, bez sáhnutí do jediného JSONu. Kroky 0–6 hotové 2. 9. 2026.
 
 ---
 
@@ -240,5 +276,7 @@ Hindsight adaptér byl 1. 9. 2026 postavený (`edbf924`, 19 souborů, 846 řádk
 | 6 — knowledge pages | shared-memory Krok 4 | ~1 den | 5 |
 | 7 — lexikální ranker | shared-memory Krok 5 | ~2 h | 5 |
 | 8 — neattended běh | [`unattended.md`](unattended.md) Kroky 1–8 | ~3 dny | 1 (chain je hotový) |
+| 9 — PO zapíše, co rozhodne | [`po-writes.md`](po-writes.md) Kroky 2, 3, 5 (1, 4, 6 ruší Fáze 10) | ~4 h + sonda | nic |
+| 10 — Agency v1, redefinice | [`agency-v1.md`](agency-v1.md) Kroky 0–7 | ~6 dní | 8 (Krok 8 přejímky je součást Kroku 7) |
 
 Fáze 0–3 jsou **~2 dny** a uzavírají graf. Fáze 0–6 jsou **~6 dní** a dají paměť, která patří projektu a čte ji každý provider. Fáze 7 je dvě hodiny nad hotovým bundlem a nepřidává závislost — verze s démonem přidávala a byla proto zamítnuta.

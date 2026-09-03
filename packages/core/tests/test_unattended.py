@@ -20,7 +20,7 @@ import json
 
 import pytest
 
-from agency import chain as chains, cli, events, ingest, packs, proc, providers, runs
+from agency import chain as chains, cli, events, ingest, proc, providers, runs
 from agency.util import write_json
 
 
@@ -33,7 +33,7 @@ def test_unattended_agent_is_allowed_to_write():
     Probed on claude 2.1.258: without `--permission-mode acceptEdits` a Write
     into the very directory handed over by `--add-dir` comes back denied.
     """
-    argv, _ = runs.launch_argv({}, "/mem", "do the work", provider="claude")
+    argv, _ = runs.launch_argv("/mem", "do the work", provider="claude")
 
     assert "--permission-mode" in argv
     assert argv[argv.index("--permission-mode") + 1] == "acceptEdits"
@@ -43,7 +43,7 @@ def test_the_pack_declares_what_it_may_call():
     """`acceptEdits` grants Write, not commands. A specialist that cannot run
     `agency triage` cannot decide on a finding, which is the whole reason a
     second member exists."""
-    argv, _ = runs.launch_argv({}, "/mem", "p", provider="claude",
+    argv, _ = runs.launch_argv("/mem", "p", provider="claude",
                                needs=["agency triage", "code-review-graph"])
 
     assert "Bash(agency triage *)" in argv
@@ -53,28 +53,16 @@ def test_the_pack_declares_what_it_may_call():
 def test_a_bare_command_is_allowed_too():
     """Probed: `Bash(git status *)` on its own does not cover a bare
     `git status`, so both shapes are emitted."""
-    argv, _ = runs.launch_argv({}, "/mem", "p", provider="claude", needs=["git"])
+    argv, _ = runs.launch_argv("/mem", "p", provider="claude", needs=["git"])
 
     assert "Bash(git *)" in argv and "Bash(git)" in argv
-
-
-def test_the_project_may_widen_the_list_but_not_narrow_it():
-    """A manifest describes the method. If a project could trim it, a run would
-    quietly do half of what its pack promises and a missing finding would be
-    indistinguishable from a missing permission."""
-    cfg = {"agent": {"provider": "claude", "allow": ["gh api"]}}
-
-    argv, _ = runs.launch_argv(cfg, "/mem", "p", needs=["git"])
-
-    assert "Bash(gh api *)" in argv, "the project's addition is there"
-    assert "Bash(git *)" in argv, "and the pack's own is still there"
 
 
 def test_the_allow_list_never_stands_right_before_the_prompt():
     """`--allowedTools` is variadic exactly like `--add-dir`, and that one
     already swallowed a positional prompt once (commit 8186673). Another flag
     has to follow it."""
-    argv, _ = runs.launch_argv({}, "/mem", "the prompt", provider="claude",
+    argv, _ = runs.launch_argv("/mem", "the prompt", provider="claude",
                                needs=["git"])
 
     assert argv[-1] == "the prompt"
@@ -83,53 +71,25 @@ def test_the_allow_list_never_stands_right_before_the_prompt():
 
 
 def test_bypass_is_a_choice_and_never_the_default():
-    """The user asked for a permission bypass to be available. It is — as an
-    opt-in written into the pack's configuration, because `acceptEdits` plus a
-    command list covers what a method does, while a bypass covers what it is not
-    supposed to do. The worktree is throwaway; the machine is not."""
-    plain, _ = runs.launch_argv({"agent": {"provider": "claude"}}, "/m", "p")
-    bypassed, _ = runs.launch_argv(
-        {"agent": {"provider": "claude", "unattended": "bypass"}}, "/m", "p")
+    """The user asked for a permission bypass to be available. It is — as a
+    `--bypass` flag on the run, because `acceptEdits` plus a command list
+    covers what a method does, while a bypass covers what it is not supposed
+    to do. The worktree is throwaway; the machine is not."""
+    plain, _ = runs.launch_argv("/m", "p", provider="claude")
+    bypassed, _ = runs.launch_argv("/m", "p", provider="claude", bypass=True)
 
     assert "--dangerously-skip-permissions" not in plain
     assert "--dangerously-skip-permissions" in bypassed
     assert "--permission-mode" not in bypassed, "a bypass replaces the grant"
 
 
-def test_ask_grants_nothing():
-    """The off switch, for whoever would rather click the prompts themselves."""
-    argv, info = runs.launch_argv(
-        {"agent": {"provider": "claude", "unattended": "ask"}}, "/m", "p")
-
-    assert "--permission-mode" not in argv and "--allowedTools" not in argv
-    assert info["authorized"] == "ask"
-
-
-def test_an_unknown_authorization_mode_is_refused():
-    """A typo in `agent.unattended` must not silently become the default: the
-    difference between the modes is the difference between an agent that can
-    work and one that cannot."""
-    with pytest.raises(SystemExit) as e:
-        runs.launch_argv({"agent": {"provider": "claude", "unattended": "yolo"}}, "/m", "p")
-
-    assert "grant" in str(e.value)
-
-
 def test_the_record_says_how_the_agent_was_authorized():
     """Without it, "the run found nothing" and "the run was not allowed to
     write" are indistinguishable afterwards — which is exactly the position this
     project was in on 2026-09-02."""
-    _, info = runs.launch_argv({"agent": {"provider": "claude"}}, "/m", "p")
+    _, info = runs.launch_argv("/m", "p", provider="claude")
 
     assert info["authorized"] == "grant"
-
-
-def test_every_pack_declares_its_commands():
-    """A pack whose manifest forgets `run.needs` produces an agent that cannot
-    triage — and that failure looks like a clean run with no findings."""
-    for name in ("review-graph", "po", "legal", "qa"):
-        needs = packs.load(name).run_policy["needs"]
-        assert "agency triage" in needs, f"{name} cannot decide on a finding"
 
 
 # ------------------------------------------------------- nothing vs. refused
@@ -217,7 +177,7 @@ def test_streaming_is_actually_asked_for():
     The old tests could not catch it: they fed JSONL to the parser directly, so
     they proved the translator worked while nobody was requesting a translation.
     """
-    argv, _ = runs.launch_argv({}, "/mem", "p", provider="claude", stream=True)
+    argv, _ = runs.launch_argv("/mem", "p", provider="claude", stream=True)
 
     assert "--output-format" in argv
     assert argv[argv.index("--output-format") + 1] == "stream-json"
@@ -227,7 +187,7 @@ def test_streaming_is_actually_asked_for():
 def test_an_attended_run_is_not_asked_to_stream():
     """A terminal shows the agent to a person. Piping JSONL at them instead
     would be a downgrade, not a feature."""
-    argv, _ = runs.launch_argv({}, "/mem", "p", provider="claude")
+    argv, _ = runs.launch_argv("/mem", "p", provider="claude")
 
     assert "--output-format" not in argv
 
@@ -241,7 +201,7 @@ def test_the_flags_and_the_dialect_come_from_one_place():
     assert dialect == "claude-stream-json"
     assert args, "a dialect with no flags is the bug this pairs against"
 
-    argv, _ = runs.launch_argv({}, "/mem", "p", provider="claude", stream=True)
+    argv, _ = runs.launch_argv("/mem", "p", provider="claude", stream=True)
     assert all(a in argv for a in args)
 
 
@@ -255,7 +215,7 @@ def test_a_runner_with_no_dialect_gets_no_flags():
 def test_the_allow_list_is_still_protected_when_streaming():
     """`--allowedTools` is variadic. With streaming on there are two flags that
     could follow it, and the prompt must not be one of them."""
-    argv, _ = runs.launch_argv({}, "/mem", "the prompt", provider="claude",
+    argv, _ = runs.launch_argv("/mem", "the prompt", provider="claude",
                                needs=["git"], stream=True)
 
     assert argv[-1] == "the prompt" and argv[-2] == "--"
@@ -428,7 +388,7 @@ def test_nor_chains(project, monkeypatch):
 def test_the_agent_is_told_so_as_well(project):
     """The refusal is a rule, but a rule the agent runs into is a wasted turn.
     The prompt says it first."""
-    member = chains.Member("review-graph", "review-graph", None)
+    member = chains.Member("review-graph")
 
     prompt = chains.step_prompt("base", member, 1, 2, [], {"findings": 0, "undecided": 0}, None)
 

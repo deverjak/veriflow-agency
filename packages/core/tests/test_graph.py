@@ -32,12 +32,12 @@ def fake_crg(monkeypatch):
 
 # ---------------------------------------------------------- schopnosti
 
-def test_pack_nechce_po_driveru_nic_vymysleneho():
+def test_pack_nechce_po_driveru_nic_vymysleneho(project):
     """Politika packu je seznam verbů, ne volný text. Kdyby si pack vyžádal
     `tests_for` místo `tests-for`, doctor by hlásil chybějící schopnost
     u driveru, který ji umí — a nikdo by nepoznal proč."""
     known = set(graph.capabilities())
-    for pack in packs.available():
+    for pack in packs.available(project):
         policy = pack.run_policy["graph"]
         if not policy:
             continue

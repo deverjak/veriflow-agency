@@ -68,12 +68,18 @@ class Tally:
 
 
 def _who(rec: dict) -> tuple[str, str, str]:
-    """Model, provider and hire of a run — the three ways to slice by worker."""
+    """Model, provider and worker of a run — the three ways to slice by who did it.
+
+    There is no roster: `worker` is the naming convention `pack@provider`, the
+    same identity `runs.worker_id` writes into `by`. It slices finer than
+    `provider` alone once a project runs the same pack on two providers.
+    """
     agent = rec.get("agent") or {}
     cost = rec.get("cost") or {}
     model = agent.get("model") or cost.get("model") or "default"
     provider = agent.get("provider") or cost.get("provider") or "default"
-    return model, provider, agent.get("hire") or provider
+    pack = rec.get("pack") or "?"
+    return model, provider, agent.get("hire") or f"{pack}@{provider}"
 
 
 def collect(project: Project, runs: list[Run] | None = None) -> dict:

@@ -1,643 +1,304 @@
 # VeriFlow Agency
 
-Specialisté, které si najmeš do repozitáře. Attended, na tvém přihlášení,
-s doloženými nálezy, které zůstanou.
+Specialists for a repository. Attended, on your own login, with evidence-backed
+findings that stay.
 
-**Recenzent** projde pull request — otevřený i mergnutý — zkříží změny se skutečnou
-strukturou kódu z `code-review-graph` a napíše nálezy.
+A specialist is not something you install — it is a **skill that lives in the
+target project**, next to the code it works on:
+`.claude/skills/agency-<name>/pack.json` beside its `SKILL.md`. Nothing hires
+it, nothing configures it. What it knows about the project — which repo,
+which board, which staging URL, which law applies — is written into the skill
+as fact, the same way the code itself is project-specific. A second project
+gets a **copy** of the pack and rewrites its facts, not a shared parameter.
 
-**QA** prozkoumá běžící aplikaci podle zadání, které napíšeš ty: *„vyzkoušej
-rezervaci lekce jako nový uživatel, včetně platby“*. Metoda je pro všechny
-projekty stejná, zadání ne — a právě zadání dělá ze specialisty tvého.
-Ke každému nálezu napíše **Playwright spec, který na něm spadne**; ten se uloží
-k běhu, takže „je to už opravené?" se za rok zodpoví spuštěním, ne dalším sezením.
+## The five workflows over `main-panel`
 
-**Právník** projde právní povrch produktu — VOP, podmínky pro partnery, změnová
-doložka, souhlasy, cookies, DAC7 — proti tomu, co české a evropské předpisy
-opravdu říkají. Každý nález nese citaci ustanovení přečtenou z primárního zdroje
-(e-Sbírka přes ELI, EU právo přes CELEX). A protože obecné modely v tomhle oboru
-chybují hlavně směrem nahoru, hlásí i **povinnosti, které si produkt vymyslel sám**:
-re-consent okno u změny, kterou už kryje sjednaný mechanismus, souhlas u zpracování
-běžícího na smlouvě, archiv VOP zřízený kvůli pravidlu, které neexistuje.
+This is the whole product. `agency` runs specialists against one project;
+what each one finds goes through a gate (evidence required, no duplicates),
+gets a decision from a human, and stays in the project's own memory.
 
-**Product owner** drží roadmapu proti tomu, co se opravdu staví. Nahraješ mu
-závazky, on projde otevřené issues i drafty na nástěnce a rozhodne, co se staví
-teď: na to zakládá tickety a draft issues, a co teď na řadě není, **škrtne
-a napíše proč** — na ticket, veřejně, i se závazkem, proti kterému to měřil.
-Výchozí odpověď je ne a každé ano se platí ze závazku, který v roadmapě opravdu
-je. Všechno, co pošle ven, je **podepsané jako od agenta** a nese marker, takže
-druhý běh najde, co napsal první, místo aby to napsal podruhé.
+**W1 — Review a pull request**
 
-Každý nález má evidenci, kotvu, která přežije pozdější změny kódu, a rozhodnutí,
-ze kterého se dá spočítat, kolik z toho byla pravda. Všichni specialisté píšou do
-téhož kontraktu, takže se v panelu, ve frontě i v metrikách chovají stejně.
+```
+agency run review-graph --pr 479
+```
 
-Každého z nich si můžeš najmout **jednou na každý AI runner** — recenzenta na
-Claudovi i recenzenta na Codexu — a pustit je na tentýž pull request vedle sebe.
-Sdílejí jednu konfiguraci, jednu frontu nálezů a jeden dedup, takže co druhý
-zopakuje, se označí jako duplicita místo aby se tě to ptalo dvakrát.
+Prepares a throwaway worktree on the PR's head commit, has the code graph
+compute blast radius, and gives you the command to launch the agent — in this
+terminal, or with `--wait` to launch and gate it in one step. When it is
+done:
 
-## Instalace
+```
+agency findings                     # what is waiting for a decision
+agency triage accept 01M1…          # or reject --reason by-design, or defer
+agency export --project 1           # accepted findings → GitHub Project drafts, once each
+```
+
+The same thing in the editor: findings sit next to the line of code, with
+Accept / Reject / Defer buttons.
+
+**W2 — Review with a product judgment**
+
+```
+agency chain review-graph po --pr 479 --prompt "does this change make product sense?"
+```
+
+The reviewer runs first; the product owner gets its findings **as its
+brief** — decides each one (accept / reject with a reason / defer), answers
+the question, and writes what that means for the queue. A human sees a
+judged queue, not a raw one.
+
+**W3 — Backlog grooming**
+
+```
+agency run po --prompt "what should build now, given we're waiting on the s.r.o. filing and rolling out payments"
+```
+
+The product owner snapshots the board — open issues with milestones, drafts
+with their fields, the nearest open milestone as the current cycle — decides
+each item against one of five dispositions (`BUILD-NOW`, `FIX-REMOVE-NOW`,
+`VALIDATE-CHEAPLY`, `DEFER-WITH-TRIGGER`, `REJECT`), and **writes the
+decision on the board itself**: a signed comment, a status move, a priority
+label, a draft promoted to an issue. Only what is wrong with the queue
+itself becomes a finding.
+
+**W4 — QA session on staging**
+
+```
+agency run qa --prompt "booking and cancelling a lesson, on mobile"
+```
+
+Explores the running staging application as a written-out persona, in a
+clean browser session. Every finding is reproduced before it is written, and
+anchored to the line of code that causes it.
+
+**W5 — Legal review**
+
+```
+agency run legal --prompt "terms of service for instructors before online payments launch"
+```
+
+Walks the legal surface of the product against what Czech and EU law
+actually say, citing the provision from the primary source. It also reports
+duties the product invented for itself — a re-consent screen for a change
+already covered by an existing mechanism, for instance — because a model
+tuned to be careful about law tends to over-comply, and over-compliance is
+a cost too.
+
+### Memory anyone can read
+
+`.agency/knowledge/` is a **committed** directory of markdown: a ledger of
+findings generated from runs, and pages written by the specialists
+themselves (`pages/po/decisions.md`, `pages/qa/coverage.md`,
+`pages/legal/applicability.md`, …). A plain Claude Code or Codex session in
+the repo reads it. So does a colleague in an editor. So does `agency
+knowledge`.
+
+## Installation
 
 ```powershell
 pwsh scripts/install.ps1
 ```
 
-Nainstaluje jádro přes `uv` (editable) a extension přes VSIX. Jednotlivě:
+Installs the core via `uv` (editable) and the extension as a VSIX. Individually:
 `-Core`, `-Extension`.
 
-Předpoklady: `git`, `uv`, VS Code 1.85+; recenzent navíc `gh` (přihlášené)
-a `code-review-graph`, QA s prohlížečem `node`/`npx` a stažené prohlížeče
-Playwrightu. Ověří je `agency doctor` — **před** během, ne v jeho půlce, a ptá se
-jen na to, co najatí specialisté opravdu potřebují.
+Prerequisites: `git`, `uv`, VS Code 1.85+; a reviewer additionally needs `gh`
+(logged in) and a code graph tool; QA needs Playwright's browsers installed.
+`agency doctor` checks all of it — **before** a run, not halfway through —
+and only asks about what the packs actually in the project need.
 
-## První běh
+## Shape
 
-```
-cd <projekt>
-agency hire review-graph     # nainstaluje metodu a postaví na ni prvního pracovníka
-agency doctor                # předpoklady
-agency run review-graph --pr 123
-#   … CLI vypíše hotový příkaz; spusť ho ve worktree
-agency ingest                # brána nad tím, co agent napsal
-agency findings              # co čeká na rozhodnutí
-agency triage accept <id>
-agency metrics               # precision, dedup, fronta
-```
-
-Totéž klikáním: ikona **Agency** v activity baru VS Code.
-(`agency add` je totéž pod starším jménem.)
-
-První tři řádky umí `agency run … --wait` najednou: pustí agenta v tomhle
-terminálu — pořád je vidět a dá se do něj vstoupit — počká na něj a bránu spustí
-sám. Nejde o pohodlí. Běh, u kterého se na `agency ingest` zapomene, zůstane
-navždycky `running` a jeho nálezy pro nástroj neexistují. Navíc je poprvé vidět,
-**jak** agent skončil: `agent.exitCode` v záznamu, `failed` místo mlčení, a
-změřený čas běhu, ze kterého metriky spočítají cenu za kandidáta.
-
-## Víc providerů nad jednou metodou
-
-**Pack je metoda, hire je pracovník**, který se jí drží. Táž metoda jde najmout
-jednou na každý runner:
+Three things, each with one responsibility. The boundary between them is a
+contract, not configuration.
 
 ```
-agency providers                              # co je na tomhle stroji
-agency hire review-graph --provider codex     # druhý recenzent, jiný runner
-agency hire review-graph --model opus         # nebo tentýž runner, silnější model
-agency roster                                 # kdo je tu najatý
+veriflow-agency/                     this repository
+  packages/core/     → `agency`      RUNNER — run, record, gate, triage, dedup, memory, chain, providers.
+                                     Knows nothing about any target project.
+  packages/extension/                VIEWER — runs, findings next to the line, triage by clicking.
+                                     Talks only to `agency … --json`.
+  packs/                             EXAMPLES — reference copies of main-panel's packs, for the next project.
+                                     Not bundled, not installed.
 
-agency run review-graph@claude --pr 123
-agency run review-graph@codex  --pr 123       # klidně současně, v druhém terminálu
+<target-project>/
+  .claude/skills/agency-po/          PACK = skill. Committed and versioned with the project.
+    pack.json                          what the runner needs to know
+    SKILL.md                           the method + Project facts, in English
+    references/                        policy documents (feature-admission.md, severity.md, …)
+    scripts/backlog.py                 the pack's own tool — called by the agent, not by the runner
+  .claude/skills/agency-qa/  … agency-legal/  … agency-review-graph/
+  .agency/
+    knowledge/                       MEMORY, committed
+    runs/<ULID>/                     RECORDS, gitignored (evidence, transcripts, findings.json, run.json)
 ```
 
-Ve VS Code je to jeden dialog: **Review a pull request…** se po výběru PR zeptá,
-kdo ho má vzít, a **vybrat jich smíš víc** — každý dostane vlastní terminál.
+There is no `~/.agency/`. There is no project configuration file. A pack
+lives where Claude Code already looks for a skill, and the runner finds it
+there too — `pack.json` next to `SKILL.md`. No `agency add`, no
+`installed.json`, no install step at all.
 
-Co je sdílené a co ne:
-
-| Sdílené (patří metodě) | Vlastní (patří pracovníkovi) |
-|---|---|
-| `.agency/<pack>.json` — zadání, prahy, dimenze, prohlížeč | runner a model |
-| fronta nálezů, rozhodnutí, dedup, kotvy | vlastní worktree u paralelního běhu |
-| paměť projektu — co už se našlo a jak se o tom rozhodlo | vlastní marker na PR |
-
-Poslední dva řádky jsou to, co dělá paralelní běh bezpečným: bez vlastního
-worktree by druhý recenzent prvnímu smazal rozdělanou práci, a bez vlastního
-markeru by ho z toho commitu vyzamkl.
-
-`agency metrics` pak umí to, kvůli čemu se dva providery pouštějí: rozpad
-**by specialist** a `agreement` — kolikrát našli totéž. Vysoká shoda znamená, že
-druhý runner platíš za potvrzení, ne za pokrytí, a je čas pustit ho na jiné PR.
-
-### Nový runner na stroji
-
-Když si nainstaluješ další CLI agent, není potřeba vydávat nástroj:
+### The runner — `agency --help`
 
 ```
-agency providers --add grok --bin grok --models "fast,heavy"
-agency hire review-graph --provider grok --model heavy
+agency — specialists for this repository — skills in .claude/skills/agency-<name>/.
+Attended, on your own login, with evidence-backed findings that stay.
+
+  packs       the specialists in this project
+  doctor      check the prerequisites BEFORE a run starts
+  prs         pull requests to review — open and merged
+  run         run a pack — over a pull request, or over the project as it is
+  chain       run specialists one after another, each judging what the previous one found
+  validate    check findings.json against the contract and the anchors against the code
+  graph       ask the code graph — one door for the core and the agent, JSON out
+  ingest      the gate: contract, existence, threshold, dedup — BEFORE a finding becomes a finding
+  knowledge   what the project knows, as committed markdown — readable without Agency
+  metrics     precision, dedup, queue age — by dimension, severity and provider
+  export      one-way push of decided findings into a GitHub Project
+  cleanup     close a run that is not coming back and remove its worktree
+  findings    findings and their decisions
+  triage      decide on a finding — an agent calls this too
+  note        a note on a finding — free text, not a decision
+  status      overview of the project's runs
 ```
 
-Provider je vlastnost **stroje** (`~/.agency/providers.json`), roster vlastnost
-**projektu** (`.agency/hires.json`, commituje se). Proto `agency doctor` řekne
-„tenhle specialista u tebe běžet nemůže, `grok` není na PATH" místo aby to
-zjistil až běh — kolega, který si repo naklonuje, nemusí mít tvoje nástroje.
+Sixteen commands. There is no `init`, `add`, `hire`, `fire`, `roster`,
+`providers`, `projects`, `config`, `brief`, or `backlog`. `agency run <pack>`
+prepares the run and prints the ready command; `--wait` launches the agent
+and runs the gate itself when it finishes; `--launch` hands this terminal
+over to the agent directly; `--json` only prepares, for the extension.
 
-## QA sezení
+Providers are **two, and they are in code** — a table of `claude` and
+`codex` in `providers.py`: binary, flags, authorization shape, streaming
+dialect. A third runner is a row in that table, not a registry. Every run
+is authorized to write into its own worktree and `.agency/`, plus whatever
+its pack's `needs` names; `--bypass` turns that check off entirely, for a
+sandbox that will not otherwise let the agent run its own binary.
 
-```
-agency hire qa
-#   … do .agency/qa.json doplň app.baseUrl (kde aplikace běží)
+### A pack — `pack.json`
 
-agency brief qa --set "Rezervační aplikace pro lekce. Nejdůležitější je rezervace a platba."
-agency run qa --prompt "vyzkoušej rušení rezervace na mobilu"
-
-#   uložené zadání pro opakovaná sezení
-agency brief qa --scenario smoke --set "přihlášení, dashboard, jedna rezervace"
-agency run qa --scenario smoke
-```
-
-Zadání má dvě vrstvy, protože každá platí jinak dlouho: **trvalé** (`brief.default`
-v konfiguraci projektu) platí pro každý běh, **jednorázové** (`--prompt`, `--scenario`)
-jen pro tenhle. Obě jdou do run recordu, takže „které zadání dává lepší nálezy“ je
-otázka, na kterou umí nástroj odpovědět čísly.
-
-QA se pouští po jednom, i když je jich najatých víc: sezení řídí běžící aplikaci,
-a dvě najednou by se praly o tentýž prohlížeč, databázi a fixtures. Paralelně jde
-pouštět recenze, ne sezení.
-
-QA běží **nad pracovní kopií**, ne v jednorázovém worktree — aplikace, kterou zkouší,
-běží nad ní. Zdrojový kód je proto ke čtení; zapisuje se do běhového adresáře.
-Nález musí být **zopakovaný v čisté session** a zakotvený na řádek kódu, který ho
-způsobuje; nereprodukované pozorování se do `findings.json` nedostane.
-
-### Prohlížeč
-
-```
-agency config qa --set playwright.enabled=true
-agency doctor                # node, playwright, stažené prohlížeče, dostupnost aplikace
+```json
+{
+  "name": "po",
+  "title": "Product owner · NaLekci",
+  "description": "Holds the roadmap against what is actually being built…",
+  "requires": ["git", "gh"],
+  "target": "workspace",
+  "worktree": false,
+  "graph": false,
+  "prompt": "required",
+  "needs": ["agency triage", "agency note", "agency findings",
+            "git", "gh issue view",
+            "python .claude/skills/agency-po/scripts/backlog.py"],
+  "minScore": 75,
+  "dimensions": [{ "id": "scope", "title": "Work in flight that no commitment covers" }, "…"]
+}
 ```
 
-Ve VS Code totéž klikáním: **Specialisté → QA → Browser**. Nastavení bydlí
-v `.agency/qa.json`, ne v editoru, takže platí i pro běh z terminálu a pro agenta.
+Every key is read by the runner: `requires` feeds `doctor`; `target` /
+`worktree` / `graph` shape the run preparation; `prompt` (`required` |
+`optional` | `none`) validates `--prompt`; `needs` is the agent's allowlist;
+`minScore` is the gate's threshold; `dimensions` validates findings and
+labels the extension's tree. There is no version — a pack is versioned with
+the project's own git history, not separately.
 
-Instalace zjistí, jestli projekt Playwright **už má** — a když ano, sezení ho
-použije: jeho `baseURL`, jeho fixtures, jeho přihlášení. Spec, který si vymyslí
-vlastní způsob přihlášení, je druhá pravda o tomtéž a rozpadne se při první změně.
+Facts about the project itself — which repository, which board fields,
+which staging URL, which law applies — go in `SKILL.md`, under a **Project
+facts** heading near the top, where the agent reads them. The runner never
+does; that is the whole point of the split.
 
-Když projekt Playwright nemá, rozhoduje `playwright.scaffold`:
-
-| Hodnota | Co se stane |
-|---|---|
-| `run-dir` *(výchozí)* | konfigurace vznikne **uvnitř běhového adresáře**, v repozitáři se nezmění nic |
-| `project` | pack smí přidat `playwright.config.ts` a devDependency do projektu |
-| `never` | sezení skončí a řekne, co spustit |
-
-Reprodukční specy jdou do `.agency/runs/<id>/specs/` a commitují se s během.
-`playwright.specTarget: "suite"` je pošle rovnou do testovací sady projektu — to je
-ale rozhodnutí o repozitáři, takže se o něj musíš říct.
-
-## Právní revize
+### Setting up a pack for another project
 
 ```
-agency hire legal
-agency config legal --set business.model="marketplace" --set business.size="micro"
-agency doctor
-
-agency run legal
-agency run legal --prompt "musí být změna VOP oznámena předem?"
+cp -r packs/po <target-project>/.claude/skills/agency-po
 ```
 
-Než se cokoli kontroluje, rozhodne se **co vůbec platí**. `business.model`
-a `business.size` jsou proto povinná konfigurace a `agency doctor` je vymáhá:
-mikropodnik je mimo oddíly 3 a 4 DSA i mimo zákon o přístupnosti, § 1752 platí jen
-na dlouhodobé opakované závazky a DAC7 se zapíná až `counterparties.businessUsers`.
-Pack, který tohle neví, umí vyrobit povinnost, kterou nikdo nemá — a to je u
-právníka ta nejdražší chyba. Dimenze `partners` a `tax-reporting` se proto samy
-nezapínají; přidáš je do `review.dimensions`, až projekt podnikatelské uživatele
-opravdu má. Závěry si pack zapisuje do `.agency/legal/applicability.md`, takže
-druhý běh gate neodvozuje znovu.
+Then rewrite the **Project facts** section of `SKILL.md` for the new
+project, and its `scripts/` if it has any (the PO pack's `backlog.py`, for
+instance, has the board's field names and constants written into it — copy
+it and change the constants). Run `agency doctor` in the target project;
+it reports what is still missing.
 
-Předpis se **nečte z paměti**. České zákony bere z e-Sbírky přes ELI (open data,
-bez klíče), evropské z Publications Office podle CELEX; znění, o které se nález
-opírá, se ukládá k běhu. `posture.requireCitation: true` znamená, že tvrzení bez
-konkrétního ustanovení se zahodí dřív, než se boduje — to je celá pointa packu.
+### Contracts
 
-| `posture.level` | Co se hlásí |
-|---|---|
-| `proportionate` *(výchozí)* | jen to, co vyžaduje jmenované ustanovení nebo vlastní slib produktu |
-| `conservative` | navíc obhajitelná dobrá praxe, vždy označená a nikdy bodovaná jako povinnost |
+The only places two of these three things touch. Nothing else is shared.
 
-Právník **nic nemění** — ani VOP, ani kód. Když si vyžádáš návrh, jde do
-`.agency/runs/<id>/drafts/`. A nenahrazuje advokáta: připravuje mu otázky
-a evidenci, aby jeho hodina padla na to těžké.
-
-## Product owner
-
-```
-agency hire po
-agency config po --set roadmap.file=docs/roadmap.md --set roadmap.cycle=2026-Q3
-agency config po --set board.projectNumber=7 --set policy.escalate=@kuba
-agency doctor
-
-agency run po
-agency run po --prompt "má se referral program stavět tenhle cyklus?"
-```
-
-`roadmap.file` je povinná konfigurace a `agency doctor` ji vymáhá — a to včetně
-toho, že na tu cestu opravdu nějaký soubor ukazuje. Je to táž brána jako
-`business.model` u právníka: **bez závazků nemá pack čím říct ne**, a product
-owner, který neumí říct ne, je generátor ticketů. `roadmap.cycle` a `capacity`
-jsou ze stejného důvodu: „teď“ bez horizontu je názor a škrt bez kapacity se
-nedá obhájit.
-
-Roadmapa se při každém běhu **zamrazí** do `evidence/roadmap/`. Rozhodnutí je
-přezkoumatelné jen proti znění, ze kterého vzniklo — škrt hájený větou
-„roadmapa to neměla“ nemá po dvou editacích roadmapy žádnou cenu.
-
-### Co smí napsat ven
-
-Tohle je první specialista, který **nepíše jen do repozitáře**. Zakládá tickety
-v cizí schránce a komentuje cizí vlákna, takže se zapisovací práva zapínají po
-jednom:
-
-| `writes.*` | Výchozí | Proč |
+| contract | between | shape |
 |---|---|---|
-| `comments` | zapnuto | komentář je vratný a je to způsob, jak se rozhodnutí dá přečíst |
-| `draftIssues` | zapnuto | draft leží na nástěnce, nikoho neupozorní a nic nestojí smazat |
-| `issues` | **vypnuto** | issue spadne lidem do schránky |
-| `promote` | **vypnuto** | povýšení draftu je okamžik, kdy se z poznámky stává závazek |
-| `labels` | **vypnuto** | štítky a sloupce jsou cizí struktura |
-| `close` | **vypnuto** | škrt patří do komentáře a sloupce, ne do zavřeného ticketu |
+| `pack.json` | pack → runner | above |
+| the run directory | runner → pack → runner | `context.json`, `evidence/`, `prompt.txt` in; `findings.json` (`finding.v1`), `summary.md`, `handoff.md` in a chain, back out |
+| `finding.v1`, `run.v1` | pack → gate; runner → extension | the two schemas, nothing else |
+| `agency … --json` | runner → extension | everything the extension reads |
 
-```
-agency config po --set writes.dryRun=true    # všechno nanečisto, ven nejde nic
-agency config po --set writes.issues=true    # až budeš chtít
-```
-
-`writes.dryRun` je způsob, jak tenhle pack pustit poprvé: každý zápis se složí
-i s podpisem, vypíše se a nikam neodejde. Co by odešlo, leží v `backlog.jsonl`
-u běhu.
-
-### Zápis jde přes jádro, ne přes `gh`
-
-Pack nevolá `gh` sám. Volá `agency backlog`, stejně jako agent volá
-`agency triage` — a ze stejného důvodu:
-
-```
-agency backlog list                                  # issues i drafty
-agency backlog draft   --title "…" --body-file …     # poznámka na nástěnku
-agency backlog issue   --title "…" --body-file …     # ticket
-agency backlog promote PVTI_xxx                      # draft → issue, v místě
-agency backlog comment 41 --text-file …              # podepsaný komentář
-agency backlog decide  41 not-now --because "…" --commitment "docs/roadmap.md#L18"
-```
-
-Kdyby si pack sáhl po `gh` sám, čtyři věci by skončily v promptu, kde je nikdo
-nevymáhá: **podpis** (jeden tvar, z jednoho místa), **marker** (druhý běh pozná,
-co napsal první), **brána `writes.*`** a **ledger** v `.agency/runs/<id>/backlog.jsonl`.
-Pravda o tom, co se rozhodlo, tak zůstává v repu — GitHub je sink, ne vlastník.
-
-Idempotence stojí na klíči odvozeném z titulku. Zápis pod klíčem, který už
-existuje, vrátí `{"action": "exists"}` a nepošle nic; to je úspěch, ne chyba.
-`promote` převádí draft **v místě** (GitHub to umí sám), takže si položka nechá
-své id, sloupec i hodnoty polí.
-
-### Podpis
-
-```
----
-**Product owner** — written by an agent, not a person. `agency po@0.1.0` · run `01M1…` · `sonnet`
-If this call is wrong, say so here — @kuba has the last word.
-```
-
-`policy.escalate` je součást podpisu schválně: agent, který řekne ne a nenapíše,
-kdo ho může přebít, není specialista, ale překážka.
-
-### Na co se agent smí ptát
-
-Běh recenzenta jede ve worktree, ale paměť projektu leží v `.agency/` hlavního
-repa — a `context.json` do ní specialistu posílá: knowledge bundle, stránky
-packu, v řetězu i běhy předchozích členů. Jádro mu proto povolí **celý
-`.agency/`**, ne jen jeho vlastní RUN_DIR. Dát cestu a nedat k ní přístup by
-znamenalo ptát se ho na svolení k adresáři, který mu jádro samo předalo.
-
-### Co agent smí udělat
-
-Cesta bez práva zápisu není opatrnost, je to chyba — a stála dva reálné nálezy.
-`claude -p` udělá z agenta neinteraktivní proces, ale permission model nechá na
-„zeptej se"; v řetězu není koho. Agent dvanáct minut pracoval, každý zápis mu
-systém odmítl a běh skončil jako `no-findings`: tvrzení „díval se a nic nenašel"
-o někom, kdo nesměl nic napsat.
-
-**Co metoda volá, ví pack**, ne uživatel. `run.needs` v manifestu vyjmenuje
-příkazy — `agency triage`, `git`, `gh pr view`, `code-review-graph`, `npx
-vitest` — a jádro je přeloží do tvaru konkrétního runneru. Zápis do pracovního
-adresáře a do `.agency/` je povolený vždycky.
-
-Projekt smí seznam **rozšířit**, nikdy zúžit:
-
-```powershell
-agency config review-graph --set 'agent.allow=["gh api","npm run test:e2e"]'
-```
-
-Zúžit ne schválně: běh, kterému chybí půlka práv, dělá tiše půlku metody
-a chybějící nález se nedá odlišit od chybějícího oprávnění.
-
-Kdo chce vypnout kontroly úplně, řekne si o to výslovně:
-
-```powershell
-agency config review-graph --set agent.unattended=bypass
-```
-
-`grant` (výchozí) pokrývá to, co metoda dělá; `bypass` i to, co dělat nemá —
-worktree je na jedno použití, stroj ne. `ask` nepovolí nic: attended agent se
-doptá, neattended umře potichu. Režim je v každém run recordu
-(`agent.authorized`), takže zpětně je vidět, s čím ten běh jel.
-
-Kolik volání bylo přesto odmítnuto, je v `agent.denied` — a je to důležitější
-číslo, než vypadá. Nenulové znamená, že běh neměřil metodu, ale svoje
-oprávnění, a porovnávat ho s jiným během je porovnávat různé věci.
-
-## Tým — specialisté za sebou
-
-Právník najde, že chybí reconsent flow. Je to nález, nebo ne? Odpověď nezná
-právník — zná ji product owner, protože ví, že tenhle web nemá účty a letos
-mít nebude. Dokud běhy stojí vedle sebe, přijde ta otázka na člověka. V řetězu
-přijde na product ownera.
-
-```powershell
-agency chain legal po --prompt "VOP pro nový web"
-agency chain legal@claude po@claude --pr 12
-```
-
-Každý člen dostane výstup předchozích v `evidence/upstream.json` — **plné
-nálezy s rozhodnutími, bez stropu**. Strop tři sta patří pozadí; zadání se
-ořezávat nesmí, jinak řetěz tiše vyrábí nálezy, o kterých nikdo nerozhodl.
-
-Prompt kroku skládá jádro z deterministické šablony a celý skončí v `prompt.txt`,
-takže je vidět, čím byl který člen vykopnutý:
-
-```
-… You are step 2/2 of a chain (po@claude).
-Upstream: legal@claude — 7 findings (5 undecided), full data in evidence/upstream.json.
-First judge those findings — `agency triage accept|reject|defer <id> --by …` —
-and only then run your own dimensions.
-Handoff from legal@claude (full text: …/runs/<id>/handoff.md):
-<handoff.md předchůdce>
-```
-
-Věty v šabloně vlastní jádro, obsah v nich napsal upstream agent do
-`handoff.md`. **Žádný LLM mezi běhy** — chain je deterministický seznam,
-pořadí volí člověk a úsudek patří dovnitř běhů, kde je zaznamenaný a zaplacený
-jednou.
-
-`summary.md` je „co jsem udělal" pro člověka a pro paměť projektu. `handoff.md`
-je „co potřebuješ ty" pro jednoho jmenovaného kolegu: co jsem nedořešil, co
-stojí na domněnce o produktu, čemu bych sám nevěřil.
-
-Sedm vlastností, které z toho dělají tým a ne skript:
-
-- **Řetěz je v datech.** Každý `run.json` nese `chain: {id, position, of, upstream}`.
-  Bez toho nejde zpětně poznat, které rozhodnutí padlo nad cizím nálezem
-  v rámci předání a které samostatně.
-- **Cíl patří týmu, ne členům.** `--pr 479` vyřeší řetěz jednou a všichni ho
-  sdílejí. Dokud to tak nebylo, doputovalo `--pr` jen k packu s
-  `target: pull-request` a product owner soudil větev, kterou měl uživatel
-  zrovna checkoutnutou — nad PR #479 to byl PR #474. Jeden worktree pro celý
-  tým, po úspěchu se uklidí (`--keep-worktree` ho nechá).
-- **Běh je list.** Agent nesmí spustit další běh; `agency run` i `agency chain`
-  to zevnitř běhu odmítnou. Bez toho stačí věta „pomocí PO agenta zjisti…"
-  a recenzent si poslušně spustí vlastní běh — bez terminálu, bez oprávnění
-  a se záznamem, který tvrdí, že u něj někdo byl.
-- **Je vidět, co se děje.** Člen řetězu jede neattended, takže mu jádro čte
-  proud událostí: řádka na každý nástroj, `agent.jsonl` a `agent.md` do
-  RUN_DIRu, tahy a cena do záznamu. `launching claude…` a deset minut ticha se
-  z venku nedá odlišit od zaseknutého procesu.
-- **Jeden tým = jeden provider** (v1). Jeden binár, jeden credential, jedna sada
-  quirků na terminálu. Handoff je souborový, takže mix providerů není
-  architektonická překážka — je to změna jedné validace, až se pipeline osvědčí.
-- **Odmítnutý nebo spadlý krok řetěz zastaví.** Pokračovat potichu by znamenalo,
-  že product owner soudí nálezy, které nevznikly. Co doběhlo, je zapsané
-  a vytiskne se, kde se dá navázat ručně.
-- **Neúplný řetěz je poznat.** `of` je v záznamu právě proto: zastavený tým se
-  v přehledu nesmí tvářit jako dokončený, jen kratší.
-- **Prázdný výstup je selhání, ne prázdný výsledek.** Když agent nenapsal
-  `findings.json`, brána za něj `[]` nevyrobí: běh je `failed` s
-  `exitReason: no-output` a řetěz na něm stojí. `[]`, které napsal specialista,
-  zůstává výsledkem — „díval jsem se a nic tam není" je měření.
-
-Zadání se zadává **po členech**, ne jedno pro všechny:
-
-```powershell
-agency chain review-graph@claude po@claude --pr 479 `
-  --focus review-graph@claude:"projdi PR technicky" `
-  --focus po@claude:"dává tahle změna produktový smysl?"
-```
-
-Bez toho čte recenzent instrukci psanou product ownerovi a poslušně na ni
-odpovídá. Věta adresovaná někomu jinému není kontext, je to matoucí pokyn.
-
-V VS Code je to **Run a team…** — výběr po jednom, protože pořadí je celý smysl
-věci a QuickPick ho neumí zaručit; na zadání se panel zeptá zvlášť pro každého
-člena. Běhy jednoho týmu drží v přehledu pohromadě pod jedním uzlem, a když
-byla nějakému členovi odmítnuta volání, je to na řádku vidět. Orchestruje pořád
-CLI: extension pošle do terminálu `agency chain …` a dál se dívá.
-
-## Paměť projektu jako markdown
-
-`.agency/knowledge/` je commitovaná paměť projektu. Čte ji každý provider,
-kolega v editoru i holá session bez Agency — proto je to markdown, a ne
-databáze.
+### Memory as committed markdown
 
 ```
 .agency/knowledge/
-  index.md            přehled — co projekt ví, co kdo rozhodl
-  log.md              chronologie: čím se který běh zabýval, jeho vlastními slovy
-  findings/<id>.md    nálezy napříč běhy, packy a specialisty — generované
-  rules/<id>.md       pravidla projektu — píše člověk
-  pages/<pack>/       závěry specialisty: co ví QA, PO nebo právník o tomhle projektu
+  index.md            overview — what the project knows, who decided what
+  log.md               chronology: what each run looked at, in its own words
+  findings/<id>.md    findings across runs, packs and specialists — generated
+  pages/<pack>/       a specialist's own conclusions about this project
 ```
 
-### Pravidla — píše je člověk
+`agency ingest` regenerates `findings/` from the run records after the gate;
+`agency knowledge --rebuild` rebuilds the whole bundle from `.agency/runs/`
+— the source of truth stays in the runs, and the bundle can always be thrown
+away and rebuilt. A page in `pages/<pack>/` is plain markdown with one
+convention: a `Last reviewed: <date>` line at the top, and a rule every
+pack's `SKILL.md` repeats — write conclusions, not a log; rewrite what
+stopped being true rather than adding to it.
 
-Dimenze `repo-rules` uměla jediný vstup: ukazatel do sekce cizího markdownu
-(`review.rules`, třeba `CLAUDE.md#rules-that-will-bite-you`). Ten funguje dál,
-ale vedle něj je teď `.agency/knowledge/rules/` — pravidlo jako soubor, který
-si nese, jestli ještě platí:
+### Three rules the whole thing stands on
 
-```markdown
----
-type: Rule
-title: "Sink PR komentáře nesmí spolknout chybu"
-status: stable
-tags: [area/export, severity/high]
-stale_after: 2026-12-01
-generated:
-  by: human
-  at: 2026-09-01T10:00:00Z
-verified:
-  - by: hire:review-graph@claude
-    at: 2026-09-01T12:00:00Z
-sources:
-  - resource: CLAUDE.md#rules-that-will-bite-you
----
+**Truth lives in the project, not in the tool.** Runs, findings and
+decisions live in `<project>/.agency/` and are committed. They survive a
+reinstall of the tool and a fresh clone of the repository, and can be
+reviewed in a pull request.
 
-Když selže zápis do PR komentáře, běh nesmí skončit jako `ok`. Nález se
-neztrácí tím, že se nepovedlo ho vyvěsit.
-```
+**Only JSON crosses the core↔client boundary**, shaped by `run.v1` and
+`finding.v1`. The extension does not know what language the core is
+written in.
 
-Příprava běhu z něj udělá `evidence/known-rules.json`, `agency doctor` řekne
-„5 concepts · 1 expired“, a pravidlo, které přestalo platit, se označí
-(`status: deprecated`) místo mazání — historie rozhodnutí je to, kvůli čemu
-tenhle nástroj existuje.
+**A decision is an operation on storage, not a UI command.** A click in VS
+Code, `agency triage` in a terminal, and a call from an agent all go through
+the same path and write to the same append-only file.
 
-### Ledger nálezů — generuje se
+## Structure
 
-`agency ingest` po bráně přepíše `findings/`. Každý nález je koncept s kotvou
-do kódu, s tím, kdo ho našel, a s tím, co se s ním pak stalo:
-
-```markdown
----
-type: Finding
-title: "Sink PR komentáře spolkne chybu a běh hlásí úspěch"
-status: deprecated
-trust: human-reviewed
-generated:
-  by: hire:review-graph@codex
-  at: 2026-08-31T21:44:00Z
-verified:
-  - by: hire:review-graph@claude
-    at: 2026-09-01T07:10:00Z
-    how: independent-duplicate
-decision:
-  state: rejected
-  reason: by-design
-  by: human:kuba
-  at: 2026-09-01T09:02:00Z
----
-```
-
-`trust` a `status` odpovídají na dvě různé otázky a schválně se neslily do
-jedné. `trust` je míra přezkoumání (kdo se na to díval), `status` je stav
-tvrzení (obstálo?). Zamítnutý nález má obojí zároveň — člověk se díval **a**
-tvrzení neobstálo; jako jedno pole by jedna z těch dvou vět nešla napsat.
-
-`verified` vzniká z duplicit napříč pracovníky: když nález našel `codex`
-a `claude` ho nezávisle našel znovu, není to druhý nález, ale potvrzení
-prvního. Duplicita od **téhož** pracovníka potvrzení není — to je jen týž
-pracovník podruhé, a kdyby se to počítalo, stačilo by pustit jeden pack dvakrát.
-
-Ledger je **odvozený**, stejný statut jako `agency.db`: pravda zůstává
-v `.agency/runs/` a bundle se dá kdykoli zahodit a postavit znovu.
-
-```powershell
-agency knowledge            # je bundle v souladu s běhy?
-agency knowledge --rebuild  # přestav ho z .agency/runs/
-```
-
-### Stránky packů — píše je specialista
-
-Nález je jednotlivost. „Payment state machine je dlouhodobě nejrizikovější část"
-nebo „u monetizace preferujeme Free jako growth engine" jednotlivost není a do
-`findings/` se to nevejde. Od toho jsou `pages/<pack>/`: kurátorovaná znalost
-packu, kterou na konci běhu aktualizuje sám specialista.
-
-```markdown
----
-type: Page
-title: "Co je prozkoumané a co ne"
-status: stable
-stale_after: 2026-12-01
-verified:
-  - by: hire:qa@claude
-    at: 2026-09-01T12:00:00Z
----
-```
-
-Pravidlo, které dostaly QA, PO i právník do SKILL.md, zní **závěry, ne log**.
-Chronologii běhů vede `log.md`; kdyby ji stránka vedla podruhé, jedna z těch
-dvou verzí bude časem lhát. Co přestalo platit, se přepíše, nebo dostane
-`status: deprecated` a **zůstane** — smazat závěr znamená zahodit i důvod, proč
-se k němu nemá příště docházet znovu.
-
-Stránka **bez hlavičky** se čte dál a v přehledu je označená jako
-„no frontmatter". Paměť se psala dřív, než koncepty existovaly, a prohlásit
-fungující soubor za rozbitý by byla nepravda. U pravidla to neplatí: pravidlo
-bez hlavičky neví, jestli ještě platí, a nález na něm stavět nelze.
-
-Výchozí místo je v bundlu, ale `memory.dir` v konfiguraci packu vyhrává —
-projekt, který má paměť v `.agency/qa/`, ji tam má dál a odkaz v přehledu vede
-tam. Pack běžící ve worktree stránky nedostane vůbec: worktree stojí na hlavičce
-PR a `agency run` ho po sobě smaže.
-
-Formát je [Open Knowledge Format](https://github.com/google/open-knowledge-format)
-v0.2, ale je to **konvence, ne závislost**: povinné je jediné pole `type`
-a čtečka je v `packages/core/src/agency/okf.py` na padesát řádků. Co nepřečte,
-ohlásí s číslem řádku — tiše špatně vyložené pravidlo by bylo horší než žádné.
-
-### Co z paměti běh dostane — a proč zrovna to
-
-Do běhu se paměť nevejde celá; `known-findings.json` má strop tři sta nálezů.
-Dlouho to znamenalo „posledních tři sta", protože běhy se čtou od nejnovějšího.
-Nález z jara tím vypadl, aby se vešlo tři sta čerstvých malicherností — a to je
-zapomínání, které si nikdo neobjednal.
-
-Dneska strop vybírá podle toho, co má běh dělat. Zadání (`--prompt`), titulek
-cíle a jméno packu složí dotaz a nálezy se seřadí podle BM25 —
-`packages/core/src/agency/rank.py`, sto řádků nad `math` a `re`. Žádný model,
-žádné API, žádná síť, žádný proces navíc.
-
-```
-agency run qa --prompt "reconsent banner po expiraci"
-#   evidence/ filled  {'knownFindings': 812, 'knownFindingsQuery': 'reconsent banner …'}
-```
-
-Dvě vlastnosti stojí za vyslovení, protože jsou to rozhodnutí, ne detaily:
-
-- **Bez zadání se nic nepřeskládá.** Běh bez `--prompt` a bez cíle nemá dotaz
-  a dostane pořadí podle stáří, jako dřív. Vymýšlet dotaz z ničeho by znamenalo
-  řadit podle šumu, což je horší než řadit podle času.
-- **Synonyma to neumí.** „payment flow" nenajde nález, který mluví jen
-  o „checkout process". Za tohle se platí embeddings, embeddings znamenají model
-  a model znamená klíč nebo GPU — tedy přesně tu závislost, kterou tenhle
-  nástroj nemá. Dotaz i nálezy naštěstí mluví slovníkem téhož repa.
-
-Sémantický recall přes [Hindsight](https://github.com/vectorize-io/hindsight)
-tu byl postavený a zamítnutý: ten démon si extrahuje fakta vlastním LLM, takže
-lokální adresa nezaručuje, že obsah nikam nejde — a to byla jediná věc, kterou
-si za démona, 18 balíčků a port navíc člověk kupoval. Rozbor je
-v [`docs/plans/shared-memory.md`](docs/plans/shared-memory.md) Kroku 5.
-
-## Jak je to poskládané
-
-```
-agency (Python)              packy, běhy, nálezy, brána, dedup, triage, metriky
-  ├── CLI                    --json na všem
-  └── klienti
-       ├── VS Code extension  stromy + detail v editoru + komentáře u řádků
-       └── agent              `agency triage` — rovnocenný klient, ne přívěsek
-```
-
-Tři pravidla, na kterých to stojí:
-
-**Pravda je v projektu, ne v nástroji.** Běhy, nálezy i rozhodnutí leží
-v `<projekt>/.agency/runs/<id>/` a commitují se. Přežijí přeinstalaci nástroje
-i nové naklonování repozitáře a dají se reviewovat v PR. Cokoli mimo — index,
-registr projektů — smí kdykoli zaniknout a postavit se znovu.
-
-**Přes hranici jádro ↔ klient teče jen JSON podle `run.v1` / `finding.v1`.**
-Extension neví, v čem je jádro napsané. Volba Pythonu je vědomě dočasná; díky
-téhle hranici je pozdější přepis výměna procesu za proces, ne přepis UI.
-
-**Rozhodnutí je operace nad úložištěm, ne příkaz UI.** Klik ve VS Code,
-`agency triage` v terminálu a volání agenta jdou toutéž cestou a zapisují do
-téhož append-only souboru. Kdyby rozhodnutí vznikalo jako příkaz editoru, agent
-by triage neuměl.
-
-## Struktura
-
-| Cesta | Co je uvnitř |
+| Path | What is inside |
 |---|---|
-| `packages/core/` | jádro a CLI (Python, `uv`) |
-| `packages/extension/` | VS Code extension (plain JS, bez build stepu) |
-| `packs/` | metody práce, ne obsah (`review-graph`, `qa`, `legal`, `po`) — kdo je jimi najatý, je v projektu |
-| `schemas/` | `run.v1`, `finding.v1` — kontrakt obou stran hranice |
-| `docs/` | rozhodnutí a plán, včetně toho, co se v nich změnilo a proč |
+| `packages/core/` | the runner and CLI (Python, `uv`) |
+| `packages/extension/` | the VS Code extension (plain JS, no build step) |
+| `packs/` | reference copies of `main-panel`'s packs, for the next project to copy |
+| `schemas/` | `run.v1`, `finding.v1` — the contract across the boundary |
+| `docs/` | decisions and plans, including what changed in them and why |
 
-## Testy
+## Tests
 
 ```powershell
 pwsh scripts/test.ps1
 ```
 
-Jádro se testuje nad dočasným git repem, který vznikne a zanikne v jednom testu —
-takže testy jdou pustit stokrát za sebou a nesahají na skutečné projekty.
-Extension má smoke test s podstrčeným `vscode`; vlákna a tlačítka chtějí `F5`.
+The core is tested over a throwaway git repository that is created and torn
+down inside each test, so the suite can run hundreds of times in a row
+without touching a real project. The extension has a smoke test against a
+stubbed `vscode` module; comment threads and buttons need `F5`.
 
-## Kam dál
+## Where the method and memory used to live
 
-[`docs/implementation-plan-v0.md`](docs/implementation-plan-v0.md) — kroky, stav
-a hlavně důvody. [`docs/baseline.md`](docs/baseline.md) — měření, ze kterého to
-celé vzešlo. [`docs/ui-surface-decision.md`](docs/ui-surface-decision.md) — proč
-VS Code a ne desktopová aplikace.
+`agency-po` and `agency-qa` in `main-panel` grew out of two standalone
+agents that predate this tool — see the note near the top of
+[`nalekci-po-agent`](../nalekci-po-agent) and
+[`nalekci-qa-agent`](../nalekci-qa-agent) for where their method and memory
+moved to.
+
+## Further reading
+
+[`docs/plans/agency-v1.md`](docs/plans/agency-v1.md) — the redesign this
+version is built from, and why an earlier, more configurable version of this
+same tool was cut down rather than extended.
+[`docs/product-brief.md`](docs/product-brief.md) — what this is and why, for
+someone who has never seen the code.
+[`docs/ui-surface-decision.md`](docs/ui-surface-decision.md) — why VS Code
+and not a desktop app.

@@ -1,88 +1,23 @@
 {
   "name": "qa",
-  "version": "0.1.0",
-  "title": "QA engineer",
-  "description": "Explores the running application the way real users do, following a brief you write. Reproduces every problem in a Playwright spec that ships with the finding, and anchors it to the code that causes it.",
-  "requires": {
-    "tools": [
-      "git"
-    ],
-    "optionalTools": [
-      "code-review-graph",
-      "npx"
-    ],
-    "provider": [
-      "claude",
-      "codex"
-    ]
-  },
-  "run": {
-    "target": "workspace",
-    "worktree": false,
-    "graph": false,
-    "prompt": {
-      "accepts": true,
-      "required": true,
-      "label": "What should be tested?",
-      "placeholder": "e.g. booking a lesson as a brand new user, including payment"
-    },
-    "needs": [
-      "agency triage",
-      "agency note",
-      "agency findings",
-      "git",
-      "npm run",
-      "npx playwright",
-      "curl"
-    ]
-  },
-  "installs": [
-    {
-      "from": "skill/SKILL.md",
-      "to": ".claude/skills/agency-qa/SKILL.md"
-    }
+  "title": "QA engineer · NaLekci",
+  "description": "Explores the running staging application the way real users do, following a brief you write. Reproduces every problem in a Playwright spec that ships with the finding, and anchors it to the code that causes it.",
+  "requires": ["git"],
+  "target": "workspace",
+  "worktree": false,
+  "graph": false,
+  "prompt": "required",
+  "needs": [
+    "agency triage", "agency note", "agency findings",
+    "git", "npx playwright test", "curl", "gh project item-list"
   ],
-  "config": {
-    "file": ".agency/qa.json",
-    "template": "config.template.json",
-    "required": [
-      "app.baseUrl"
-    ]
-  },
-  "outputs": {
-    "findings": "finding.v1",
-    "run": "run.v1"
-  },
+  "minScore": 70,
   "dimensions": [
-    {
-      "id": "happy-path",
-      "title": "The main flows do what they promise",
-      "projectSpecific": false
-    },
-    {
-      "id": "edge-cases",
-      "title": "Boundaries, empty states, unexpected input",
-      "projectSpecific": false
-    },
-    {
-      "id": "errors",
-      "title": "Failures shown honestly, recovery possible",
-      "projectSpecific": false
-    },
-    {
-      "id": "data",
-      "title": "What survives a reload — state and persistence",
-      "projectSpecific": false
-    },
-    {
-      "id": "access",
-      "title": "What a role must not be able to do",
-      "projectSpecific": true
-    },
-    {
-      "id": "regression",
-      "title": "Things that used to be fixed",
-      "projectSpecific": true
-    }
+    { "id": "happy-path", "title": "The main flows do what they promise" },
+    { "id": "edge-cases", "title": "Boundaries, empty states, unexpected input" },
+    { "id": "errors", "title": "Failures shown honestly, recovery possible" },
+    { "id": "data", "title": "What survives a reload — state and persistence" },
+    { "id": "access", "title": "What a role must not be able to do" },
+    { "id": "regression", "title": "Things that used to be fixed" }
   ]
 }

@@ -1,7 +1,7 @@
 [project]
 name = "agency"
 version = "0.1.0"
-description = "VeriFlow Agency — specialisté, které si najmeš do repozitáře. Attended, na tvém přihlášení, s doloženými nálezy, které zůstanou."
+description = "VeriFlow Agency — specialists for your repository. Attended, on your own login, with evidence-backed findings that stay."
 requires-python = ">=3.11"
 dependencies = [
     "jsonschema>=4.21",
@@ -17,17 +17,19 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/agency"]
 
-# Packs a schemas leží v kořeni repa, ne uvnitř balíčku — sdílí je i TypeScript
-# klient. Do wheelu se přibalí, aby `uv tool install` fungoval odkudkoli.
+# Schemas live at the repo root, not inside the package — the extension
+# reads them too. Bundled into the wheel so `uv tool install` works from
+# anywhere. Packs are not bundled: a pack is a skill in the target project,
+# never installed from here.
 [tool.hatch.build.targets.wheel.force-include]
-"../../packs" = "agency/_bundled/packs"
 "../../schemas" = "agency/_bundled/schemas"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
 
-# Testy jádra běží mimo VS Code i mimo skutečné repozitáře uživatele — celý
-# řetěz se staví nad dočasným git repem, takže jdou pustit stokrát za sebou.
+# Core tests run outside VS Code and outside any real user repository — the
+# whole chain is built over a throwaway git repo, so they can run hundreds
+# of times in a row.
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src", "tests"]

@@ -1,17 +1,21 @@
-"""Ledger nálezů: paměť, kterou přečte i ten, kdo Agency nemá.
+"""The findings ledger: memory that reads even for someone without Agency.
 
-`docs/plans/tasks.md` Fáze 5. Tady se zaplatí atribuce z Fáze 1 — z toho, kdo
-nález našel, kdo ho potvrdil a kdo o něm rozhodl, vzniká tier. Testy hlídají
-tři vlastnosti, které se dají snadno rozbít, aniž si toho kdokoli všimne:
+This is where the attribution work pays off — who found a finding, who
+confirmed it and who decided on it produces a trust tier. Tests guard three
+properties that break easily without anyone noticing:
 
-  1. bundle je ODVOZENÝ — přegenerování nesmí nic změnit ani ztratit,
-  2. duplicita od téhož pracovníka NENÍ potvrzení,
-  3. do paměti jde to, co prošlo branou, ne to, co pack napsal.
+  1. the bundle is DERIVED — rebuilding it must not change or lose anything,
+  2. a duplicate from the SAME worker is NOT a confirmation,
+  3. memory holds what passed the gate, not what the pack wrote.
+
+The generated `findings/*.md` files are read by humans and agents, never
+re-parsed by the tool — so these tests check the raw text, the same way any
+other reader would.
 """
 
 from __future__ import annotations
 
-from agency import ingest, knowledge, okf, runs
+from agency import ingest, knowledge, runs
 
 from conftest import make_finding
 
@@ -24,39 +28,38 @@ CODEX = {"provider": "codex", "model": "gpt-5", "bin": "codex",
          "hire": "review-graph@codex"}
 
 
-def read_concept(project, fid: str) -> dict:
+def finding_text(project, fid: str) -> str:
     root = project.agency_dir / knowledge.BUNDLE
-    return okf.read(root / knowledge.LEDGER / f"{fid}.md", root=project.root)
+    return (root / knowledge.LEDGER / f"{fid}.md").read_text(encoding="utf-8")
 
 
 def bundle_text(project, name: str) -> str:
     return (project.agency_dir / knowledge.BUNDLE / name).read_text(encoding="utf-8")
 
 
-# ------------------------------------------------------------------ koncept
+# ------------------------------------------------------------------ the concept
 
-def test_nalez_je_koncept_ktery_precte_i_parser(project, make_run):
-    """Zapisovač a čtečka bydlí v jednom modulu právě proto, aby se nerozešly.
-    Kdyby ledger vyrobil soubor, který `okf.read` nepřečte, byl by to markdown
-    pro lidi a rozbitý koncept pro všechny ostatní."""
+def test_a_finding_is_a_readable_concept(project, make_run):
+    """The finding without a body is just a heading — the whole point of the
+    format is that it carries the claim, not just a pointer to it."""
     run = make_run(run_id=RUN_A, agent=CLAUDE)
     fid = run.findings()[0]["id"]
 
     knowledge.bundle(project)
-    c = read_concept(project, fid)
+    text = finding_text(project, fid)
 
-    assert c["type"] == "Finding"
-    assert c["title"].startswith("Uživatel se načte")
-    assert c["status"] == "draft", "o nálezu nikdo nerozhodl"
-    assert c["trust"] == "unverified"
-    assert c["generated"] == {"by": "hire:review-graph@claude", "at": c["generated"]["at"]}
-    assert "getUser" in c["body"], "koncept bez těla nálezu je jen nadpis"
-    assert c["anchor"]["file"] == "src/auth.ts" and c["anchor"]["line"] == 2
+    assert 'type: "Finding"' in text
+    assert 'status: "draft"' in text, "nobody has decided on the finding"
+    assert 'trust: "unverified"' in text
+    assert 'by: "hire:review-graph@claude"' in text
+    assert "getUser" in text, "a concept without the finding's body is only a heading"
+    assert 'file: "src/auth.ts"' in text and "line: 2" in text
 
 
-def test_koncept_odkazuje_na_soubory_ktere_existuji(project, make_run):
-    """Odkaz je celá pointa formátu — bundle se čte klikáním v editoru, ne
-    nástrojem. Odkaz o adresář vedle je horší než žádný."""
+def test_a_concept_links_to_files_that_exist(project, make_run):
+    """The link is the whole point of the format — the bundle is read by
+    clicking in an editor, not by a tool. A link one directory off is worse
+    than no link."""
     run = make_run(run_id=RUN_A, agent=CLAUDE)
     fid = run.findings()[0]["id"]
     knowledge.bundle(project)
@@ -70,12 +73,13 @@ def test_koncept_odkazuje_na_soubory_ktere_existuji(project, make_run):
     assert (path.parent / f"../../runs/{RUN_A}").resolve().is_dir()
 
 
-# ------------------------------------------------------------------ tiery
+# ------------------------------------------------------------------ trust tiers
 
-def test_duplicita_od_jineho_pracovnika_je_potvrzeni(project, make_run):
-    """`codex našel → claude nezávisle potvrdil` je ta nejcennější věta na
-    vstupu dalšího běhu. Jako dva samostatné nálezy v ledgeru by tvrdila, že
-    projekt našel dvě věci — a tím by se ta informace ztratila úplně."""
+def test_a_duplicate_from_another_worker_is_a_confirmation(project, make_run):
+    """"codex found it → claude independently confirmed it" is the most
+    valuable sentence on a later run's input. As two separate findings in
+    the ledger it would claim the project found two things — and lose that
+    information entirely."""
     first = make_run(run_id=RUN_A, agent=CODEX)
     ingest.ingest(project, first)
     again = make_run([make_finding(project, RUN_B)], run_id=RUN_B, agent=CLAUDE)
@@ -83,45 +87,45 @@ def test_duplicita_od_jineho_pracovnika_je_potvrzeni(project, make_run):
 
     concepts = knowledge.ledger(project)
 
-    assert len(concepts) == 1, "duplicita není další nález, je to druhý pracovník"
+    assert len(concepts) == 1, "a duplicate is not another finding, it is a second worker"
     c = concepts[0]
     assert c["trust"] == "machine-confirmed"
     assert c["occurrences"] == 2
     assert [v["by"] for v in c["verified"]] == ["hire:review-graph@claude"]
-    assert c["generated"]["by"] == "hire:review-graph@codex", "autor je ten první"
+    assert c["generated"]["by"] == "hire:review-graph@codex", "the author is the first one"
 
 
-def test_tyz_pracovnik_podruhe_neni_potvrzeni(project, make_run):
-    """Týž pracovník nad týmž kódem podruhé je opakování, ne shoda dvou. Kdyby
-    se to počítalo jako potvrzení, stačilo by pustit jeden pack dvakrát a
-    ledger by tvrdil, že se na tom shodli dva."""
+def test_the_same_worker_twice_is_not_a_confirmation(project, make_run):
+    """The same worker over the same code a second time is a repeat, not
+    agreement between two. If it counted as confirmation, running one pack
+    twice would be enough to make the ledger claim two workers agreed."""
     ingest.ingest(project, make_run(run_id=RUN_A, agent=CLAUDE))
     ingest.ingest(project, make_run([make_finding(project, RUN_B)], run_id=RUN_B, agent=CLAUDE))
 
     c = knowledge.ledger(project)[0]
 
-    assert c["occurrences"] == 2, "že ho našel podruhé, se neztrácí"
+    assert c["occurrences"] == 2, "finding it a second time is not lost"
     assert c["verified"] == []
     assert c["trust"] == "unverified"
 
 
-def test_rozhodnuti_cloveka_je_nejvyssi_tier(project, make_run):
+def test_a_humans_decision_is_the_highest_tier(project, make_run):
     run = make_run(run_id=RUN_A, agent=CLAUDE)
     fid = run.findings()[0]["id"]
     runs.append_decision(run, fid, "rejected", reason="by-design", by="human:kuba")
 
     knowledge.bundle(project)
-    c = read_concept(project, fid)
+    text = finding_text(project, fid)
 
-    assert c["trust"] == "human-reviewed"
-    assert c["status"] == "deprecated", "tvrzení neobstálo — a nese si to v sobě"
-    assert c["decision"] == {"state": "rejected", "reason": "by-design",
-                             "by": "human:kuba", "at": c["decision"]["at"]}
+    assert 'trust: "human-reviewed"' in text
+    assert 'status: "deprecated"' in text, "the claim did not hold — and it carries that with it"
+    assert 'state: "rejected"' in text and 'reason: "by-design"' in text
+    assert 'by: "human:kuba"' in text
 
 
-def test_vlastni_rozhodnuti_nalez_nepotvrzuje(project, make_run):
-    """Pack, který si sám odsouhlasí vlastní nález, není druhý názor. Bez téhle
-    podmínky by stačilo `agency triage --by <vlastní hire>` a tier by vyskočil."""
+def test_a_packs_own_decision_does_not_confirm_its_finding(project, make_run):
+    """A pack that approves its own finding is not a second opinion. Without
+    this guard, `agency triage --by <its own hire>` alone would bump the tier."""
     run = make_run(run_id=RUN_A, agent=CLAUDE)
     fid = run.findings()[0]["id"]
     runs.append_decision(run, fid, "accepted", by="hire:review-graph@claude")
@@ -129,13 +133,13 @@ def test_vlastni_rozhodnuti_nalez_nepotvrzuje(project, make_run):
     c = knowledge.ledger(project)[0]
 
     assert c["trust"] == "unverified"
-    assert c["status"] == "stable", "rozhodnutí platí, jen ho nikdo nepřezkoumal"
+    assert c["status"] == "stable", "the decision holds, nobody has reviewed it yet"
 
 
-def test_zamitnuty_nalez_z_pameti_nemizi(project, make_run):
-    """„Tohle už jsme zamítli jako by-design" je vstup, kvůli kterému paměť
-    existuje. Kdyby se zamítnuté nálezy do přehledu nepsaly, další běh by je
-    hlásil znovu — a přesně tomu má ledger bránit."""
+def test_a_rejected_finding_stays_in_memory(project, make_run):
+    """"We already rejected this as by-design" is the exact reason memory
+    exists. If rejected findings were dropped from the overview, the next
+    run would report them again — the ledger exists to stop that."""
     run = make_run(run_id=RUN_A, agent=CLAUDE)
     runs.append_decision(run, run.findings()[0]["id"], "rejected",
                          reason="by-design", by="human")
@@ -147,12 +151,12 @@ def test_zamitnuty_nalez_z_pameti_nemizi(project, make_run):
     assert "by-design" in index
 
 
-# ------------------------------------------------------------------ odvozenost
+# ------------------------------------------------------------------ derived-ness
 
-def test_prestaveni_bundlu_nic_nezmeni(project, make_run):
-    """Bundle je odvozený — dvě přestavení nad týmiž běhy musí dát bajt po
-    bajtu totéž. Kdyby ne, `git diff` přestane odpovídat na otázku, co se
-    změnilo, a bundle se stane šumem, který nikdo nečte."""
+def test_rebuilding_the_bundle_changes_nothing(project, make_run):
+    """The bundle is derived — two rebuilds over the same runs must give
+    byte-for-byte the same result. Otherwise `git diff` stops answering what
+    actually changed, and the bundle becomes noise nobody reads."""
     make_run(run_id=RUN_A, agent=CLAUDE)
     knowledge.bundle(project)
 
@@ -161,9 +165,10 @@ def test_prestaveni_bundlu_nic_nezmeni(project, make_run):
     assert second["changed"] == [] and second["removed"] == []
 
 
-def test_bundle_jde_zahodit_a_postavit_znovu(project, make_run):
-    """Pravda zůstává v `.agency/runs/`. Kdyby smazání bundlu něco ztratilo,
-    byl by to druhý zdroj pravdy — a jeden špatný přepis by mazal historii."""
+def test_the_bundle_can_be_discarded_and_rebuilt(project, make_run):
+    """The truth stays in `.agency/runs/`. If deleting the bundle lost
+    something, it would be a second source of truth — and one bad rewrite
+    would erase history."""
     import shutil
 
     run = make_run(run_id=RUN_A, agent=CLAUDE)
@@ -176,7 +181,7 @@ def test_bundle_jde_zahodit_a_postavit_znovu(project, make_run):
     assert bundle_text(project, f"{knowledge.LEDGER}/{run.findings()[0]['id']}.md") == before
 
 
-def test_zahozeny_beh_zmizi_i_z_ledgeru(project, make_run):
+def test_a_discarded_run_disappears_from_the_ledger_too(project, make_run):
     import shutil
 
     run = make_run(run_id=RUN_A, agent=CLAUDE)
@@ -190,71 +195,56 @@ def test_zahozeny_beh_zmizi_i_z_ledgeru(project, make_run):
     assert not (project.agency_dir / knowledge.BUNDLE / knowledge.LEDGER / f"{fid}.md").is_file()
 
 
-def test_kontrola_bez_zapisu_nic_nepise(project, make_run):
-    """`agency knowledge` bez `--rebuild` odpovídá na otázku, jestli je bundle
-    v souladu s běhy. Odpověď, která si stav rovnou opraví, není odpověď."""
+def test_a_dry_check_writes_nothing(project, make_run):
+    """`agency knowledge` without `--rebuild` answers whether the bundle
+    matches the runs. An answer that fixes itself along the way is not an
+    answer."""
     make_run(run_id=RUN_A, agent=CLAUDE)
 
     dry = knowledge.bundle(project, write=False)
 
-    assert dry["changed"], "bundle ještě neexistuje, takže se liší"
+    assert dry["changed"], "the bundle does not exist yet, so it differs"
     assert not (project.agency_dir / knowledge.BUNDLE).exists()
 
 
-def test_rucne_psana_pravidla_bundle_nesaha(project, make_run):
-    """`rules/` je jediná část bundlu, kterou píše člověk. Generátor, který by
-    mazal, co nevygeneroval, by první expirované pravidlo přepsal na nic."""
-    rules_dir = project.agency_dir / knowledge.BUNDLE / "rules"
-    rules_dir.mkdir(parents=True)
-    (rules_dir / "sink.md").write_text(
-        '---\ntype: Rule\ntitle: "Sink nesmí spolknout chybu"\n---\n\nTělo.\n',
-        encoding="utf-8")
-    make_run(run_id=RUN_A, agent=CLAUDE)
+# ------------------------------------------------------------------ chronology
 
-    result = knowledge.bundle(project)
-
-    assert result["removed"] == []
-    assert (rules_dir / "sink.md").is_file()
-    assert "Sink nesmí spolknout chybu" in bundle_text(project, "index.md")
-
-
-# ------------------------------------------------------------------ chronologie
-
-def test_chronologie_bere_slova_specialisty(project, make_run):
-    """`log.md` je jediné místo, kde specialista mluví vlastními slovy. Jádro
-    shrnutí nepíše ani nedopisuje — jen ho přepíše do chronologie."""
+def test_the_chronology_takes_the_specialists_own_words(project, make_run):
+    """`log.md` is the one place a specialist speaks in its own words. The
+    core does not write or edit the summary — it only copies it into the
+    chronology."""
     run = make_run(run_id=RUN_A, agent=CLAUDE)
     (run.dir / "summary.md").write_text(
-        "Prošel jsem pět souborů kolem exportu. Jediné, co stojí za zmínku, "
-        "je spolknutá chyba v sinku.", encoding="utf-8")
+        "Went through five files around the export. The one thing worth "
+        "noting is a swallowed error in the sink.", encoding="utf-8")
     knowledge.bundle(project)
 
     log = bundle_text(project, "log.md")
 
-    assert "spolknutá chyba v sinku" in log
+    assert "swallowed error in the sink" in log
     assert f"[run {RUN_A}](../runs/{RUN_A}/)" in log
     assert "hire:review-graph@claude" in log
 
 
-def test_beh_bez_shrnuti_je_v_chronologii_videt(project, make_run):
-    """Kontrakt `summary.md` je v SKILL.md packů. Prázdné místo v chronologii
-    je jediné, kde je vidět, že ho pack nesplnil — vynechat ten běh by tu
-    informaci schovalo."""
+def test_a_run_without_a_summary_is_visible_in_the_chronology(project, make_run):
+    """The `summary.md` contract lives in each pack's `SKILL.md`. An empty
+    slot in the chronology is the one place that shows a pack did not meet
+    it — skipping the run would hide that information."""
     make_run(run_id=RUN_A, agent=CLAUDE)
     knowledge.bundle(project)
 
     assert "_No summary left behind._" in bundle_text(project, "log.md")
 
 
-# ------------------------------------------------------------------ brána
+# ------------------------------------------------------------------ the gate
 
-def test_do_pameti_jde_az_to_co_proslo_branou(project, make_run):
-    """Halucinovaný nález se nesmí stát pamětí projektu. Brána běží první a
-    ledger se staví z toho, co po ní zbylo."""
+def test_only_what_passed_the_gate_reaches_memory(project, make_run):
+    """A hallucinated finding must never become the project's memory. The
+    gate runs first, and the ledger is built from what survives it."""
     good = make_finding(project, RUN_A)
-    phantom = make_finding(project, RUN_A, anchor={"file": "src/neni.ts"},
-                           title="Nález v souboru, který na tom commitu není",
-                           body="Jiné tvrzení o jiném místě, aby to nebyla duplicita.")
+    phantom = make_finding(project, RUN_A, anchor={"file": "src/does-not-exist.ts"},
+                           title="A finding in a file that does not exist at that commit",
+                           body="A different claim about a different place, so it is not a duplicate.")
     run = make_run([good, phantom], run_id=RUN_A, agent=CLAUDE)
 
     result = ingest.ingest(project, run)
@@ -262,4 +252,4 @@ def test_do_pameti_jde_az_to_co_proslo_branou(project, make_run):
     assert result["counts"]["gated"] == 1
     ids = [c["id"] for c in knowledge.ledger(project)]
     assert ids == [good["id"]]
-    assert result["bundle"]["changed"], "ingest ledger obnovuje sám"
+    assert result["bundle"]["changed"], "ingest refreshes the ledger itself"

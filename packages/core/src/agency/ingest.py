@@ -158,9 +158,15 @@ def ingest(project: Project, run: Run, min_score: int | None = None) -> dict:
             write_json(raw_path, findings)
 
     raw_count = len(findings)
-    cfg = project.pack_config(run.record().get("pack", "review-graph").split("@")[0]) or {}
     if min_score is None:
-        min_score = (cfg.get("review") or {}).get("minScore")
+        from . import packs
+        pack_name = run.record().get("pack") or "review-graph"
+        try:
+            min_score = packs.load(pack_name, project).min_score
+        except SystemExit:
+            # The pack no longer exists (renamed, removed) — the gate still
+            # has to run, just without a threshold to check.
+            min_score = None
 
     kept, dropped = gate(project, run, findings, min_score)
     for f in kept:
@@ -217,12 +223,12 @@ def ingest(project: Project, run: Run, min_score: int | None = None) -> dict:
 
 
 def _bundle(project: Project) -> dict:
-    """Odvozený bundle se aktualizuje, ale nesmí shodit bránu.
+    """The derived bundle is refreshed, but it must not bring down the gate.
 
-    Nálezy jsou v `.agency/runs/` uložené ještě před tímhle voláním. Selhání
-    zápisu do `.agency/knowledge/` je tedy nepříjemnost, ne ztráta dat — a
-    hlásí se jako řádek, ne jako pád, protože pád by uživatele poslal pustit
-    ingest znovu a to by nic neopravilo.
+    The findings are already saved in `.agency/runs/` before this call runs.
+    A failure writing `.agency/knowledge/` is therefore an inconvenience, not
+    data loss — reported as a line, not a crash, since a crash would send the
+    user to run ingest again and that would fix nothing.
     """
     try:
         return knowledge.bundle(project)

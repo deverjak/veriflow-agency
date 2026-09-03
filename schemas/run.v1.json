@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://veriflow.dev/schemas/run.v1.json",
   "title": "run.v1",
-  "description": "Záznam jednoho běhu packu. Leží v .agency/runs/<run-id>/run.json a commituje se.",
+  "description": "The record of one run of a pack. Lives in .agency/runs/<run-id>/run.json and is committed.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -17,12 +17,13 @@
   "properties": {
     "id": {
       "type": "string",
-      "description": "ULID běhu; zároveň jméno adresáře.",
+      "description": "ULID of the run; also the name of its directory.",
       "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
     },
     "pack": {
       "type": "string",
-      "pattern": "^[a-z0-9-]+@[0-9]+\\.[0-9]+\\.[0-9]+$"
+      "description": "Name of the pack this run used — a skill in .claude/skills/agency-<name>/.",
+      "pattern": "^[a-z][a-z0-9-]*$"
     },
     "project": {
       "type": "object",
@@ -36,7 +37,7 @@
             "string",
             "null"
           ],
-          "description": "owner/repo, nebo null — repozitář bez remote je legitimní projekt, packy bez sinků ho nepotřebují"
+          "description": "owner/repo, or null — a repository with no remote is a legitimate project; packs with no sinks do not need one."
         },
         "defaultBranch": {
           "type": [
@@ -48,7 +49,7 @@
     },
     "target": {
       "type": "object",
-      "description": "Co se recenzovalo. Klíč (repo, pr, headRefOid) zajišťuje idempotenci — tentýž commit dvakrát nevyrobí duplikát.",
+      "description": "What was reviewed. The key (repo, pr, headRefOid) guarantees idempotence — the same commit twice does not produce a duplicate.",
       "additionalProperties": false,
       "required": [
         "kind",
@@ -62,7 +63,7 @@
             "commit-range",
             "workspace"
           ],
-          "description": "merged-pull-request je retrospektivní audit — bez něj nemá pack co dělat na projektu s jediným mergnutým PR. workspace je běh bez pull requestu: projekt tak, jak je právě teď, včetně rozdělané práce — na tom stojí QA, které zkouší běžící aplikaci."
+          "description": "merged-pull-request is a retrospective audit — without it a pack has nothing to do on a project with a single merged PR. workspace is a run with no pull request: the project as it is right now, uncommitted work included — this is what QA, which tries the running application, stands on."
         },
         "pr": {
           "type": [
@@ -108,24 +109,24 @@
         "filesSkipped": {
           "type": "integer",
           "minimum": 0,
-          "description": "Lockfily, generované soubory, snapshoty — šum pro graf i pro dimenze."
+          "description": "Lockfiles, generated files, snapshots — noise for both the graph and the dimensions."
         },
         "ref": {
           "type": [
             "string",
             "null"
           ],
-          "description": "Větev cíle u workspace běhu. U PR běhu se neplní."
+          "description": "The target branch of a workspace run. Left empty for a PR run."
         },
         "dirty": {
           "type": "boolean",
-          "description": "Byla v pracovní kopii při startu nezacommitovaná změna? Nález z takového běhu může ukazovat na kód, který nikde jinde neexistuje."
+          "description": "Was there an uncommitted change in the working copy at start? A finding from such a run may point at code that exists nowhere else."
         }
       }
     },
     "trigger": {
       "type": "object",
-      "description": "Typ triggeru určuje typ credentialu. Attended → subscription, unattended → API klíč s rozpočtem. Musí to být v datech, ne ve slibu.",
+      "description": "The trigger kind determines the credential kind. Attended → subscription, unattended → an API key with a budget. This has to be in the data, not in a promise.",
       "additionalProperties": false,
       "required": [
         "kind",
@@ -148,28 +149,28 @@
             "integer",
             "null"
           ],
-          "description": "Stáří heartbeatu živé session při startu. Když je moc staré, běh se zařadí a neproběhne."
+          "description": "Age of the live session's heartbeat at start. When it is too old, the run is queued and does not proceed."
         }
       }
     },
     "outputs": {
       "type": "object",
-      "description": "Co po sobě běh nechal vedle findings.json. Jádro to nevyrábí, jen zaznamenává, že to pack napsal.",
+      "description": "What the run left behind besides findings.json. The core does not produce these, only records that the pack wrote them.",
       "additionalProperties": false,
       "properties": {
         "summary": {
           "type": "boolean",
-          "description": "RUN_DIR/summary.md — krátké shrnutí vlastními slovy specialisty: co zkoumal, co našel, co rozhodl, co doporučuje dál."
+          "description": "RUN_DIR/summary.md — a short summary in the specialist's own words: what it looked at, what it found, what it decided, what it recommends next."
         },
         "handoff": {
           "type": "boolean",
-          "description": "RUN_DIR/handoff.md — adresná zpráva dalšímu členovi řetězu: co jsem nedořešil, čemu nevěřit, co stojí na domněnce, kterou má potvrdit on. Na rozdíl od summary.md, které je „co jsem udělal“ pro člověka a paměť, je tohle „co potřebuješ ty“. Když chybí, předá se summary.md."
+          "description": "RUN_DIR/handoff.md — a message addressed to the next member of the chain: what I did not finish, what not to trust, what rests on an assumption for them to confirm. Unlike summary.md, which is \"what I did\" for a human and for memory, this is \"what you need\". Falls back to summary.md when missing."
         }
       }
     },
     "graph": {
       "type": "object",
-      "description": "Stav grafového indexu při běhu — včetně toho, který driver ho obsluhoval. Bez toho se zpětně nepozná, jestli nález stál na čerstvém, nebo měsíc starém indexu.",
+      "description": "State of the code-graph index during the run, including which driver served it. Without this you cannot tell in hindsight whether a finding stood on a fresh index or one a month old.",
       "additionalProperties": false,
       "properties": {
         "tool": {
@@ -180,14 +181,18 @@
         },
         "driver": {
           "type": "string",
-          "description": "Který grafový driver běh obsloužil. Bez toho po výměně nepoznáš, jestli nálezů ubylo kvůli horšímu nástroji, nebo kvůli chybějící schopnosti."
+          "description": "Which code-graph driver served the run. Without this, after a driver swap you cannot tell whether findings dropped because of a worse tool or a missing capability."
         },
         "capabilities": {
           "type": "array",
           "items": {
             "type": "string"
           },
-          "description": "Na které otázky driver v tomhle běhu odpovídal. Dimenze, která stojí na chybějící schopnosti, se přeskočí — a tady je vidět proč."
+          "description": "Which questions the driver answered during this run. A dimension that stands on a missing capability skips itself — and this is where you see why."
+        },
+        "note": {
+          "type": ["string", "null"],
+          "description": "A limitation the pack ran into with the graph tool that the fields above cannot express — e.g. a query returning empty for a symbol confirmed present by direct reading. Free text, not machine-read; a place to keep a real observation from being silently dropped."
         },
         "action": {
           "enum": [
@@ -223,7 +228,7 @@
         },
         "changedFunctionsTruncated": {
           "type": "boolean",
-          "description": "Graf ořízl seznam změněných funkcí (CRG: CRG_MAX_CHANGED_FUNCS, výchozí 500). Pak je changedFunctions dolní odhad, ne počet."
+          "description": "The graph truncated the list of changed functions (CRG: CRG_MAX_CHANGED_FUNCS, default 500). changedFunctions is then a lower bound, not a count."
         },
         "untestedFunctions": {
           "type": [
@@ -253,7 +258,7 @@
     },
     "cost": {
       "type": "object",
-      "description": "Bez tohohle nejde zodpovědět, jestli je systém výhodný i při plné API ceně — a to je jedno z kill criteria. Musí vzniknout dřív, než se nasbírá historie, do které se to zpětně nedoplní.",
+      "description": "Without this there is no way to answer whether the system is worth it even at full API price — and that is one of the kill criteria. Has to exist before history accumulates that it cannot be filled in retroactively.",
       "additionalProperties": false,
       "properties": {
         "provider": {
@@ -346,12 +351,12 @@
         "raw": {
           "type": "integer",
           "minimum": 0,
-          "description": "co vrátily dimenze"
+          "description": "what the dimensions returned"
         },
         "gated": {
           "type": "integer",
           "minimum": 0,
-          "description": "zahozeno deterministickou bránou (bez evidence nebo bez file:line)"
+          "description": "dropped by the deterministic gate (no evidence, or no file:line)"
         },
         "belowScore": {
           "type": "integer",
@@ -369,7 +374,7 @@
     },
     "agent": {
       "type": "object",
-      "description": "What handled the run. The model is part of the record because precision is compared between models, not only between packs. `hire` names the roster entry that took it — with several specialists over one pack, provider and model alone no longer identify who did the work.",
+      "description": "What handled the run. The model is part of the record because precision is compared between models, not only between packs.",
       "additionalProperties": false,
       "properties": {
         "provider": {
@@ -384,7 +389,7 @@
             "string",
             "null"
           ],
-          "description": "null = výchozí model providera"
+          "description": "null = the provider's default model"
         },
         "bin": {
           "type": "string"
@@ -394,7 +399,7 @@
             "string",
             "null"
           ],
-          "description": "Id of the roster entry from .agency/hires.json, e.g. review-graph@codex. null = the run was handed over straight from the pack configuration."
+          "description": "Historical: the roster id (e.g. review-graph@codex) a pre-v1 run was hired under, from the since-removed .agency/hires.json. New runs leave this null and are identified by pack + provider alone — there is no roster to name a second worker over the same pack."
         },
         "exitCode": {
           "type": [
@@ -447,41 +452,9 @@
         }
       }
     },
-    "brief": {
-      "type": "object",
-      "description": "Zadání běhu. Dvě vrstvy, protože každá platí jinak dlouho: standing je konfigurace projektu a platí pořád, focus je tenhle jeden běh. Zapisuje se do run recordu proto, že „které zadání vyrábí lepší nálezy“ je otázka, kterou má nástroj umět zodpovědět čísly.",
-      "additionalProperties": false,
-      "properties": {
-        "standing": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "focus": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "scenario": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "source": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "description": "prompt | scenario:<name> | scenario:<name>+prompt | config"
-        }
-      }
-    },
     "evidence": {
       "type": "object",
-      "description": "Deterministický signál nasbíraný před během u packu, který nejede nad grafem — kolik souborů se změnilo, kolik commitů přibylo, kolik nálezů projekt už zná.",
+      "description": "Deterministic signal gathered before the run, for a pack that does not run over the graph — how many files changed, how many commits landed, how many findings the project already knows.",
       "additionalProperties": {
         "type": [
           "integer",
@@ -496,7 +469,7 @@
         "object",
         "null"
       ],
-      "description": "Kolik nálezů zahodila brána a proč — schema, phantom-file, phantom-line, below-score. Píše to ingest; bez rozpadu po důvodech se nedá poznat, čím pack nejčastěji plýtvá.",
+      "description": "How many findings the gate dropped and why — schema, phantom-file, phantom-line, below-score. Written by ingest; without a breakdown by reason you cannot tell what a pack most often wastes on.",
       "additionalProperties": {
         "type": "integer",
         "minimum": 0
@@ -515,7 +488,7 @@
         "null"
       ],
       "additionalProperties": false,
-      "description": "Členství běhu v řetězu specialistů (`agency chain`). Chybí u samostatného běhu. Bez tohoto bloku by se z běhů nedalo zpětně poznat, které rozhodnutí padlo nad cizím nálezem v rámci předání a které samostatně — a to je celý rozdíl mezi týmem a několika běhy za sebou.",
+      "description": "This run's membership in a chain of specialists (`agency chain`). Absent for a standalone run. Without this block you could not tell, from the runs alone, which decision was made over someone else's finding as a handoff and which was made independently — and that is the whole difference between a team and a few runs back to back.",
       "required": [
         "id",
         "position",
@@ -524,24 +497,24 @@
       "properties": {
         "id": {
           "type": "string",
-          "description": "ULID řetězu. Společný všem jeho běhům."
+          "description": "ULID of the chain. Shared by all its runs."
         },
         "position": {
           "type": "integer",
           "minimum": 1,
-          "description": "Pořadí člena v řetězu, od jedničky."
+          "description": "The member's order in the chain, starting at one."
         },
         "of": {
           "type": "integer",
           "minimum": 1,
-          "description": "Kolik členů řetěz má. Zapisuje se, aby šlo poznat přerušený řetěz od dokončeného bez čtení ostatních běhů."
+          "description": "How many members the chain has. Recorded so a broken-off chain can be told apart from a finished one without reading the other runs."
         },
         "upstream": {
           "type": "array",
           "items": {
             "type": "string"
           },
-          "description": "Id běhů, jejichž výstup dostal tenhle člen na vstupu — v pořadí, v jakém běžely. Prázdné u prvního člena."
+          "description": "Ids of the runs whose output this member received as input — in the order they ran. Empty for the first member."
         }
       }
     }

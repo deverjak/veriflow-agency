@@ -1,8 +1,8 @@
 {
   "name": "veriflow-agency",
   "displayName": "Agency",
-  "description": "Specialists you hire into your repository. Pull request reviews with evidence-backed findings, triage right next to the code, and measurable precision.",
-  "version": "0.5.0",
+  "description": "Specialists for this repository. Pull request reviews with evidence-backed findings, triage right next to the code, and measurable precision.",
+  "version": "0.6.0",
   "publisher": "veriflow",
   "license": "UNLICENSED",
   "private": true,
@@ -86,7 +86,7 @@
       {
         "view": "agency.findings",
         "when": "agency.ready && !agency.hasRuns",
-        "contents": "No run yet.\n\nTwo specialists, two ways of finding a problem.\n\nThe reviewer walks a pull request and cross-checks the changes against the real structure of the code.\n\n[Review a pull request](command:agency.review.pick)\n\nThe QA engineer explores the running application following a brief you write, reproduces every problem from a clean session and anchors it to the code that causes it.\n\n[Start a QA session](command:agency.qa.run)\n\nEither of them can be hired on more than one AI runner and started side by side on the same code — they share the findings, so the second one's repeats are marked as duplicates rather than asked about twice.\n\nA run starts in a visible terminal, not in the background: attended is a property of the system, not an intention."
+        "contents": "No run yet.\n\nA specialist is a skill in `.claude/skills/agency-<name>/`, written for this project.\n\nA reviewer walks a pull request and cross-checks the changes against the real structure of the code.\n\n[Review a pull request](command:agency.review.pick)\n\nA QA engineer explores the running application following a prompt you write, reproduces every problem from a clean session and anchors it to the code that causes it.\n\n[Start a session](command:agency.qa.run)\n\nA run starts in a visible terminal, not in the background: attended is a property of the system, not an intention."
       },
       {
         "view": "agency.findings",
@@ -96,7 +96,7 @@
       {
         "view": "agency.tools",
         "when": "agency.ready",
-        "contents": "A specialist is a **method** plus the **runner** that follows it.\n\nHiring one brings its procedure and its configuration into the project; rules and documentation stay with the project.\n\nThe same method can be hired once per runner — a reviewer on Claude and a reviewer on Codex share one configuration, one queue of findings and one dedup, and can walk the same pull request side by side.\n\n[Hire a specialist](command:agency.hire.add)\n[Register an AI runner](command:agency.provider.add)"
+        "contents": "No specialist found in this project.\n\nA pack is a skill directory — `pack.json` next to `SKILL.md`, under `.claude/skills/agency-<name>/`. Nothing here installs one; it is written for this project and committed with it."
       }
     ],
     "configuration": {
@@ -108,41 +108,17 @@
           "markdownDescription": "Path to the `agency` command. Leave it as `agency` when it is on PATH; `uv tool install` can also put it somewhere else.",
           "order": 1
         },
-        "agency.pack": {
-          "type": "string",
-          "default": "review-graph",
-          "description": "Deprecated — the roster decides who runs (`agency roster`). Kept so an older setting does not break; it is ignored when the project has hired specialists.",
-          "order": 2
-        },
-        "agency.model": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "default": null,
-          "markdownDescription": "Fallback model for a project with no roster. Empty = the model of the specialist that takes the run.\n\nThe model is a property of the task, not of the user: a review is reading and classification, not writing, so it can run cheaper than coding. Per specialist it is set by `agency hire <pack> --model <m>`, and the choice is written into the run record so you can measure which one produces better findings.",
-          "order": 3
-        },
-        "agency.provider": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "default": null,
-          "markdownDescription": "Fallback runner for a project with no roster. Empty = the runner of the specialist that takes the run. Runners are registered per machine — `agency providers`.",
-          "order": 4
-        },
         "agency.commentThreads": {
           "type": "boolean",
           "default": true,
           "markdownDescription": "Show findings as comments right at the line of code. Turning this off leaves only the Agency panel.",
-          "order": 5
+          "order": 2
         },
         "agency.autoRefresh": {
           "type": "boolean",
           "default": true,
           "markdownDescription": "Reload when `.agency/runs/` changes from the outside — that is, when an agent or a terminal decides. Turning this off means changes only show up after a manual refresh.",
-          "order": 6
+          "order": 3
         }
       }
     },
@@ -162,7 +138,7 @@
       },
       {
         "command": "agency.qa.run",
-        "title": "Start a QA session…",
+        "title": "Start a session…",
         "category": "Agency",
         "icon": "$(beaker)"
       },
@@ -221,43 +197,14 @@
         "icon": "$(settings-gear)"
       },
       {
-        "command": "agency.pack.add",
-        "title": "Hire a specialist…",
-        "category": "Agency",
-        "icon": "$(person-add)"
-      },
-      {
-        "command": "agency.hire.add",
-        "title": "Hire a specialist…",
-        "category": "Agency",
-        "icon": "$(person-add)"
-      },
-      {
-        "command": "agency.hire.remove",
-        "title": "Dismiss this specialist",
-        "category": "Agency",
-        "icon": "$(trash)"
-      },
-      {
-        "command": "agency.hire.run",
+        "command": "agency.pack.run",
         "title": "Run this specialist…",
         "category": "Agency",
         "icon": "$(play)"
       },
       {
-        "command": "agency.provider.add",
-        "title": "Register an AI runner…",
-        "category": "Agency",
-        "icon": "$(rocket)"
-      },
-      {
         "command": "agency.view.tools.focus",
         "title": "Go to the specialists",
-        "category": "Agency"
-      },
-      {
-        "command": "agency.pack.openConfig",
-        "title": "Open pack configuration",
         "category": "Agency"
       },
       {
@@ -330,18 +277,6 @@
         "command": "agency.view.findings.focus",
         "title": "Go to the findings queue",
         "category": "Agency"
-      },
-      {
-        "command": "agency.pack.brief",
-        "title": "Set the standing brief…",
-        "category": "Agency",
-        "icon": "$(note)"
-      },
-      {
-        "command": "agency.qa.playwright",
-        "title": "Browser testing setup…",
-        "category": "Agency",
-        "icon": "$(browser)"
       }
     ],
     "menus": {
@@ -399,10 +334,6 @@
           "when": "false"
         },
         {
-          "command": "agency.pack.openConfig",
-          "when": "false"
-        },
-        {
           "command": "agency.decision.apply",
           "when": "false"
         },
@@ -411,15 +342,11 @@
           "when": "false"
         },
         {
-          "command": "agency.hire.remove",
-          "when": "false"
-        },
-        {
           "command": "agency.view.tools.focus",
           "when": "false"
         },
         {
-          "command": "agency.pack.add",
+          "command": "agency.pack.run",
           "when": "false"
         },
         {
@@ -459,11 +386,6 @@
           "when": "view == agency.overview || view == agency.findings"
         },
         {
-          "command": "agency.hire.add",
-          "group": "navigation@1",
-          "when": "view == agency.tools"
-        },
-        {
           "command": "agency.doctor",
           "group": "1_check@1",
           "when": "view == agency.overview"
@@ -472,21 +394,6 @@
           "command": "agency.openSettings",
           "group": "9_config@1",
           "when": "view == agency.overview || view == agency.tools"
-        },
-        {
-          "command": "agency.pack.brief",
-          "group": "9_config@2",
-          "when": "view == agency.tools"
-        },
-        {
-          "command": "agency.qa.playwright",
-          "group": "9_config@3",
-          "when": "view == agency.tools"
-        },
-        {
-          "command": "agency.provider.add",
-          "group": "9_config@4",
-          "when": "view == agency.tools"
         },
         {
           "command": "agency.run.close",
@@ -526,29 +433,9 @@
           "when": "viewItem =~ /^agencyFinding/"
         },
         {
-          "command": "agency.hire.add",
+          "command": "agency.pack.run",
           "group": "inline@1",
-          "when": "viewItem == agencyPack.available"
-        },
-        {
-          "command": "agency.hire.run",
-          "group": "inline@1",
-          "when": "viewItem == agencyHire"
-        },
-        {
-          "command": "agency.hire.add",
-          "group": "1_hire@1",
-          "when": "viewItem == agencyHire"
-        },
-        {
-          "command": "agency.pack.brief",
-          "group": "1_hire@2",
-          "when": "viewItem == agencyHire"
-        },
-        {
-          "command": "agency.hire.remove",
-          "group": "inline@2",
-          "when": "viewItem == agencyHire"
+          "when": "viewItem == agencyPack"
         },
         {
           "command": "agency.run.close",

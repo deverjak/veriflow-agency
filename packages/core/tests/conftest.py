@@ -1,8 +1,9 @@
-"""Dočasný projekt pro testy.
+"""A temporary project for tests.
 
-Testy jádra nesmí sahat na skutečné repozitáře uživatele. Celý řetěz — běh,
-nález, brána, rozhodnutí, metrika — se dá postavit nad git repem, který vznikne
-a zanikne v jednom testu; a jenom takový test jde pustit stokrát za sebou.
+Core tests must never touch the user's real repositories. The whole chain —
+run, finding, gate, decision, metric — can be built over a git repo that is
+born and dies inside one test; and only such a test can be run a hundred
+times in a row.
 """
 
 from __future__ import annotations
@@ -76,17 +77,27 @@ def repo(tmp_path: Path) -> Path:
     return root
 
 
+def install_pack(project: config.Project, name: str, manifest: dict | None = None,
+                 skill_body: str = "# Test skill\n") -> Path:
+    """Drops a minimal pack — `pack.json` next to `SKILL.md` — where the core
+    looks for it: `.claude/skills/agency-<name>/`."""
+    skill_dir = project.skills_dir / f"agency-{name}"
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    m = {"name": name, "title": name, "description": "test pack",
+         "requires": [], "target": "pull-request", "worktree": True,
+         "graph": False, "prompt": "optional", "needs": [], "minScore": 70,
+         "dimensions": [{"id": "correctness", "title": "Correctness"}]}
+    m.update(manifest or {})
+    write_json(skill_dir / "pack.json", m)
+    (skill_dir / "SKILL.md").write_text(skill_body, encoding="utf-8")
+    return skill_dir
+
+
 @pytest.fixture
-def project(repo: Path, tmp_path: Path, monkeypatch) -> config.Project:
-    # Registr do dočasného adresáře — test nesmí zapisovat do ~/.agency.
-    monkeypatch.setenv("AGENCY_HOME", str(tmp_path / "home"))
+def project(repo: Path, tmp_path: Path) -> config.Project:
     p = config.discover(repo)
     assert p is not None
-    write_json(p.agency_dir / "review-graph.json", {
-        "pack": "review-graph@0.1.0",
-        "review": {"minScore": 80},
-        "sinks": {"runRecord": True},
-    })
+    install_pack(p, "review-graph", {"minScore": 80})
     return p
 
 
@@ -96,7 +107,7 @@ def make_finding(project: config.Project, run_id: str, **over) -> dict:
     f = {
         "id": ulid(),
         "runId": run_id,
-        "pack": "review-graph@0.1.0",
+        "pack": "review-graph",
         "dimension": "correctness",
         "severity": "high",
         "title": "Uživatel se načte i po odhlášení, protože se nekontroluje relace",
@@ -132,7 +143,7 @@ def make_run(project: config.Project):
         run = runs.Run(rid, project.runs_dir / rid, project)
         run.dir.mkdir(parents=True, exist_ok=True)
         rec = {
-            "id": rid, "pack": "review-graph@0.1.0",
+            "id": rid, "pack": "review-graph",
             "project": {"slug": project.slug, "defaultBranch": "main"},
             # `headRefOid` je v run.v1 povinné — bez něj by fixture vyráběla
             # záznam, jaký by skutečný běh nikdy nezapsal.

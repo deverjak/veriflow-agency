@@ -1,31 +1,27 @@
-// Sdílený stav UI — jeden načtený snímek, ze kterého čtou všechny pohledy.
+// Shared UI state — one loaded snapshot every view reads from.
 //
-// Bez tohohle by čtyři stromy plus vlákna plus stavový řádek spustily při každém
-// překreslení vlastní `agency …` proces. Snímek se pořídí jednou, pohledy se
-// překreslí z něj, a `refresh()` je jediné místo, které sahá na CLI.
+// Without this, four trees plus threads plus the status bar would each spawn
+// their own `agency …` process on every redraw. The snapshot is taken once,
+// views redraw from it, and `refresh()` is the only place that touches the CLI.
 //
-// Stav TADY NEŽIJE. Žije v `.agency/runs/` a tenhle soubor je jen jeho kopie
-// pro vykreslení — proto se smí kdykoli celý zahodit a načíst znovu.
+// State does NOT live here. It lives in `.agency/runs/` and this file is only
+// a copy of it for rendering — which is why it can be thrown away and reloaded
+// at any time.
 
 const vscode = require('vscode');
 const cli = require('./cli.js');
 
 const emitter = new vscode.EventEmitter();
 
-/** Pohledy poslouchají tohle; nikdy nesahají na CLI samy. */
+/** Views listen to this; they never touch the CLI themselves. */
 const onDidChange = emitter.event;
 
 const snapshot = {
   cwd: null,
-  /** {ok, reason, error} — proč UI ukazuje uvítání místo dat */
+  /** {ok, reason, error} — why the UI shows a welcome screen instead of data */
   probe: { ok: false, reason: 'loading', error: null },
-  project: null,     // `agency init` — co nástroj o projektu ví
+  project: null,     // {name, slug, root, packs} — from `agency status`
   packs: [],
-  // The roster — one entry per hired worker. Kept beside `packs` rather than
-  // inside them because the Specialists view lists workers, while “what does
-  // this method look at” still belongs to the pack.
-  hires: [],
-  providers: [],
   runs: [],
   findings: [],
   metrics: null,
@@ -39,7 +35,7 @@ function workspaceRoot() {
   return folders && folders.length ? folders[0].uri.fsPath : null;
 }
 
-/** Nálezy k rozhodnutí. Duplicity a rozhodnuté se do fronty nepočítají. */
+/** Findings waiting for a decision. Duplicates and decided ones do not count. */
 function queue() {
   return snapshot.findings.filter((f) => !f.decision && f.state !== 'duplicate');
 }
@@ -49,11 +45,12 @@ function findingById(id) {
 }
 
 /**
- * Načte všechno znovu. Jediné místo v extension, které volá CLI kvůli čtení.
+ * Reloads everything. The only place in the extension that calls the CLI
+ * for reads.
  *
- * `metrics` a `doctor` se načítají taky — jsou to dva procesy navíc, ale
- * odpovídají na otázky „vyplácí se to?" a „proč to nejede?", které se jinak
- * musí hledat v terminálu.
+ * `metrics` and `doctor` are loaded too — two extra processes, but they
+ * answer "is this paying off?" and "why isn't this working?", which
+ * otherwise have to be looked up in the terminal.
  */
 async function refresh({ light = false } = {}) {
   const cwd = workspaceRoot();
@@ -76,19 +73,16 @@ async function refresh({ light = false } = {}) {
     return snapshot;
   }
 
-  const [findings, runs] = await Promise.all([cli.findings(cwd), cli.status(cwd)]);
+  const [findings, statusData] = await Promise.all([cli.findings(cwd), cli.status(cwd)]);
   snapshot.findings = findings || [];
-  snapshot.runs = runs || [];
+  snapshot.runs = (statusData && statusData.runs) || [];
+  snapshot.project = (statusData && statusData.project) || snapshot.project;
 
   if (!light) {
-    const [packs, hires, providers, project, metrics, doctor] = await Promise.all([
-      cli.packs(cwd), cli.roster(cwd), cli.providers(cwd),
-      cli.init(cwd), cli.metrics(cwd), cli.doctor(cwd),
+    const [packs, metrics, doctor] = await Promise.all([
+      cli.packs(cwd), cli.metrics(cwd), cli.doctor(cwd),
     ]);
     snapshot.packs = packs || [];
-    snapshot.hires = hires || [];
-    snapshot.providers = providers || [];
-    snapshot.project = project || null;
     snapshot.metrics = metrics || null;
     snapshot.doctor = doctor || [];
   }
@@ -99,17 +93,6 @@ async function refresh({ light = false } = {}) {
   return snapshot;
 }
 
-/** Workers of one pack. The Specialists view and every run picker read this. */
-function hiresOf(packName) {
-  return (snapshot.hires || []).filter((h) => h.pack === packName);
-}
-
-/** The pack a hire works by — its brief, its dimensions, its run policy. */
-function packOf(hire) {
-  return (snapshot.packs || []).find((p) => p.name === (hire && hire.pack)) || null;
-}
-
 module.exports = {
   snapshot, onDidChange, refresh, queue, findingById, workspaceRoot, emitter,
-  hiresOf, packOf,
 };

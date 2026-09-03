@@ -1,95 +1,23 @@
 {
   "name": "legal",
-  "version": "0.1.0",
-  "title": "Compliance counsel",
+  "title": "Compliance counsel · NaLekci",
   "description": "Reviews the legal surface of the product — terms, change notices, consent flows, seller data, platform reporting — against what Czech and EU law actually say, with the provision quoted from the primary source. Calibrated in both directions: it reports missing duties and duties the product invented for itself.",
-  "requires": {
-    "tools": [
-      "git"
-    ],
-    "optionalTools": [
-      "code-review-graph"
-    ],
-    "provider": [
-      "claude",
-      "codex"
-    ]
-  },
-  "run": {
-    "target": "workspace",
-    "worktree": false,
-    "graph": false,
-    "prompt": {
-      "accepts": true,
-      "required": false,
-      "label": "What should this review focus on?",
-      "placeholder": "e.g. the new instructor terms, or DAC7 readiness before January"
-    },
-    "needs": [
-      "agency triage",
-      "agency note",
-      "agency findings",
-      "git",
-      "gh issue view",
-      "gh issue list"
-    ]
-  },
-  "installs": [
-    {
-      "from": "skill/SKILL.md",
-      "to": ".claude/skills/agency-legal/SKILL.md"
-    },
-    {
-      "from": "skill/references/sources.md",
-      "to": ".claude/skills/agency-legal/references/sources.md"
-    },
-    {
-      "from": "skill/references/cz-eu-baseline.md",
-      "to": ".claude/skills/agency-legal/references/cz-eu-baseline.md"
-    }
+  "requires": ["git"],
+  "target": "workspace",
+  "worktree": false,
+  "graph": false,
+  "prompt": "optional",
+  "needs": [
+    "agency triage", "agency note", "agency findings",
+    "git", "gh issue view", "gh issue list"
   ],
-  "config": {
-    "file": ".agency/legal.json",
-    "template": "config.template.json",
-    "required": [
-      "business.model",
-      "business.size"
-    ]
-  },
-  "outputs": {
-    "findings": "finding.v1",
-    "run": "run.v1"
-  },
+  "minScore": 85,
   "dimensions": [
-    {
-      "id": "terms",
-      "title": "Terms, their incorporation and their changes",
-      "projectSpecific": false
-    },
-    {
-      "id": "consumer",
-      "title": "Consumer contracts and distance selling duties",
-      "projectSpecific": false
-    },
-    {
-      "id": "privacy",
-      "title": "Personal data, cookies and commercial messages",
-      "projectSpecific": false
-    },
-    {
-      "id": "over-compliance",
-      "title": "Duties the product invented for itself",
-      "projectSpecific": false
-    },
-    {
-      "id": "partners",
-      "title": "Business users, marketplace and platform duties",
-      "projectSpecific": true
-    },
-    {
-      "id": "tax-reporting",
-      "title": "Platform reporting of sellers (DAC7)",
-      "projectSpecific": true
-    }
+    { "id": "terms", "title": "Terms, their incorporation and their changes" },
+    { "id": "consumer", "title": "Consumer contracts and distance selling duties" },
+    { "id": "privacy", "title": "Personal data, cookies and commercial messages" },
+    { "id": "over-compliance", "title": "Duties the product invented for itself" },
+    { "id": "partners", "title": "Business users, marketplace and platform duties" },
+    { "id": "tax-reporting", "title": "Platform reporting of sellers (DAC7)" }
   ]
 }

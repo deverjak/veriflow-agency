@@ -135,7 +135,7 @@ def test_statistiky_se_vejdou_do_run_v1(project, make_run, fake_crg):
 
     stats = runs.collect_evidence(project, project.root, run,
                                   {"baseRefOid": "b" * 40}, ["src/auth.ts"])
-    ginfo = runs.prepare_graph(project, project.root, {})
+    ginfo = runs.prepare_graph(project, project.root)
 
     allowed = set(json.loads(SCHEMA.read_text(encoding="utf-8"))
                   ["properties"]["graph"]["properties"])

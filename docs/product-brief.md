@@ -102,13 +102,13 @@ agency status
 | Pojem | Co to je |
 |---|---|
 | **Projekt** | Repozitář, na kterém pracuješ. Drží si vlastní stav a vlastní paměť. |
-| **Specialista** *(agent pack)* | Nainstalovatelný odborník s vlastní metodou. Recenzent, QA, product owner. Jedna verze metody pro všechny projekty. |
+| **Specialista** *(pack)* | Skill v repozitáři projektu, s fakty projektu natvrdo. Recenzent, QA, product owner, právník. Jedna verze na projekt; další projekt dostane kopii. |
 | **Běh** | Jedno konkrétní pověření: „prověř tenhle PR", „projdi rezervační flow jako zákazník". Má začátek, konec a záznam. |
 | **Nález** | Jedno zjištění s důkazem: kde to je, čím to selže, co to dokládá. Bez důkazu to není nález. |
 | **Rozhodnutí** | Co s nálezem — opravit, odložit, zamítnout. Zaznamenané i s důvodem. |
 | **Paměť projektu** | Co už specialista o projektu ví. Aby netvrdil podruhé totéž a nezkoumal, co už prozkoumal. |
 
-**Klíčové rozdělení:** *metodu* vlastní specialista a sdílí se mezi projekty. *Stav* vlastní projekt a nesdílí se. Dnes je to slepené dohromady, a proto agent umí jen jeden projekt.
+**Klíčové rozdělení:** *jádro* (běh, záznam, brána, triage, dedup, paměť) patří všem projektům stejně. *Pack* patří jednomu projektu — je to skill s fakty toho projektu natvrdo, ne konfigurace nad obecnou metodou. Sdílený je kontrakt (`pack.json`, `finding.v1`, `run.v1`), ne stav.
 
 ---
 
@@ -146,7 +146,7 @@ Zkráceně: **Claude Code ti dá odpověď. Agency ti dá záznam.**
 2. **Nic ven bez souhlasu člověka.** Agent připravuje, člověk rozhoduje.
 3. **Neopakovat se.** Co už bylo nalezeno, se nehlásí znovu jako nové. Doplní se novým důkazem k původnímu nálezu.
 4. **Bez tebe se neběhá.** „Jsem u toho" je vlastnost systému, ne slib.
-5. **Metoda patří specialistovi, stav patří projektu.** Jinak specialista umí jen jeden projekt.
+5. **Jádro patří všem, pack patří projektu.** Sdílený je kontrakt, ne konfigurace.
 6. **Vypnutí nesmí nic ztratit.** Když Agency smažeš, projekty i nálezy zůstanou čitelné bez ní.
 
 ---
@@ -172,7 +172,7 @@ Ne „máme hezkou appku", ale:
 
 1. **Vím, co se rozbilo, a nemusím to hledat** — nálezy jsou v editoru u toho řádku kódu, kterého se týkají.
 2. **Nález mi neuteče.** Dnes 35 ze 36 přepisuju rukou. Cíl: nula.
-3. **Nový projekt je hotový za deset minut.** Ne za odpoledne kopírování.
+3. **Nový projekt je hotový za deset minut.** Zkopíruješ čtyři adresáře z `packs/`, přepíšeš Project facts a skripty, pustíš `agency doctor`. Ne za odpoledne kopírování.
 4. **Fronta se hýbe.** Dnes 47 nerozhodnutých položek. Cíl: pod 15.
 5. **Vím, kolik z toho bylo k něčemu.** Dnes to spočítat nejde — evidence nemá stav pro zamítnutý nález. To je první věc k opravě.
 
@@ -188,7 +188,9 @@ Ne „máme hezkou appku", ale:
 
 **Potom** — sdílení stavu s teammates (rozhodnutí a nálezy, nikdy přístupy), další specialisté podle toho, co bude reálně chybět.
 
-**Vědomě zatím ne** — samostatná desktopová aplikace (zrušená, ne odložená), noční automatizace, víceuživatelský server, obchod se specialisty. Každá z těch věcí má svůj spouštěč a žádný zatím nenastal.
+**Vědomě zatím ne** — samostatná desktopová aplikace (zrušená, ne odložená), noční automatizace, víceuživatelský server. Každá z těch věcí má svůj spouštěč a žádný zatím nenastal.
+
+**Není a nebude** — obchod se specialisty ani registr packů. Specialisté se kopírují mezi projekty a přepisují ručně; to je rozhodnutí, ne mezikrok.
 
 ---
 

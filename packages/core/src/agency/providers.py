@@ -1,36 +1,18 @@
-"""What a run can be handed to — the AI runners present on this machine.
+"""What a run can be handed to — the two AI runners Agency drives.
 
-A provider is a property of the MACHINE, not of the project. Whether you have
-`codex` depends on what you installed, not on which repository you happen to
-have open — which is why this table lives in `~/.agency/providers.json`, next
-to the project registry, and not in `.agency/`.
-
-Two are built in because they are the two that have been exercised. A third is
-added with a command, not with a commit:
-
-    agency providers add grok --bin grok
-
-Were this a branch in the code, every new runner would mean a release of the
-tool — and that is exactly the thing the roster (`hires.py`) exists to avoid.
+Two, and they are a table in code, not a registry. A third runner is a change
+to `BUILTIN`, not a migration: adding one means writing its launch shape once,
+the same care a new provider took before, minus a file nobody but this
+machine could read.
 
 The launch shape is a description, not code: which flag carries the model,
 which one grants a directory outside the working copy, whether the prompt goes
-positionally or behind a flag. As long as a new runner fits that shape, one row
-of data is enough.
+positionally or behind a flag.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from . import proc
-from .util import read_json, write_json
-
-# An empty `promptFlag` means a positional argument — both claude and codex.
-FIELDS = ("title", "bin", "modelFlag", "dirFlag", "promptFlag", "promptSeparator",
-          "unattendedPrefix", "editsGrant", "allowFlag", "allowShapes",
-          "bypassArgs", "streamArgs", "streamDialect", "extraArgs",
-          "models", "defaultModel")
 
 BUILTIN: dict[str, dict] = {
     "claude": {
@@ -103,9 +85,7 @@ BUILTIN: dict[str, dict] = {
         # is off inside it, so `gh` would fail — hence the second flag.
         #
         # CAUTION: unlike the claude branch this is **not verified by a real
-        # run**, only read off the 0.144.3 help. The user's roster is entirely
-        # `@claude` today; the first codex chain has to confirm it, and
-        # `agency doctor` says so.
+        # run**, only read off the 0.144.3 help. `agency doctor` says so.
         "editsGrant": ["--sandbox", "workspace-write",
                        "-c", "sandbox_workspace_write.network_access=true"],
         # Codex has no per-command allowlist — the sandbox decides what is
@@ -122,64 +102,16 @@ BUILTIN: dict[str, dict] = {
 }
 
 
-def path() -> Path:
-    from .registry import home
-    return home() / "providers.json"
-
-
-def custom() -> dict[str, dict]:
-    data = read_json(path(), default={"version": 1, "providers": {}})
-    return data.get("providers") or {}
-
-
-def load() -> dict[str, dict]:
-    """The built-ins, overlaid with whatever the user added.
-
-    An overlay, not a replacement: someone who wants claude with a different
-    binary (another path, a wrapper) overrides `bin` alone and the rest of the
-    launch shape stays.
-    """
-    merged = {k: dict(v) for k, v in BUILTIN.items()}
-    for pid, over in custom().items():
-        base = merged.get(pid) or {"title": pid, "bin": pid, "modelFlag": "--model",
-                                   "dirFlag": None, "promptFlag": None,
-                                   # `None` by default, because a foreign runner
-                                   # need not know `--`. Whoever needs it sets it.
-                                   "promptSeparator": None,
-                                   # Empty: a foreign runner need not have an
-                                   # unattended mode at all, and guessing one
-                                   # means a chain that hangs on its first step.
-                                   "unattendedPrefix": [],
-                                   # Same for authorization: the flag a foreign
-                                   # runner grants writes with cannot be guessed.
-                                   # Empty = the agent will ask and nobody will
-                                   # answer; `agency doctor` reports that.
-                                   "editsGrant": [], "allowFlag": None,
-                                   "allowShapes": [], "bypassArgs": [],
-                                   # With no dialect the run goes through
-                                   # `attend` — a terminal, no progress lines.
-                                   # Worse, but working; a guessed stream shape
-                                   # would be a parser that silently finds
-                                   # nothing.
-                                   "streamArgs": [], "streamDialect": None,
-                                   "extraArgs": [], "models": [], "defaultModel": None}
-        base.update({k: v for k, v in over.items() if k in FIELDS})
-        merged[pid] = base
-    return merged
-
-
 def known() -> list[str]:
-    return sorted(load())
+    return sorted(BUILTIN)
 
 
 def spec(provider_id: str) -> dict:
-    """The launch shape of a provider. Unknown name = a binary of that name.
-
-    An unknown name is DELIBERATELY not refused: `agency run … --provider
-    myscript` should work without registering anything. Registration exists so
-    a runner shows up in the picker and in the doctor, not to be mandatory.
-    """
-    s = load().get(provider_id)
+    """The launch shape of a provider. Unknown name = a bare binary of that
+    name — `agency run … --provider myscript` works without registering
+    anything, just with a narrower launch shape (no model flag, no
+    authorization, no stream)."""
+    s = BUILTIN.get(provider_id)
     if s is None:
         s = {"title": provider_id, "bin": provider_id, "modelFlag": "--model",
              "dirFlag": None, "promptFlag": None, "extraArgs": [],
@@ -206,25 +138,19 @@ def authorizes(provider_id: str) -> bool:
 def authorization(provider_id: str, needs: list[str], mode: str = "grant") -> list[str]:
     """The flags that start the agent allowed to do what its method does.
 
-    `needs` are the commands from the pack manifest (`run.needs`) —
-    `agency triage`, `git`, `gh pr view`, `npx vitest`. The core does not
-    translate them into one runner's syntax, it only fills them into that
-    runner's shape (`allowShapes`); a runner that authorizes with a sandbox
-    (codex) ignores the list, and that is correct rather than a gap.
+    `needs` are the commands from the pack manifest (`needs`) — `agency
+    triage`, `git`, `gh pr view`, `npx vitest`. The core does not translate
+    them into one runner's syntax, it only fills them into that runner's shape
+    (`allowShapes`); a runner that authorizes with a sandbox (codex) ignores
+    the list, and that is correct rather than a gap.
 
-    Three modes, because the difference between them is the user's decision:
+    Two modes:
 
       * `grant` — the default: writes into the working directory and into
         `--add-dir`, plus the listed commands. Covers what the method does.
-      * `bypass` — a project opt-in: no checks at all. Covers what the method
-        is not supposed to do as well; the worktree is throwaway, the machine
-        is not.
-      * `ask` — nothing is granted. An attended agent asks, an unattended one
-        dies quietly; it exists so authorization can be turned off without a
-        code change.
+      * `bypass` — a run-level opt-in (`--bypass`): no checks at all. The
+        worktree is throwaway; the machine is not.
     """
-    if mode == "ask":
-        return []
     s = spec(provider_id)
     if mode == "bypass":
         return [str(x) for x in (s.get("bypassArgs") or [])]
@@ -250,19 +176,8 @@ def authorization(provider_id: str, needs: list[str], mode: str = "grant") -> li
 
 
 def streaming(provider_id: str) -> tuple[list[str], str | None]:
-    """How to ask this runner for a live event stream — flags and dialect together.
-
-    One function, because these two are one decision. They were two: the flags
-    lived in the provider table and the dialect was read separately at the launch
-    site, and the flags were never read at all. The result was an orchestrator
-    parsing a stream it had forgotten to request — `claude -p` printing one blob
-    of prose at the very end, twelve minutes of nothing before it, and a run
-    record with no turns, no cost and no denials because there was no JSON to
-    take them from.
-
-    Returning both from one place makes that class of mismatch unrepresentable:
-    no dialect, no flags.
-    """
+    """How to ask this runner for a live event stream — flags and dialect
+    together, so no dialect means no flags and no flags means no dialect."""
     s = spec(provider_id)
     dialect = s.get("streamDialect")
     if not dialect:
@@ -271,51 +186,17 @@ def streaming(provider_id: str) -> tuple[list[str], str | None]:
 
 
 def installed(provider_id: str) -> str | None:
-    """Path to the binary, or None.
-
-    This is why the roster lives in the project but availability is computed
-    here: a colleague with the same repository need not have the same tools.
-    """
+    """Path to the binary, or None."""
     return proc.which(spec(provider_id).get("bin") or provider_id)
 
 
 def detected() -> list[dict]:
     rows = []
-    for pid, s in sorted(load().items()):
+    for pid, s in sorted(BUILTIN.items()):
+        path = proc.which(s.get("bin") or pid)
         rows.append({
-            "id": pid,
-            "title": s.get("title") or pid,
-            "bin": s.get("bin") or pid,
-            "models": s.get("models") or [],
-            "defaultModel": s.get("defaultModel"),
-            "builtin": pid in BUILTIN,
-            "path": proc.which(s.get("bin") or pid),
+            "id": pid, "title": s.get("title") or pid, "bin": s.get("bin") or pid,
+            "models": s.get("models") or [], "defaultModel": s.get("defaultModel"),
+            "path": path, "installed": bool(path),
         })
-    for r in rows:
-        r["installed"] = bool(r["path"])
     return rows
-
-
-def register(provider_id: str, **fields) -> dict:
-    provider_id = (provider_id or "").strip().lower()
-    if not provider_id or not provider_id.replace("-", "").replace("_", "").isalnum():
-        raise SystemExit(
-            f"“{provider_id}” is not a usable provider id — letters, digits, - and _ only.")
-    data = read_json(path(), default={"version": 1, "providers": {}})
-    entry = dict((data.get("providers") or {}).get(provider_id) or {})
-    entry.update({k: v for k, v in fields.items() if k in FIELDS and v is not None})
-    entry.setdefault("bin", provider_id)
-    entry.setdefault("title", provider_id)
-    data.setdefault("providers", {})[provider_id] = entry
-    data["version"] = 1
-    write_json(path(), data)
-    return spec(provider_id)
-
-
-def forget(provider_id: str) -> bool:
-    data = read_json(path(), default={"version": 1, "providers": {}})
-    if provider_id not in (data.get("providers") or {}):
-        return False
-    data["providers"].pop(provider_id)
-    write_json(path(), data)
-    return True
