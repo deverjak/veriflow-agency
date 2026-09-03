@@ -428,10 +428,18 @@ def cmd_run(args, chain: dict | None = None) -> int:
                  "members; do only your part and leave theirs to them"
                  if shared else "Prompt for this run")
         prompt += f" {label}: " + _one_line(prompt_text)
+    # `needsUnattended` joins in only when nobody could be asked anyway — a
+    # chain member. A standalone run stays interactive, so leaving them out
+    # here is what makes Claude Code's own permission prompt ask a person
+    # before a pack's consequential commands run, instead of granting them
+    # blind.
+    needs = list(policy.get("needs") or [])
+    if chain is not None:
+        needs += policy.get("needsUnattended") or []
     launch, agent_info = runs.launch_argv(
         posix(project.agency_dir), prompt, provider=provider,
         model=getattr(args, "model", None), unattended=chain is not None,
-        needs=policy.get("needs"), stream=chain is not None,
+        needs=needs, stream=chain is not None,
         bypass=bool(getattr(args, "bypass", False)))
     rec = run.record()
     rec["agent"] = agent_info

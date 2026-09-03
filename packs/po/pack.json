@@ -10,7 +10,13 @@
   "needs": [
     "agency triage", "agency note", "agency findings",
     "git", "gh issue view",
-    "python .claude/skills/agency-po/scripts/backlog.py"
+    "python .claude/skills/agency-po/scripts/backlog.py snapshot",
+    "python .claude/skills/agency-po/scripts/backlog.py comment",
+    "python .claude/skills/agency-po/scripts/backlog.py draft"
+  ],
+  "needsUnattended": [
+    "python .claude/skills/agency-po/scripts/backlog.py promote",
+    "python .claude/skills/agency-po/scripts/backlog.py decide"
   ],
   "minScore": 75,
   "sink": "python .claude/skills/agency-po/scripts/backlog.py draft --finding {id} --run-dir {runDir}",

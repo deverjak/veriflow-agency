@@ -17,11 +17,14 @@ happened.
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
 from agency import chain as chains, cli, events, ingest, proc, providers, runs
 from agency.util import write_json
+
+from conftest import install_pack
 
 
 # ------------------------------------------------------------ authorization
@@ -222,6 +225,59 @@ def test_the_allow_list_is_still_protected_when_streaming():
     assert argv[argv.index("--allowedTools") + 1].startswith("Bash(")
     after = argv[argv.index("--allowedTools"):]
     assert any(a.startswith("--") for a in after[1:]), "a flag closes the rule list"
+
+
+def _capture_needs(monkeypatch):
+    """Records what `needs` reaches `runs.launch_argv`, without faking the
+    rest of it — the real function still builds the real argv."""
+    captured = {}
+    real = runs.launch_argv
+
+    def fake(*a, **kw):
+        captured.update(kw)
+        return real(*a, **kw)
+    monkeypatch.setattr(runs, "launch_argv", fake)
+    return captured
+
+
+def test_a_consequential_command_stays_out_of_a_standalone_runs_grant(
+        project, monkeypatch):
+    """A standalone run keeps the terminal interactive. Leaving a pack's
+    `needsUnattended` command out of the grant is what makes Claude Code's
+    own permission dialog ask the person watching before it runs — instead
+    of granting it blind, the way a chain member has to."""
+    install_pack(project, "po", {
+        "target": "workspace", "worktree": False, "prompt": "none",
+        "needs": ["git"], "needsUnattended": ["python scripts/backlog.py promote"],
+    })
+    captured = _capture_needs(monkeypatch)
+
+    code = cli.main(["run", "po", "--repo", str(project.root), "--json"])
+
+    assert code == 0
+    assert "git" in (captured.get("needs") or [])
+    assert "python scripts/backlog.py promote" not in (captured.get("needs") or [])
+
+
+def test_a_consequential_command_joins_the_grant_only_inside_a_chain(
+        project, monkeypatch):
+    """Nobody could answer a prompt mid-chain — so here, and only here, the
+    pack's consequential commands are granted up front."""
+    install_pack(project, "po", {
+        "target": "workspace", "worktree": False, "prompt": "none",
+        "needs": ["git"], "needsUnattended": ["python scripts/backlog.py promote"],
+    })
+    captured = _capture_needs(monkeypatch)
+    args = SimpleNamespace(repo=str(project.root), json=True, pack="po",
+                           pr=None, latest_merged=False, prompt=None, since=None,
+                           wait=False, launch=False, model=None, provider=None,
+                           bypass=False, force=False)
+    chain_block = {"id": "01CHAINCHAINCHAINCHAINCHAI", "position": 1, "of": 2, "upstream": []}
+
+    code = cli.cmd_run(args, chain=chain_block)
+
+    assert code == 0
+    assert "python scripts/backlog.py promote" in (captured.get("needs") or [])
 
 
 # ------------------------------------------------------------- event stream

@@ -67,6 +67,13 @@ class Pack:
             "graph": graph_policy(m.get("graph")),
             "prompt": prompt,
             "needs": [str(x).strip() for x in (m.get("needs") or []) if str(x).strip()],
+            # Granted ON TOP of `needs`, but only when nobody could answer a
+            # permission prompt anyway — a chain member. Attended, leaving a
+            # command out of the grant is what makes Claude Code's own
+            # permission dialog ask the person watching before it runs; a
+            # pack puts its consequential, hard-to-undo commands here rather
+            # than in `needs` so a standalone run keeps asking for them.
+            "needsUnattended": [str(x).strip() for x in (m.get("needsUnattended") or []) if str(x).strip()],
         }
 
     @property
