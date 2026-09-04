@@ -238,23 +238,36 @@ class ToolsTree extends Tree {
   roots() {
     const s = state.snapshot;
     if (!s.probe.ok) return [];
-    return (s.packs || []).map((p) => node(p.title || p.name, {
-      id: `pack:${p.name}`,
-      description: p.skill || '',
-      iconId: 'person',
-      color: 'charts.green',
-      contextValue: 'agencyPack',
-      collapsed: true,
-      children: [
-        ...presets.forPack(p.name).map((preset) => presetNode(preset, p)),
-        ...packChildren(p),
-      ],
-      tooltip: `**${p.title || p.name}**\n\n${p.description || ''}\n\n---\n\n`
-        + `\`agency run ${p.name}\` — or the ▶ on this row.\n\n`
-        + '▶▶ is the same run with the runner’s permission checks turned off '
-        + `(\`agency run ${p.name} --bypass\`). Nothing asks before it acts — for a `
-        + 'method that reads the whole project and would otherwise ask fifty times.',
-    }));
+    return (s.packs || []).map((p) => {
+      // Which runner the row's own arrows use — the first preset, or the
+      // question asked on a first run. It stands in front of the skill
+      // directory because it is the part that decides what comes out of the
+      // run, and the row truncates.
+      const pinned = presets.pinned(p.name);
+      const who = pinned ? [pinned.provider, pinned.model].filter(Boolean).join(' · ') : '';
+      return node(p.title || p.name, {
+        id: `pack:${p.name}`,
+        description: [who, p.skill].filter(Boolean).join(' · '),
+        iconId: 'person',
+        color: 'charts.green',
+        contextValue: 'agencyPack',
+        collapsed: true,
+        children: [
+          ...presets.forPack(p.name).map((preset) => presetNode(preset, p)),
+          ...packChildren(p),
+        ],
+        tooltip: `**${p.title || p.name}**\n\n${p.description || ''}\n\n---\n\n`
+          + `\`agency run ${p.name}\` — or the ▶ on this row.\n\n`
+          + (pinned
+            ? `▶ runs it on **${who}** — the first preset below.\n\n`
+            : '▶ asks which runner the first time, and offers to keep the answer '
+              + 'as a preset. A run never inherits whatever model the session '
+              + 'happens to default to.\n\n')
+          + '▶▶ is the same run with the runner’s permission checks turned off '
+          + `(\`agency run ${p.name} --bypass\`). Nothing asks before it acts — for a `
+          + 'method that reads the whole project and would otherwise ask fifty times.',
+      });
+    });
   }
 }
 

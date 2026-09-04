@@ -263,9 +263,14 @@ whole project has no short `needs` list (a strategy pack asked about fifty
 separate commands in a single run), and the honest answer to that is either
 a manifest nobody can keep true or a run you knowingly start unguarded. The
 run record says which it was: `agent.authorized` is `grant` or `bypass`.
-A saved preset row carries the same pair, because a preset only pins the
-runner and the model — it must not also decide, once and for all, that this
-specialist can only run supervised.
+
+The model is **named, never inherited**. A run with no `--model` used to
+pass no model flag at all, which means the runner's own session default —
+so a run could go to a model nobody chose for that specialist, and the
+record kept `model: null`, leaving "which model produces better findings"
+with a bucket full of unknowns. The table names the default instead
+(`claude` → `sonnet`, the ordinary run), and anything worth more says so in
+`--model`, in a preset, or in the question the extension asks.
 
 ### A pack — `pack.json`
 
@@ -371,6 +376,14 @@ needs a different provider). A preset is a VS Code setting
 (`agency.presets`, per workspace) spelling out `agency run <pack>
 --provider … --model …` in advance — the core knows nothing about it, and
 there is no `.agency/*.json` for it either.
+
+A row with no preset **asks once**: which runner, which model, and then it
+offers to keep the answer. Saying no means being asked again — an answer
+worth keeping is a preset, and a preset is the thing that stops the
+question. A row that has one runs on its first preset and says so where the
+skill directory used to sit, so what a click starts is readable without
+opening anything. Every preset row carries the same two arrows as the pack
+above it: a preset pins the runner, never whether the run is supervised.
 
 **Runs → Discard all finished runs…** clears every run whose terminal is
 gone in one step (`agency cleanup --all --discard`). Safe by construction:

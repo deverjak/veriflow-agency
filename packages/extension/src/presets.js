@@ -18,6 +18,17 @@ function forPack(name) {
   return all().filter((p) => p.pack === name);
 }
 
+/** What a pack's own row starts on: its first preset, or nothing at all.
+ *
+ *  "Nothing" is not "any model will do" — it is the row's cue to ask. A run
+ *  with no `--model` takes whatever the runner's session defaults to that
+ *  month, which is a model nobody chose for this specialist and one the run
+ *  record could not name afterwards. */
+function pinned(name) {
+  const [first] = forPack(name);
+  return first ? { provider: first.provider, model: first.model } : null;
+}
+
 function label(p) {
   return p.label || p.model || p.provider;
 }
@@ -42,4 +53,4 @@ async function remove(p) {
     .update('presets', list, vscode.ConfigurationTarget.Workspace);
 }
 
-module.exports = { all, forPack, label, same, add, remove };
+module.exports = { all, forPack, pinned, label, same, add, remove };

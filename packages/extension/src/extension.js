@@ -416,10 +416,24 @@ function activate(context) {
     const name = packNameOf(arg);
     const p = (state.snapshot.packs || []).find((x) => x.name === name);
     if (!p) return;
+
+    // Which model this runs on is never left unsaid. A row with no preset
+    // used to start `agency run <pack>` with no `--model` at all, which
+    // means the runner's own session default — a model nobody picked for
+    // this specialist, and one the run record could not even name. So the
+    // first run of a pack asks, and the answer is offered as a preset,
+    // which is precisely the thing that stops it asking again.
+    const pinned = presets.pinned(p.name);
+    const pm = pinned || await pickProviderModel();
+    if (!pm) return;                              // Esc = walked away
+
+    const opts = { ...extra, provider: pm.provider, model: pm.model };
     const d = (p.run && p.run.target === 'workspace')
-      ? await review.runOverWorkspace(state.snapshot.cwd, p, log, extra)
-      : await runOneOverPr(p, extra);
-    if (d) setTimeout(() => refresh(), 2000);
+      ? await review.runOverWorkspace(state.snapshot.cwd, p, log, opts)
+      : await runOneOverPr(p, opts);
+    if (!d) return;
+    if (!pinned) offerPreset(p, pm);
+    setTimeout(() => refresh(), 2000);
   };
 
   reg('agency.pack.run', (arg) => runOne(arg));
@@ -681,6 +695,21 @@ function presetArgOf(arg) {
  * `agency status --json`'s provider catalog, so a new provider needs no
  * change here.
  */
+/** After a run started on a runner the user just picked by hand, offer to
+ *  keep it. Offered AFTERWARDS on purpose: remembering an answer is a
+ *  convenience, and a third dialog in front of the run would make the choice
+ *  feel like paperwork. Saying no simply means being asked again. */
+function offerPreset(pack, pm) {
+  const who = [pm.provider, pm.model].filter(Boolean).join(' · ');
+  vscode.window.showInformationMessage(
+    `Agency: run ${pack.title || pack.name} on ${who} from now on?`,
+    'Remember as a preset').then(async (answer) => {
+    if (!answer) return;
+    await presets.add({ pack: pack.name, provider: pm.provider, model: pm.model });
+    state.emitter.fire();
+  });
+}
+
 async function pickProviderModel() {
   const known = (state.snapshot.project && state.snapshot.project.providers) || [];
   const catalog = known.length ? known : [

@@ -64,7 +64,18 @@ BUILTIN: dict[str, dict] = {
         "streamDialect": "claude-stream-json",
         "extraArgs": [],
         "models": ["opus", "sonnet", "haiku"],
-        "defaultModel": None,
+        # Named on purpose, rather than left to the binary. Without a model
+        # flag `claude` runs on whatever the user's session happens to default
+        # to that month — a run started from a row that says nothing about a
+        # model would then quietly go to a model nobody chose for it. Worse,
+        # the run record kept `model: null`, so "which model produces better
+        # findings" — a question this tool is supposed to answer with numbers —
+        # had a bucket full of unknowns.
+        #
+        # Sonnet, because it is the ordinary run; a method worth more says so
+        # in its own `--model`, in a preset, or in the question the extension
+        # asks on a specialist's first run.
+        "defaultModel": "sonnet",
     },
     "codex": {
         "title": "Codex CLI",

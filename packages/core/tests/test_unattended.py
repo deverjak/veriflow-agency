@@ -119,6 +119,20 @@ def test_the_record_says_how_the_agent_was_authorized():
     assert info["authorized"] == "grant"
 
 
+def test_a_run_always_names_the_model_it_ran_on():
+    """Without a `--model` the runner used to fall back to whatever the user's
+    session defaulted to that month, and the record kept `model: null`. So the
+    row that started the run could not say what it would run, and the metrics
+    could not say what wrote a finding. The default is named in the table."""
+    argv, info = runs.launch_argv("/m", "p", provider="claude")
+
+    assert info["model"] == "sonnet"
+    assert argv[argv.index("--model") + 1] == "sonnet"
+
+    _, chosen = runs.launch_argv("/m", "p", provider="claude", model="opus")
+    assert chosen["model"] == "opus", "what the run asked for still wins"
+
+
 # ------------------------------------------------------- nothing vs. refused
 
 def test_a_run_that_wrote_nothing_is_not_a_run_that_found_nothing(project, make_run):

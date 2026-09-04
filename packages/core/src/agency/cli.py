@@ -1347,7 +1347,8 @@ def build_parser() -> argparse.ArgumentParser:
                        help="start the agent right away and hand this terminal over to it")
     start.add_argument("--wait", action="store_true",
                        help="start the agent, wait for it, and run the gate when it ends")
-    s.add_argument("--model", help="model for this run (default: the provider's default)")
+    s.add_argument("--model", help="model for this run (default: the runner's named "
+                   "default — sonnet for claude, never the session's own)")
     s.add_argument("--provider", choices=providers.known(),
                    help="which runner does the work (default: claude)")
     s.add_argument("--bypass", action="store_true",

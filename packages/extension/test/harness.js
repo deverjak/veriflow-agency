@@ -443,6 +443,35 @@ check('preset rows sit under their pack, ahead of the pack\'s own info rows', ()
   vscode.workspace._settings.agency.presets = [];
 });
 
+check('a pack row says which runner its arrow uses, and asks when nothing says', () => {
+  // The complaint this answers: the row started `agency run <pack>` with no
+  // `--model` at all, so it ran on whatever the session defaulted to that
+  // month — and the row said nothing about it either way.
+  const vscode = require.cache.vscode.exports;
+  const presets = require(path.join(SRC, 'presets.js'));
+  vscode.workspace._settings.agency.presets = [
+    { pack: 'review-graph', provider: 'claude', model: 'opus', label: 'Deep' },
+    { pack: 'review-graph', provider: 'codex', model: 'gpt-5', label: 'Second opinion' },
+  ];
+  Object.assign(state.snapshot, { probe: { ok: true }, packs: [RG_PACK, QA_PACK] });
+
+  const [rg, qa] = new views.ToolsTree().roots();
+  assert.ok(String(rg.item.description).startsWith('claude · opus'),
+    `the runner has to stand where a truncated row still shows it, got ${rg.item.description}`);
+  assert.ok(rg.item.tooltip.value.includes('claude · opus'),
+    'the tooltip has to name the preset the arrow takes');
+  assert.deepStrictEqual(presets.pinned('review-graph'), { provider: 'claude', model: 'opus' },
+    'the first preset is what the row runs — not the second, and not silence');
+
+  assert.strictEqual(presets.pinned('qa'), null, 'no preset is a question, not a default');
+  assert.ok(!/claude|codex/.test(String(qa.item.description)),
+    'a row with nothing pinned must not claim a runner it does not have');
+  assert.ok(qa.item.tooltip.value.includes('asks which runner'),
+    'and it has to say that the first run asks');
+
+  vscode.workspace._settings.agency.presets = [];
+});
+
 checkAsync('presets.add refuses a duplicate', async () => {
   const presets = require(path.join(SRC, 'presets.js'));
   const vscode = require.cache.vscode.exports;
