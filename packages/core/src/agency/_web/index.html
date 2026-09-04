@@ -37,6 +37,17 @@
        color: var(--dim); font-weight: 600; margin: 26px 0 10px; }
   p { margin: 0 0 12px; }
   .dim { color: var(--dim); }
+  .proj { margin: 22px 0 4px; }
+  .proj .head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+  .proj .head b { font-size: 16px; font-weight: 600; }
+  .proj .head .where { font-size: 12px; color: var(--dim);
+                       overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .proj .head .more { margin-left: auto; font-size: 13px; }
+  .chip {
+    display: inline-block; font-size: 12px; padding: 3px 9px; border-radius: 999px;
+    border: 1px solid var(--accent); color: var(--accent); background: none;
+    font-family: inherit; cursor: pointer; margin: 0 6px 8px 0;
+  }
   .row {
     display: flex; gap: 12px; align-items: center; width: 100%; text-align: left;
     background: var(--card); border: 1px solid var(--line); border-radius: 12px;
@@ -44,8 +55,8 @@
   }
   .row:active { border-color: var(--accent); }
   .row .body { min-width: 0; flex: 1; }
-  .row .title { font-weight: 600; }
-  .row .sub { font-size: 13px; color: var(--dim);
+  .row .title { font-weight: 600; display: block; }
+  .row .sub { font-size: 13px; color: var(--dim); display: block;
               overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .row .go { color: var(--dim); font-size: 18px; }
   button.primary {
@@ -102,20 +113,19 @@
     <p class="err" id="pair-err"></p>
   </section>
 
-  <!-- 2 — projects -->
-  <section id="view-projects" class="hidden">
-    <h2>Projects</h2>
-    <div id="projects"></div>
+  <!-- 2 — every project and its specialists -->
+  <section id="view-home" class="hidden">
+    <div id="home"></div>
+    <p class="err" id="home-err"></p>
+    <button class="link" id="home-refresh">Refresh</button>
+    <button class="link" id="forget">Forget this device</button>
   </section>
 
-  <!-- 3 — specialists -->
-  <section id="view-packs" class="hidden">
-    <h2 id="packs-head">Specialists</h2>
-    <div id="packs"></div>
-    <h2>Recent runs</h2>
+  <!-- 3 — the runs of one project -->
+  <section id="view-runs" class="hidden">
+    <h2 id="runs-head">Runs</h2>
     <div id="runs"></div>
-    <button class="link" id="switch-project">Another project</button>
-    <button class="link" id="forget">Forget this device</button>
+    <button class="link" id="runs-back">Back</button>
   </section>
 
   <!-- 4 — starting a run -->
@@ -144,7 +154,7 @@
     <div class="counts" id="run-counts"></div>
     <div class="feed" id="feed"></div>
     <p class="err" id="run-err"></p>
-    <button class="link" id="run-back">Back to specialists</button>
+    <button class="link" id="run-back">Back to projects</button>
   </section>
 </div>
 
@@ -154,12 +164,10 @@
 
   // ------------------------------------------------------------- state
   const KEY_TOKEN = 'agency.token';
-  const KEY_PROJECT = 'agency.project';
   const $ = (id) => document.getElementById(id);
-  const state = { token: null, project: null, packs: [], pack: null, stream: null };
+  const state = { token: null, project: null, pack: null, stream: null };
 
   try { state.token = localStorage.getItem(KEY_TOKEN); } catch (e) { /* private mode */ }
-  try { state.project = localStorage.getItem(KEY_PROJECT); } catch (e) { /* ditto */ }
 
   function remember(key, value) {
     try { value === null ? localStorage.removeItem(key) : localStorage.setItem(key, value); }
@@ -167,10 +175,15 @@
   }
 
   function show(name) {
-    for (const v of ['pair', 'projects', 'packs', 'start', 'run']) {
+    for (const v of ['pair', 'home', 'runs', 'start', 'run']) {
       $('view-' + v).classList.toggle('hidden', v !== name);
     }
     window.scrollTo(0, 0);
+  }
+
+  function fail(e) {
+    const target = document.querySelector('section:not(.hidden) .err');
+    if (target) target.textContent = e.message;
   }
 
   // ------------------------------------------------------------- api
@@ -204,73 +217,73 @@
       if (!r.ok) throw new Error(data.message || 'Pairing failed.');
       state.token = data.token;
       remember(KEY_TOKEN, data.token);
-      await openProjects();
+      await openHome();
     } catch (e) { $('pair-err').textContent = e.message; }
   };
 
   $('forget').onclick = () => { signOut(); };
 
-  // ------------------------------------------------------------- projects
-  async function openProjects() {
-    const data = await api('/api/projects');
+  // ------------------------------------------------------------- everything at once
+  async function openHome() {
+    show('home');
+    $('home-err').textContent = '';
+    const box = $('home');
+    if (!box.children.length) box.innerHTML = '<p class="dim">…</p>';
+
+    const data = await api('/api/overview');
     const hours = Math.floor(data.activatedFor / 3600);
     const mins = Math.round((data.activatedFor % 3600) / 60);
     $('meta').textContent = (hours ? hours + ' h ' : '') + mins + ' min left';
 
-    const known = data.projects.map((p) => p.key);
-    if (state.project && known.indexOf(state.project) >= 0) return openPacks(state.project);
-    if (data.projects.length === 1) return openPacks(data.projects[0].key);
-
-    const box = $('projects');
     box.innerHTML = '';
-    for (const p of data.projects) {
-      box.appendChild(row(p.name, p.slug || p.root, () => openPacks(p.key)));
+    if (!data.projects.length) {
+      box.innerHTML = '<p class="dim">The machine is serving no project. '
+        + '<code>agency serve --scan &lt;dir&gt;</code> opens every repository with a '
+        + 'specialist in it.</p>';
+      return;
     }
-    show('projects');
+    for (const p of data.projects) box.appendChild(projectBlock(p));
   }
 
-  $('switch-project').onclick = () => {
-    state.project = null;
-    remember(KEY_PROJECT, null);
-    openProjects().catch(fail);
-  };
+  function projectBlock(p) {
+    const el = document.createElement('div');
+    el.className = 'proj';
 
-  // ------------------------------------------------------------- specialists
-  async function openPacks(key) {
-    state.project = key;
-    remember(KEY_PROJECT, key);
-    $('packs-head').textContent = key;
+    const head = document.createElement('div');
+    head.className = 'head';
+    const name = document.createElement('b');
+    name.textContent = p.name;
+    const where = document.createElement('span');
+    where.className = 'where';
+    where.textContent = p.slug || p.root;
+    const more = document.createElement('button');
+    more.className = 'link more';
+    more.textContent = 'runs';
+    more.onclick = () => openRuns(p.key, p.name);
+    head.appendChild(name); head.appendChild(where); head.appendChild(more);
+    el.appendChild(head);
 
-    const packs = await api('/api/packs?project=' + encodeURIComponent(key));
-    state.packs = packs;
-    const box = $('packs');
-    box.innerHTML = '';
-    if (!packs.length) {
-      box.innerHTML = '<p class="dim">No specialist in this project yet. A pack is a '
-        + 'skill committed with the code — it is written at the machine, not here.</p>';
+    // What is happening right now comes first: a run in flight is the one
+    // thing on this screen that changes without anybody touching the phone.
+    for (const r of p.running || []) {
+      const chip = document.createElement('button');
+      chip.className = 'chip';
+      chip.textContent = '● ' + r.pack + ' running';
+      chip.onclick = () => { state.project = p.key; openRun(r.runId, r.pack, true); };
+      el.appendChild(chip);
     }
-    for (const p of packs) {
-      box.appendChild(row(p.title || p.name, p.description || p.skill,
-        () => openStart(p)));
-    }
-    show('packs');
-    loadRuns(key);
-  }
 
-  async function loadRuns(key) {
-    const box = $('runs');
-    box.innerHTML = '<p class="dim">…</p>';
-    try {
-      const data = await api('/api/runs?project=' + encodeURIComponent(key) + '&limit=6');
-      box.innerHTML = '';
-      if (!data.runs.length) box.innerHTML = '<p class="dim">Nothing has run here yet.</p>';
-      for (const r of data.runs) {
-        const when = (r.startedAt || '').replace('T', ' ').slice(0, 16);
-        box.appendChild(row(r.pack + ' · ' + r.status,
-          when + ' · ' + (r.targetLabel || '') + ' · ' + r.findings + ' findings',
-          () => openRun(r.id, r.pack, r.status === 'running')));
-      }
-    } catch (e) { box.innerHTML = '<p class="err">' + e.message + '</p>'; }
+    if (!p.packs.length) {
+      const none = document.createElement('p');
+      none.className = 'dim';
+      none.textContent = 'No specialist here yet — a pack is written at the machine.';
+      el.appendChild(none);
+    }
+    for (const pack of p.packs) {
+      el.appendChild(row(pack.title || pack.name, pack.description || pack.skill,
+        () => openStart(p.key, pack)));
+    }
+    return el;
   }
 
   function row(title, sub, onClick) {
@@ -284,11 +297,36 @@
     return el;
   }
 
+  $('home-refresh').onclick = () => openHome().catch(fail);
+
+  // ------------------------------------------------------------- runs of a project
+  async function openRuns(key, name) {
+    state.project = key;
+    $('runs-head').textContent = name + ' · runs';
+    const box = $('runs');
+    box.innerHTML = '<p class="dim">…</p>';
+    show('runs');
+    try {
+      const data = await api('/api/runs?project=' + encodeURIComponent(key) + '&limit=10');
+      box.innerHTML = '';
+      if (!data.runs.length) box.innerHTML = '<p class="dim">Nothing has run here yet.</p>';
+      for (const r of data.runs) {
+        const when = (r.startedAt || '').replace('T', ' ').slice(0, 16);
+        box.appendChild(row(r.pack + ' · ' + r.status,
+          when + ' · ' + (r.targetLabel || '') + ' · ' + r.findings + ' findings',
+          () => openRun(r.id, r.pack, r.status === 'running')));
+      }
+    } catch (e) { box.innerHTML = ''; fail(e); }
+  }
+
+  $('runs-back').onclick = () => openHome().catch(fail);
+
   // ------------------------------------------------------------- starting
-  async function openStart(pack) {
+  async function openStart(key, pack) {
+    state.project = key;
     state.pack = pack;
-    $('start-head').textContent = pack.title || pack.name;
-    $('start-desc').textContent = pack.description || '';
+    $('start-head').textContent = (pack.title || pack.name);
+    $('start-desc').textContent = key + ' — ' + (pack.description || '');
     $('start-err').textContent = '';
     $('start-go').disabled = false;
     $('start-go').textContent = 'Run unsupervised';
@@ -324,7 +362,7 @@
     } catch (e) { $('start-err').textContent = e.message; }
   }
 
-  $('start-back').onclick = () => openPacks(state.project).catch(fail);
+  $('start-back').onclick = () => openHome().catch(fail);
 
   $('start-go').onclick = async () => {
     const pack = state.pack;
@@ -359,7 +397,7 @@
   // ------------------------------------------------------------- one run
   function openRun(runId, packName, live) {
     closeStream();
-    $('run-head').textContent = packName + ' · ' + runId.slice(0, 10);
+    $('run-head').textContent = packName + ' · ' + state.project;
     $('run-counts').innerHTML = '';
     $('feed').innerHTML = '';
     $('run-err').textContent = '';
@@ -367,9 +405,8 @@
 
     const q = '?project=' + encodeURIComponent(state.project)
       + '&token=' + encodeURIComponent(state.token);
-    if (!live) {
-      api('/api/run/' + runId + q).then(paintState).catch(fail);
-    }
+    if (!live) api('/api/run/' + runId + q).then(paintState).catch(fail);
+
     // The stream is opened either way: a finished run replays what the agent
     // did and closes itself, which is the same screen with no waiting.
     const es = new EventSource('/api/run/' + runId + '/events' + q);
@@ -379,11 +416,11 @@
       append(JSON.parse(e.data));
     };
     es.addEventListener('done', (e) => {
-      closeStream();                  // or the browser reconnects and replays it
+      closeStream();                   // or the browser reconnects and replays it
       paintState(JSON.parse(e.data));
     });
     es.onerror = () => {
-      // EventSource reconnects on its own and the server resumes from
+      // EventSource reconnects on its own and the daemon resumes from
       // Last-Event-ID, so this is a note, not a failure.
       $('run-err').textContent = 'Connection lost — reconnecting.';
     };
@@ -431,16 +468,11 @@
     if (s.exitReason) $('run-err').textContent = s.exitReason;
   }
 
-  $('run-back').onclick = () => { closeStream(); openPacks(state.project).catch(fail); };
+  $('run-back').onclick = () => { closeStream(); openHome().catch(fail); };
 
   // ------------------------------------------------------------- start
-  function fail(e) {
-    const target = document.querySelector('section:not(.hidden) .err');
-    if (target) target.textContent = e.message;
-  }
-
   if (!state.token) show('pair');
-  else openProjects().catch((e) => { show('pair'); $('pair-err').textContent = e.message; });
+  else openHome().catch((e) => { show('pair'); $('pair-err').textContent = e.message; });
 })();
 </script>
 </body>

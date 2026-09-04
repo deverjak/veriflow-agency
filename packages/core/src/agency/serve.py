@@ -39,6 +39,7 @@ import subprocess
 import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -66,6 +67,10 @@ RUN_ID_TIMEOUT = 180
 #: Silence on an SSE connection that some proxy will eventually cut.
 SSE_HEARTBEAT = 20
 
+#: How long `agency packs` is believed for. A pack changes when somebody
+#: commits one; a pull-to-refresh should not cost a subprocess per project.
+PACKS_TTL = 60
+
 
 # ---------------------------------------------------------------- state
 
@@ -87,6 +92,141 @@ def state_dir() -> Path:
     else:
         root = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
     return Path(root) / "agency"
+
+
+# ---------------------------------------------------------------- what it serves
+
+#: Directories a scan never walks into. Not a policy, just the places a
+#: repository is never hiding.
+SKIP_DIRS = {"node_modules", "__pycache__", "venv", ".venv", "dist", "build",
+             "target", "vendor", "AppData", "Library"}
+
+#: How many directories below a scan root a repository may sit. Two, because
+#: `coding/<org>/<repo>` is the layout this was written against; deeper costs
+#: nothing but time.
+SCAN_DEPTH = 2
+
+
+@dataclass
+class Selection:
+    """What the daemon opens: paths named outright, plus trees to look in.
+
+    Kept as the *question* rather than its answer — a scan stored as a list of
+    paths would go stale the day a repository is cloned, and re-running it is
+    milliseconds.
+    """
+    projects: list[str] = field(default_factory=list)
+    scan: list[str] = field(default_factory=list)
+    depth: int = SCAN_DEPTH
+
+    def empty(self) -> bool:
+        return not self.projects and not self.scan
+
+
+def selection_path() -> Path:
+    return state_dir() / "projects.json"
+
+
+def load_selection() -> Selection:
+    d = read_json(selection_path(), default={}) or {}
+    return Selection(projects=[str(x) for x in (d.get("projects") or [])],
+                     scan=[str(x) for x in (d.get("scan") or [])],
+                     depth=int(d.get("depth") or SCAN_DEPTH))
+
+
+def save_selection(sel: Selection) -> Path:
+    write_json(selection_path(), {"projects": sel.projects, "scan": sel.scan,
+                                  "depth": sel.depth})
+    return selection_path()
+
+
+def has_pack(root: Path) -> bool:
+    try:
+        return any((root / ".claude" / "skills").glob("agency-*/pack.json"))
+    except OSError:
+        return False
+
+
+def scan_tree(root: Path, depth: int) -> list[Path]:
+    """Repositories with at least one specialist, at most `depth` levels down.
+
+    Two exclusions carry the whole thing:
+
+    * **A worktree is not a project.** `agency run` builds throwaway worktrees
+      next to the repository and copies the pack into them, so on disk
+      `main-panel-review-pr-467` looks exactly like a project with a
+      specialist. Its `.git` is a FILE (`gitdir: …`) rather than a directory,
+      which is how git itself tells them apart, and how this does.
+    * **A repository is never walked into.** Whatever is nested inside one
+      belongs to it — a scan that descends finds a project's own fixtures and
+      offers them as projects.
+    """
+    found: list[Path] = []
+
+    def walk(d: Path, level: int) -> None:
+        if level > depth:
+            return
+        try:
+            entries = sorted(p for p in d.iterdir() if p.is_dir())
+        except OSError:
+            return                                  # unreadable is not fatal
+        for p in entries:
+            if p.name.startswith(".") or p.name in SKIP_DIRS:
+                continue
+            git = p / ".git"
+            if git.exists():
+                if git.is_dir() and has_pack(p):
+                    found.append(p)
+                continue
+            walk(p, level + 1)
+
+    walk(Path(root).expanduser(), 1)
+    return found
+
+
+def resolve_projects(sel: Selection) -> list[config.Project]:
+    """The selection, as projects. Named ones first, then what the scan found.
+
+    A path named outright is opened whether or not it has a specialist yet —
+    the person said so. A scanned one has to have one, because a project with
+    nothing to task is a row on a phone that does nothing.
+    """
+    roots: list[Path] = []
+    for raw in sel.projects:
+        p = Path(str(raw)).expanduser()
+        if p.exists():
+            roots.append(p)
+    for tree in sel.scan:
+        roots.extend(scan_tree(Path(str(tree)), sel.depth))
+
+    out_: list[config.Project] = []
+    seen: set[str] = set()
+    for root in roots:
+        project = config.discover(root)
+        if project is None:
+            continue                                # not a git repository
+        key = posix(project.root).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out_.append(project)
+    return out_
+
+
+def project_keys(projects: list[config.Project]) -> dict[str, config.Project]:
+    """How the phone names a project. The directory, and when two projects
+    share it, the directory it sits in as well — `main-panel` is worth reading
+    on a small screen, `chytre-digital/main-panel` only when it has to be."""
+    names: dict[str, int] = {}
+    for p in projects:
+        names[p.root.name] = names.get(p.root.name, 0) + 1
+    keyed: dict[str, config.Project] = {}
+    for p in projects:
+        key = p.root.name if names[p.root.name] == 1 else f"{p.root.parent.name}/{p.root.name}"
+        while key in keyed:                         # two of those too — rare, still possible
+            key += "~"
+        keyed[key] = p
+    return keyed
 
 
 @dataclass
@@ -201,15 +341,7 @@ class Daemon:
 
     def __init__(self, projects: list[config.Project], hours: float,
                  pair_window: int = PAIR_WINDOW) -> None:
-        self.projects: dict[str, config.Project] = {}
-        for p in projects:
-            key = p.root.name
-            if key in self.projects:
-                raise SystemExit(
-                    f"Two activated projects are both called “{key}”. The name is how the "
-                    "phone asks for one, so they cannot share it — activate them separately.")
-            self.projects[key] = p
-
+        self.projects = project_keys(projects)
         self.started = time.time()
         self.expires_at = self.started + hours * 3600
         self.state = state_dir()
@@ -224,6 +356,10 @@ class Daemon:
         self.lock = threading.Lock()
         self.server: ThreadingHTTPServer | None = None
         self.port: int | None = None
+        #: `agency packs` per project, for a while. The overview asks every
+        #: project at once and a pack changes when someone commits one — a
+        #: pull-to-refresh should not cost one subprocess per project every time.
+        self._packs: dict[str, tuple[float, object]] = {}
 
     # -------------------------------------------------------- activation
 
@@ -278,6 +414,43 @@ class Daemon:
             return True, json.loads(p.stdout), ""
         except json.JSONDecodeError:
             return False, None, "agency did not answer with JSON"
+
+    # -------------------------------------------------------- overview
+
+    def packs_of(self, project: config.Project) -> list:
+        key = posix(project.root)
+        hit = self._packs.get(key)
+        if hit and time.monotonic() - hit[0] < PACKS_TTL:
+            return hit[1]                            # type: ignore[return-value]
+        ok, data, _ = self.agency(project, ["packs"], timeout=60)
+        rows = data if ok and isinstance(data, list) else []
+        self._packs[key] = (time.monotonic(), rows)
+        return rows
+
+    def overview(self) -> list[dict]:
+        """Every project and its specialists, in one answer.
+
+        One request rather than one per project, and the projects are asked in
+        parallel: a phone that has to make eight round trips before it can show
+        anything is a phone that shows a spinner.
+        """
+        keys = list(self.projects.items())
+        with ThreadPoolExecutor(max_workers=min(8, max(1, len(keys)))) as pool:
+            packs_by_key = dict(zip(
+                [k for k, _ in keys],
+                pool.map(lambda kp: self.packs_of(kp[1]), keys)))
+
+        rows = []
+        for key, project in keys:
+            running = [{"runId": r.id, "pack": r.record().get("pack")}
+                       for r in runs.unfinished(project)]
+            rows.append({
+                "key": key, "name": project.name, "slug": project.slug,
+                "root": posix(project.root),
+                "packs": packs_by_key.get(key) or [],
+                "running": running,
+            })
+        return rows
 
     # -------------------------------------------------------- runs
 
@@ -522,6 +695,14 @@ class Handler(BaseHTTPRequestHandler):
                     {"key": key, "name": p.name, "slug": p.slug,
                      "root": posix(p.root), "defaultBranch": p.default_branch}
                     for key, p in self.daemon.projects.items()],
+            })
+
+        if path == "/api/overview":
+            return self._send(200, {
+                "ok": True,
+                "activatedFor": self.daemon.remaining(),
+                "device": {"id": device.id, "name": device.name, "bypass": device.bypass},
+                "projects": self.daemon.overview(),
             })
 
         key, project = self._project(query)

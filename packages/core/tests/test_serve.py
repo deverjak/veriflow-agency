@@ -25,8 +25,9 @@ from pathlib import Path
 
 import pytest
 
-from agency import cli, runs, serve
+from agency import cli, config, runs, serve
 from agency.util import write_json
+from conftest import git, install_pack
 
 
 # ---------------------------------------------------------------- harness
@@ -92,6 +93,131 @@ def spawns(daemon, monkeypatch, target: dict | None = None):
 
     monkeypatch.setattr(serve.Daemon, "_spawn", fake_spawn)
     return seen
+
+
+# ---------------------------------------------------------------- what it serves
+
+def fake_repo(path: Path, worktree: bool = False, pack: bool = True) -> Path:
+    """A repository on disk as a scan sees it — no git, because a scan does
+    not run git either. A worktree's `.git` is a FILE; that is the whole
+    difference, and it is the one that matters."""
+    path.mkdir(parents=True, exist_ok=True)
+    if worktree:
+        (path / ".git").write_text("gitdir: ../real/.git/worktrees/x\n", encoding="utf-8")
+    else:
+        (path / ".git").mkdir()
+    if pack:
+        skill = path / ".claude" / "skills" / "agency-po"
+        skill.mkdir(parents=True)
+        (skill / "pack.json").write_text("{}", encoding="utf-8")
+    return path
+
+
+def test_a_scan_finds_projects_and_skips_a_runs_worktree(tmp_path):
+    """The trap this was written for: `agency run` builds a throwaway worktree
+    next to the repository and copies the pack into it, so
+    `main-panel-review-pr-467` looks exactly like a project with a specialist.
+    Three of them were sitting on the real disk when this was written."""
+    root = tmp_path / "coding"
+    fake_repo(root / "org" / "main-panel")
+    fake_repo(root / "org" / "main-panel-review-pr-467", worktree=True)
+    fake_repo(root / "org" / "notes", pack=False)
+    fake_repo(root / "org" / "deep" / "nested" / "repo")
+
+    found = [p.name for p in serve.scan_tree(root, depth=2)]
+
+    assert found == ["main-panel"]
+
+
+def test_a_scan_never_walks_into_a_repository(tmp_path):
+    """Whatever is nested inside a repository belongs to it. A scan that
+    descends offers a project's own fixtures as projects."""
+    root = tmp_path / "coding"
+    outer = fake_repo(root / "org" / "outer")
+    fake_repo(outer / "fixtures" / "inner")
+
+    found = [p.name for p in serve.scan_tree(root, depth=4)]
+
+    assert found == ["outer"]
+
+
+def test_two_projects_with_one_name_both_stay(tmp_path, repo):
+    """The name is how the phone asks for a project, so it has to be unique —
+    but refusing to start over it (which is what this did) means one clone in
+    the wrong place takes the whole daemon down."""
+    other = tmp_path / "elsewhere" / repo.name
+    other.mkdir(parents=True)
+    git(other, "init", "-q", "-b", "main")
+
+    a, b = config.discover(repo), config.discover(other)
+    keys = serve.project_keys([a, b])
+
+    assert sorted(keys) == sorted([f"{repo.parent.name}/{repo.name}",
+                                   f"{other.parent.name}/{other.name}"])
+    assert len(keys) == 2
+
+
+def test_a_named_project_is_opened_even_with_no_specialist(project, tmp_path):
+    """A scan asks for a pack, because a project with nothing to task is a row
+    that does nothing. A path someone typed is not a guess — it is opened."""
+    bare = tmp_path / "bare"
+    bare.mkdir()
+    git(bare, "init", "-q", "-b", "main")
+
+    found = serve.resolve_projects(serve.Selection(projects=[str(bare)]))
+
+    assert [p.root.name for p in found] == ["bare"]
+
+
+def test_the_list_is_the_question_not_its_answer(tmp_path, monkeypatch):
+    """A scan is stored as a scan. Stored as the paths it found, it would go
+    stale the day a repository is cloned — and re-running it is milliseconds."""
+    monkeypatch.setenv("AGENCY_STATE_DIR", str(tmp_path / "state"))
+    serve.save_selection(serve.Selection(projects=["C:/one"], scan=["C:/coding"], depth=3))
+
+    back = serve.load_selection()
+
+    assert (back.projects, back.scan, back.depth) == (["C:/one"], ["C:/coding"], 3)
+    assert serve.Selection().empty(), "nothing named and nothing to scan is nothing to open"
+
+
+def serve_once(*args) -> str:
+    """`agency serve` with a window of zero: it opens, prints what it opened,
+    and closes. Enough to test what it decided to serve, and nothing else."""
+    cli.main(["serve", "--hours", "0", "--port", "0", *args])
+
+
+def test_saving_the_list_means_a_bare_serve_opens_it_again(project, tmp_path,
+                                                           monkeypatch, capsys):
+    """The answer to "where else do I write the projects down": once, with
+    --save, and never again."""
+    monkeypatch.setenv("AGENCY_STATE_DIR", str(tmp_path / "state"))
+
+    serve_once("--project", str(project.root), "--save")
+    assert serve.load_selection().projects == [str(project.root)]
+
+    capsys.readouterr()
+    serve_once()
+    printed = capsys.readouterr().out
+    assert "stored list" in printed and project.root.name in printed
+
+    serve_once("--forget")
+    assert not serve.selection_path().exists()
+
+
+def test_arguments_beat_the_stored_list_outright(project, tmp_path, monkeypatch, capsys):
+    """"Serve exactly this one project for an hour" has to be sayable. A flag
+    that silently joins a list written weeks ago is not that."""
+    monkeypatch.setenv("AGENCY_STATE_DIR", str(tmp_path / "state"))
+    serve.save_selection(serve.Selection(projects=["C:/somewhere/that/is/gone"]))
+
+    capsys.readouterr()
+    serve_once("--project", str(project.root))
+    printed = capsys.readouterr().out
+
+    assert "from the arguments" in printed
+    assert serve.load_selection().projects == ["C:/somewhere/that/is/gone"], \
+        "without --save the stored list is not touched"
 
 
 # ---------------------------------------------------------------- step 0
@@ -207,6 +333,52 @@ def test_only_activated_projects_answer(daemon):
 
     code, data = call(daemon, "GET", "/api/packs?project=somewhere-else", token)
     assert code == 404 and data["reason"] == "no-project"
+
+
+def test_every_project_and_its_specialists_in_one_answer(project, tmp_path, monkeypatch):
+    """What the phone opens is not one project — it is all of them. One request
+    rather than one per project, because a phone that makes eight round trips
+    before it can show anything shows a spinner."""
+    monkeypatch.setenv("AGENCY_STATE_DIR", str(tmp_path / "state"))
+    second = tmp_path / "second"
+    second.mkdir()
+    git(second, "init", "-q", "-b", "main")
+    (second / "a.txt").write_text("x", encoding="utf-8")
+    git(second, "add", "-A")
+    git(second, "-c", "user.email=t@t.t", "-c", "user.name=T", "commit", "-q", "-m", "one")
+    other = config.discover(second)
+    install_pack(other, "ceo", {"target": "workspace", "worktree": False,
+                                "prompt": "required"})
+
+    d = serve.serve([config.discover(project.root), other], "127.0.0.1", 0, hours=1)
+    try:
+        token = pair(d)
+        # The real subprocess answers here — `agency packs` per project, in
+        # parallel — so this also pins that delegation actually works.
+        code, data = call(d, "GET", "/api/overview", token)
+    finally:
+        d.server.shutdown()
+
+    assert code == 200
+    by_key = {p["key"]: p for p in data["projects"]}
+    assert sorted(by_key) == [project.root.name, "second"]
+    assert [x["name"] for x in by_key[project.root.name]["packs"]] == ["review-graph"]
+    assert [x["name"] for x in by_key["second"]["packs"]] == ["ceo"]
+    assert by_key["second"]["running"] == []
+
+
+def test_the_overview_says_what_is_running_right_now(daemon, project):
+    """A run in flight is the one thing on that screen that changes without
+    anybody touching the phone."""
+    token = pair(daemon)
+    runs.start(project, "review-graph",
+               {"kind": "workspace", "ref": "main", "headRefOid": "d" * 40})
+
+    code, data = call(daemon, "GET", "/api/overview", token)
+
+    assert code == 200
+    running = data["projects"][0]["running"]
+    assert [r["pack"] for r in running] == ["review-graph"]
 
 
 def test_projects_are_named_by_their_directory(daemon, project):

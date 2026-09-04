@@ -394,20 +394,31 @@ so nothing that mattered is deleted with the record.
 ### From somewhere else — `agency serve`
 
 The third client, for the case where the person is not at the machine. The PC
-is on, the project is open, and a specialist should start now rather than
+is on, the projects are open, and a specialist should start now rather than
 tonight:
 
 ```
-agency serve --project . --hours 8
+agency serve --scan ~/Documents/coding --save --hours 8
 ```
 
-The command **is** the activation: while it runs, that project can be worked
-on from a phone, and when it stops, it cannot. It prints a pairing code the
+The command **is** the activation: while it runs, those projects can be worked
+on from a phone, and when it stops, they cannot. It prints a pairing code the
 phone types once; what comes back is a per-device token, kept outside the
 project (a token in `.agency/` is a token in a pull request) next to
 `remote.jsonl`, where every remote action lands as a line. Starting a run
 with the authorization checks off is a right a device is paired with, not a
 checkbox in a request.
+
+**Which projects, and where that is written down: nowhere.** `--scan` walks a
+tree two levels deep and opens every repository that has a specialist in it —
+skipping a run's throwaway worktree, whose `.git` is a file rather than a
+directory, and never descending into a repository. `--save` stores that
+question (not its answer, which would go stale the day something is cloned),
+so a bare `agency serve` opens the same set next time. `--project <path>`
+adds one from outside the scanned trees, specialists or not. This is the one
+command that knows about more than one project: `run`, `findings` and the
+rest still resolve from the current directory, because you are standing in a
+project when you use them — and on a phone you are not standing anywhere.
 
 It listens on the **loopback**, and what publishes it is `tailscale serve`,
 which terminates TLS and knows who is on the other end. No public IP, no port
@@ -422,12 +433,16 @@ and from where — `trigger.origin` in the record is `cli`, `extension` or
 stream, tailed out of the run's `agent.jsonl` and translated by the same
 `events.py` the terminal prints from; nothing is recorded twice.
 
-What the phone opens is one page the daemon serves from the install — pair,
-pick a project, pick a specialist, write the prompt or choose the pull
-request, then watch. No build step and no deploy: it is a file read off disk
-on every request, so an edit at the machine is live on the next refresh. A
-connection lost in a lift resumes where it stopped, because the browser sends
-`Last-Event-ID` by itself and the daemon reads it.
+What the phone opens is one page the daemon serves from the install: **every
+project with its specialists on one screen**, plus what is running in each
+right now. Tap a specialist, write the prompt or choose the pull request,
+watch. One request builds that screen — the projects are asked in parallel and
+their pack lists cached for a minute — because a phone that makes eight round
+trips before it shows anything shows a spinner. No build step and no deploy:
+the page is a file read off disk on every request, so an edit at the machine
+is live on the next refresh. A connection lost in a lift resumes where it
+stopped, because the browser sends `Last-Event-ID` by itself and the daemon
+reads it.
 
 A run started this way is **unattended** by construction, because nobody is at
 the terminal to answer it. Taking over an attended session with Claude Code's

@@ -1322,11 +1322,39 @@ def cmd_serve(args) -> int:
     window is an argument here and not a setting anywhere — reopening it is a
     decision made at this machine, by the person who owns it.
     """
-    seen: dict[str, config.Project] = {}
-    for spec in (args.project or [None]):
-        p = config.require(spec)
-        seen[posix(p.root)] = p
-    projects = list(seen.values())
+    if getattr(args, "forget", False):
+        path = serving.selection_path()
+        if path.is_file():
+            path.unlink()
+            out.done(f"forgotten — {posix(path)} is gone")
+        else:
+            out.note("there was no stored list")
+        return 0
+
+    # Flags beat the stored list outright rather than adding to it: "serve
+    # exactly this one project for an hour" has to be sayable, and a flag that
+    # silently joins a list written weeks ago is not that.
+    flags = serving.Selection(projects=list(args.project or []),
+                              scan=list(args.scan or []),
+                              depth=args.depth)
+    stored = serving.load_selection()
+    selection, source = ((flags, "arguments") if not flags.empty()
+                         else (stored, "stored list"))
+    if getattr(args, "save", False):
+        if flags.empty():
+            raise SystemExit("--save wants something to save — pass --project or --scan with it.")
+        serving.save_selection(flags)
+
+    if selection.empty():
+        selection = serving.Selection(projects=[posix(config.require(None).root)])
+        source = "this project"
+
+    projects = serving.resolve_projects(selection)
+    if not projects:
+        raise SystemExit(
+            "Nothing to open. `--scan <dir>` looks for repositories with a specialist in "
+            "them, `--project <path>` opens one whether it has any or not, and `--save` "
+            "keeps the answer for next time.")
 
     try:
         daemon = serving.serve(projects, args.host, args.port, args.hours,
@@ -1337,10 +1365,13 @@ def cmd_serve(args) -> int:
             "is probably already holding it; that one is the activation.")
 
     out.say(f"\n  {out.bold('agency serve')}  {out.dim(f'{args.host}:{daemon.port}')}"
-            f"  {out.dim('·')}  {out.dim(f'activated for {args.hours:g} h')}\n")
+            f"  {out.dim('·')}  {out.dim(f'activated for {args.hours:g} h')}"
+            f"  {out.dim('·')}  {out.dim(f'{len(daemon.projects)} projects from the {source}')}\n")
     for key, p in daemon.projects.items():
         installed = ", ".join(x.name for x in packs.available(p)) or "no specialists yet"
-        out.done(f"{key:24} {out.dim(installed)}")
+        out.done(f"{key:28} {out.dim(installed)}")
+    if source == "arguments" and not getattr(args, "save", False):
+        out.say(f"  {out.dim('Add --save once and a bare `agency serve` opens these again.')}")
     out.say()
     out.say(f"  {out.bold('Pairing code:')}  {out.bold(daemon.pair_code)}"
             f"   {out.dim(f'valid for {args.pair_window // 60} minutes, for one device')}")
@@ -1535,7 +1566,16 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("serve", parents=[common],
                        help="open this project to a paired phone on the tailnet, for a while")
     s.add_argument("--project", action="append", metavar="PATH",
-                   help="a project to open (repeatable; default: the current one)")
+                   help="open this project, specialists or not (repeatable)")
+    s.add_argument("--scan", action="append", metavar="DIR",
+                   help="open every repository under DIR that has a specialist in it "
+                        "(repeatable). A run's throwaway worktree is not one.")
+    s.add_argument("--depth", type=int, default=serving.SCAN_DEPTH, metavar="N",
+                   help=f"how many directories below a --scan root to look "
+                        f"(default: {serving.SCAN_DEPTH}, for <root>/<org>/<repo>)")
+    s.add_argument("--save", action="store_true",
+                   help="remember this --project/--scan so a bare `agency serve` opens it again")
+    s.add_argument("--forget", action="store_true", help="drop the remembered list and stop")
     s.add_argument("--host", default="127.0.0.1",
                    help="what to bind (default: the loopback — `tailscale serve` publishes it)")
     s.add_argument("--port", type=int, default=7777)

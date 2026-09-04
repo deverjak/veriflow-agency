@@ -127,6 +127,38 @@ Jeden `index.html` v `packages/core/src/agency/_web/`, servírovaný démonem. T
 
 ---
 
+### Krok 4 — všechny projekty na jednom místě (~4 h) — **hotovo 4. 9. 2026**
+
+Krok 1 počítal s tím, že se démon spustí uvnitř projektu a další se dopíšou přes `--project`. Po prvním použití je jasné, proč to nestačí: **na telefonu nejsi „v projektu"**. Není tam `cd`, není tam terminál a to, co chceš vidět, není jeden repozitář — je to všechno, co dnes běží, a co v tom kterém projektu umí kdo spustit.
+
+**Tohle je vědomý rozpor s [`agency-v1.md`](agency-v1.md) §1**, kde v seznamu „co to není" stojí *multi-projektový přehled* a *konfigurační systém*. Rozpor se řeší hranicí, ne výjimkou:
+
+- **CLI zůstává jednoprojektové.** `run`, `findings`, `ingest`, `status` — všechno se pořád odvozuje od `cwd` a o žádném seznamu projektů neví. Vícero projektů zná jediný příkaz: `serve`, protože jeho celý smysl je, že u žádného z nich nesedíš.
+- **Seznam není konfigurace projektu.** Je to stav toho stroje, jako tokeny zařízení — bydlí vedle nich v `%LOCALAPPDATA%/agency/projects.json` a žádný projekt o něm neví.
+
+**Kam projekty zapsat: nikam.** Primární cesta je sken:
+
+```
+agency serve --scan C:/Users/kubad/Documents/coding --save
+```
+
+Projde strom do hloubky 2 (`<root>/<org>/<repo>`) a otevře každý repozitář, který má aspoň jednoho specialistu. `--save` tu otázku zapíše — od té chvíle bare `agency serve` otevře totéž. Uloží se **otázka, ne odpověď**: sken uložený jako seznam cest by zestárnul dnem, kdy něco naklonuješ, a znovu ho spustit stojí 0,1 s (měřeno na skutečném disku).
+
+Dvě vyloučení nesou celou věc:
+
+- **Worktree běhu není projekt.** `agency run` staví vedle repozitáře jednorázové worktree a kopíruje do nich pack, takže `main-panel-review-pr-467` vypadá na disku přesně jako projekt se specialistou — tři takové na disku ležely, když tohle vznikalo. Jejich `.git` je **soubor** (`gitdir: …`), ne adresář; tak je odlišuje git a tak je odlišuje sken.
+- **Do repozitáře se nikdy nesestupuje.** Co je zanořené uvnitř, patří jemu; sken, který leze dovnitř, nabídne cizí fixtures jako projekty.
+
+`--project <cesta>` zůstává pro to, co leží mimo skenované stromy, a otevře projekt, i když specialistu ještě nemá — cestu někdo napsal, to není odhad. Argumenty **přebíjejí** uložený seznam celý, aby šlo říct „dnes obsluhuj jenom tohle"; bez `--save` se uložené nesáhne.
+
+**Jedna odpověď místo N.** `GET /api/overview` vrátí všechny projekty i s jejich specialisty a s tím, co v nich zrovna běží — projekty se ptají paralelně a `agency packs` se drží minutu v cache. Telefon, který musí udělat osm round-tripů, než něco ukáže, ukazuje kolečko. (Naměřeno na dvou skutečných projektech: 0,38 s poprvé, 5 ms z cache.)
+
+Kolize jmen už démona neshodí: klíč je jméno adresáře, a když ho mají dva, tak `<org>/<repo>`. Padnout na startu kvůli klonu na špatném místě byl špatný tvar — `main-panel` se na malém displeji čte, `chytre-digital/main-panel` jen když musí.
+
+**Hotovo, když:** na jedné obrazovce vidím každý projekt, jeho specialisty a co v něm zrovna běží. — ✅ ověřeno proti skutečnému disku (2 projekty, 3 worktree správně vynechané) i testy (`tests/test_serve.py`).
+
+---
+
 ## 5. Ochrana — co musí platit, než to poprvé pustím ven
 
 1. Démon poslouchá **na loopbacku**; do tailnetu ho pouští `tailscale serve`, ne bind na `0.0.0.0`. Rozdíl je v tom, co se stane při chybě: špatně napsaná autorizace v démonu je pak pořád dosažitelná jen z tailnetu, ne z celé domácí sítě.
@@ -145,7 +177,7 @@ Jeden `index.html` v `packages/core/src/agency/_web/`, servírovaný démonem. T
 - **Týmy.** `agency chain` sekvenci umí, chybí jí jen jméno. Až na to dojde, tým bydlí jako `.claude/skills/agency-team-<name>/team.json` — komitnutý vedle packů, které řadí, tedy táž věc jako pack. `.agency/teams.json` ne: to je přesně ten konfigurační soubor, který [`agency-v1.md`](agency-v1.md) vyhodil.
 - **Fronta pro vypnuté PC.** Vypnuté PC znamená „nejde to", ne „spustí se to potom". Fronta chce relay a relay chce provoz.
 - **Notifikace.** Stránka drží SSE, dokud je otevřená. Push potřebuje PWA a HTTPS, tedy Krok „Cloudflare" níž.
-- **Druhý projekt na jedno kliknutí.** `--project` se dá dát vícekrát, ale přepínání projektů v UI je seznam, ne funkce.
+- ~~**Druhý projekt na jedno kliknutí.**~~ — Přehodnoceno 4. 9. 2026, viz Krok 4.
 
 ---
 
