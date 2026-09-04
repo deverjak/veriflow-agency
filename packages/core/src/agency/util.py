@@ -83,15 +83,15 @@ def bundled(*parts: str) -> Path:
     return here.parents[3].joinpath(*parts)  # src/agency -> core -> packages -> repo
 
 
-# ---------------------------------------------------------------- výstup
+# ---------------------------------------------------------------- output
 
 class Out:
-    """Barevný výstup, který se sám vypne, když nejde o terminál."""
+    """Coloured output that turns itself off when this is not a terminal."""
 
     def __init__(self) -> None:
         self.tty = os.isatty(1) and os.environ.get("NO_COLOR") is None
-        # Průběh se v --json režimu potlačuje, jinak by se mísil s JSONem
-        # a konzument (extension, agent) by ho neuparsoval.
+        # Progress is suppressed in --json mode; otherwise it would mix into
+        # the JSON and the consumer (extension, agent) could not parse it.
         self.quiet = False
 
     def _c(self, code: str, s: str) -> str:
@@ -114,23 +114,23 @@ class Out:
 
     def step(self, msg: str) -> None:
         if not self.quiet:
-            print(f"  {self.dim('·')} {msg}")
+            print(f"  {self.dim('·')} {msg}", flush=True)
 
     def done(self, msg: str) -> None:
         if not self.quiet:
-            print(f"  {self.ok('✓')} {msg}")
+            print(f"  {self.ok('✓')} {msg}", flush=True)
 
     def fail(self, msg: str) -> None:
         if not self.quiet:
-            print(f"  {self.err('✗')} {msg}")
+            print(f"  {self.err('✗')} {msg}", flush=True)
 
     def note(self, msg: str) -> None:
         if not self.quiet:
-            print(f"  {self.warn('!')} {msg}")
+            print(f"  {self.warn('!')} {msg}", flush=True)
 
     def say(self, msg: str = "") -> None:
         if not self.quiet:
-            print(msg)
+            print(msg, flush=True)
 
 
 out = Out()
