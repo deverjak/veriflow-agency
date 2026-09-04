@@ -193,7 +193,7 @@ async function askSupervision(packs) {
  * argv instead would put raw JSONL in front of the user.
  */
 function runUnsupervised(cwd, pack, opts, log) {
-  const args = ['run', pack.name, '--unattended', '--wait'];
+  const args = ['run', pack.name, '--unattended', '--wait', '--origin', 'extension'];
   if (opts.pr) args.push('--pr', String(opts.pr));
   if (opts.latestMerged) args.push('--latest-merged');
   if (opts.force) args.push('--force');

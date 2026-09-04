@@ -543,7 +543,8 @@ def method_hint(pack, project: Project, carried: list[str], in_worktree: bool) -
 
 def start(project: Project, pack_name: str, target: dict,
           trigger: str = "manual", provider: str | None = None,
-          attended: bool = True) -> Run:
+          attended: bool = True, origin: str = "cli",
+          device: str | None = None) -> Run:
     run_id = ulid()
     run = Run(run_id, project.runs_dir / run_id, project)
     run.dir.mkdir(parents=True, exist_ok=True)
@@ -557,7 +558,13 @@ def start(project: Project, pack_name: str, target: dict,
         # anyone could step into this run at all, which is what decides whether
         # a question the agent asks can ever be answered. A chain member runs
         # with nobody able to enter it, and that is what gets written.
-        "trigger": {"kind": trigger, "attended": attended},
+        #
+        # `origin` is a different question — where the person was standing when
+        # they asked. It is written every time, including the ordinary `cli`,
+        # because a field that only appears when the answer is interesting
+        # cannot be counted.
+        "trigger": {"kind": trigger, "attended": attended, "origin": origin,
+                    **({"device": device} if device else {})},
         "startedAt": now(),
         "status": "running",
     })

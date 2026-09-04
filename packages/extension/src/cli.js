@@ -118,7 +118,9 @@ const ingest = (cwd, runId) =>
  */
 async function run(cwd, pack, { pr, latestMerged, force, model, provider,
   bypass, prompt, since } = {}) {
-  const args = ['run', pack];
+  // Where the person was standing when they asked. An enum value nothing ever
+  // writes is a lie in the schema, so the client that is not the terminal says so.
+  const args = ['run', pack, '--origin', 'extension'];
   if (pr) args.push('--pr', String(pr));
   if (latestMerged) args.push('--latest-merged');
   if (force) args.push('--force');

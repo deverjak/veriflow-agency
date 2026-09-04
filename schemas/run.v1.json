@@ -144,6 +144,21 @@
         "attended": {
           "type": "boolean"
         },
+        "origin": {
+          "enum": [
+            "cli",
+            "extension",
+            "remote"
+          ],
+          "description": "Where the person who started this run was standing. Not the same question as `kind` (what kind of event started it) or `attended` (whether anyone could answer the agent): a run started from a phone over the tailnet is manual, unattended and remote, and all three are separate facts. Absent on records written before 2026-09-04."
+        },
+        "device": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Which paired device asked for it, when origin is `remote`. A run that turns out to have been a mistake has to be traceable to the phone that started it, or revoking that phone's token means nothing."
+        },
         "heartbeatAgeSeconds": {
           "type": [
             "integer",

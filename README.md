@@ -213,9 +213,10 @@ Attended, on your own login, with evidence-backed findings that stay.
   triage      accept (send to the board) or reject a finding — an agent calls this too
   note        a note on a finding — free text, not a decision
   status      overview of the project's runs
+  serve       open this project to a paired phone on the tailnet, for a while
 ```
 
-Fifteen commands. There is no `init`, `add`, `hire`, `fire`, `roster`,
+Sixteen commands. There is no `init`, `add`, `hire`, `fire`, `roster`,
 `providers`, `projects`, `config`, `brief`, `backlog`, or `export` — a
 one-way push to a board is the pack's own `sink`, called by `ingest`, not a
 separate step. `agency run <pack>`
@@ -389,6 +390,43 @@ above it: a preset pins the runner, never whether the run is supervised.
 gone in one step (`agency cleanup --all --discard`). Safe by construction:
 the committed trail keeps what any of them sent to a board or had rejected,
 so nothing that mattered is deleted with the record.
+
+### From somewhere else — `agency serve`
+
+The third client, for the case where the person is not at the machine. The PC
+is on, the project is open, and a specialist should start now rather than
+tonight:
+
+```
+agency serve --project . --hours 8
+```
+
+The command **is** the activation: while it runs, that project can be worked
+on from a phone, and when it stops, it cannot. It prints a pairing code the
+phone types once; what comes back is a per-device token, kept outside the
+project (a token in `.agency/` is a token in a pull request) next to
+`remote.jsonl`, where every remote action lands as a line. Starting a run
+with the authorization checks off is a right a device is paired with, not a
+checkbox in a request.
+
+It listens on the **loopback**, and what publishes it is `tailscale serve`,
+which terminates TLS and knows who is on the other end. No public IP, no port
+forwarding, nothing exposed — and never `tailscale funnel`, which is the same
+command for the opposite thing.
+
+The daemon has no judgement of its own: it authenticates the device, knows
+which projects are open, and hands everything else to `agency … --json` as a
+subprocess. The run it starts is the run the terminal starts, plus who asked
+and from where — `trigger.origin` in the record is `cli`, `extension` or
+`remote`, and a remote run also names the device. Progress is the agent's own
+stream, tailed out of the run's `agent.jsonl` and translated by the same
+`events.py` the terminal prints from; nothing is recorded twice.
+
+A run started this way is **unattended** by construction, because nobody is at
+the terminal to answer it. Taking over an attended session with Claude Code's
+Remote Control is the next step of
+[`docs/plans/remote.md`](docs/plans/remote.md), and so is the page the daemon
+will hand the phone — today it is an API.
 
 ### Three rules the whole thing stands on
 

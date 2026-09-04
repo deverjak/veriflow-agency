@@ -1080,6 +1080,21 @@ checkAsync('an unsupervised run carries the bypass into its own command', async 
   assert.ok(sent[0].includes('--bypass'), sent[0]);
 });
 
+checkAsync('a run started here says the editor started it', async () => {
+  // `trigger.origin` in run.v1 has three values and one of them is this
+  // client. An enum nobody ever writes is a lie in the schema — and "what did
+  // I start from the phone" is only answerable if the other two say so too.
+  const review = require(path.join(SRC, 'review.js'));
+  Object.assign(state.snapshot, { probe: { ok: true }, cwd: 'C:/project', packs: [PO_TRUSTED] });
+
+  const { sent } = supervisionHarness([
+    'what should PO look at', { unattended: true },
+  ]);
+  await review.runOverWorkspace('C:/project', PO_TRUSTED, { appendLine() {} });
+
+  assert.ok(sent[0].includes('--origin extension'), sent[0]);
+});
+
 check('accept/defer/rejectPick/decision.apply are no longer contributed', () => {
   const pkg = require(path.join(SRC, '..', 'package.json'));
   const ids = pkg.contributes.commands.map((c) => c.command);

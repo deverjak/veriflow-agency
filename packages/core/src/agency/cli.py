@@ -10,9 +10,10 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 
-from . import anchor, chain as chains, config, graph, ingest, knowledge, metrics, packs, proc, providers, runs
+from . import anchor, chain as chains, config, graph, ingest, knowledge, metrics, packs, proc, providers, runs, serve as serving
 from .util import bundled, out, posix, read_json, ulid
 
 # ---------------------------------------------------------------- helpers
@@ -327,7 +328,10 @@ def cmd_run(args, chain: dict | None = None) -> int:
     # A chain member runs unattended: the orchestrator is waiting for it to
     # end, so nobody can step into it. A standalone run stays attended even
     # with `--wait` — unless `--unattended` said otherwise.
-    run = runs.start(project, pack.name, target, provider=provider, attended=not unattended)
+    run = runs.start(project, pack.name, target, provider=provider,
+                     attended=not unattended,
+                     origin=getattr(args, "origin", None) or "cli",
+                     device=getattr(args, "device", None))
     out.step(f"run {run.id}")
 
     wt = project.root
@@ -1308,6 +1312,64 @@ def cmd_status(args) -> int:
     return _emit(args, payload, human)
 
 
+# ---------------------------------------------------------------- serve
+
+def cmd_serve(args) -> int:
+    """Hold the projects open for a phone on the tailnet, and wait.
+
+    The command is the activation: while it runs, the projects it names can be
+    worked on from somewhere else; when it stops, they cannot. That is why the
+    window is an argument here and not a setting anywhere — reopening it is a
+    decision made at this machine, by the person who owns it.
+    """
+    seen: dict[str, config.Project] = {}
+    for spec in (args.project or [None]):
+        p = config.require(spec)
+        seen[posix(p.root)] = p
+    projects = list(seen.values())
+
+    try:
+        daemon = serving.serve(projects, args.host, args.port, args.hours,
+                               pair_window=args.pair_window)
+    except OSError as e:
+        raise SystemExit(
+            f"Cannot listen on {args.host}:{args.port} — {e}. Another `agency serve` "
+            "is probably already holding it; that one is the activation.")
+
+    out.say(f"\n  {out.bold('agency serve')}  {out.dim(f'{args.host}:{daemon.port}')}"
+            f"  {out.dim('·')}  {out.dim(f'activated for {args.hours:g} h')}\n")
+    for key, p in daemon.projects.items():
+        installed = ", ".join(x.name for x in packs.available(p)) or "no specialists yet"
+        out.done(f"{key:24} {out.dim(installed)}")
+    out.say()
+    out.say(f"  {out.bold('Pairing code:')}  {out.bold(daemon.pair_code)}"
+            f"   {out.dim(f'valid for {args.pair_window // 60} minutes, for one device')}")
+    known = daemon.devices.all()
+    if known:
+        out.say(f"  {out.dim('Already paired:')} "
+                f"{out.dim(', '.join(d.name + ('  bypass' if d.bypass else '') for d in known))}")
+    out.say()
+    out.say(f"  {out.dim('Publish it to the tailnet (once, on this machine):')}")
+    out.say(f"  {out.dim(f'  tailscale serve --bg {daemon.port}')}")
+    out.say(f"  {out.dim('Never `tailscale funnel` — that one is the public internet.')}")
+    out.say()
+    out.say(f"  {out.dim('Ctrl-C closes the window. A run already under way keeps going.')}\n")
+
+    try:
+        while daemon.activated():
+            time.sleep(1)
+    except KeyboardInterrupt:
+        out.say()
+        out.note("stopped — the projects are no longer reachable from anywhere else")
+        return 130
+    finally:
+        if daemon.server is not None:
+            daemon.server.shutdown()
+    out.note(f"the activation window closed after {args.hours:g} h — "
+             "start `agency serve` again to reopen it")
+    return 0
+
+
 # ---------------------------------------------------------------- parser
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1358,6 +1420,11 @@ def build_parser() -> argparse.ArgumentParser:
                         "are granted up front and nothing stops to ask. The agent runs in print "
                         "mode, so pair it with --wait to watch it and gate the output in one go.")
     s.add_argument("--force", action="store_true", help="a draft or an already reviewed commit too")
+    # Hidden, because they are not something a person types: they are how a
+    # client says who it is, and the run record is the only reader.
+    s.add_argument("--origin", choices=["cli", "extension", "remote"], default="cli",
+                   help=argparse.SUPPRESS)
+    s.add_argument("--device", help=argparse.SUPPRESS)
     s.set_defaults(fn=cmd_run)
 
     s = sub.add_parser("chain", parents=[common],
@@ -1464,6 +1531,21 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("status", parents=[common], help="overview of the project's runs")
     s.add_argument("--limit", type=int, default=10)
     s.set_defaults(fn=cmd_status)
+
+    s = sub.add_parser("serve", parents=[common],
+                       help="open this project to a paired phone on the tailnet, for a while")
+    s.add_argument("--project", action="append", metavar="PATH",
+                   help="a project to open (repeatable; default: the current one)")
+    s.add_argument("--host", default="127.0.0.1",
+                   help="what to bind (default: the loopback — `tailscale serve` publishes it)")
+    s.add_argument("--port", type=int, default=7777)
+    s.add_argument("--hours", type=float, default=8,
+                   help="how long the projects stay open (default: 8)")
+    s.add_argument("--pair-window", type=int, default=serving.PAIR_WINDOW,
+                   metavar="SECONDS",
+                   help="how long the pairing code printed at startup is accepted "
+                        f"(default: {serving.PAIR_WINDOW})")
+    s.set_defaults(fn=cmd_serve)
 
     return p
 
