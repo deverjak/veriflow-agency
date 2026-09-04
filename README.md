@@ -425,6 +425,19 @@ which terminates TLS and knows who is on the other end. No public IP, no port
 forwarding, nothing exposed — and never `tailscale funnel`, which is the same
 command for the opposite thing.
 
+```bash
+tailscale serve --bg 7777            # https://<machine>.<tailnet>.ts.net/
+tailscale serve --bg --http=80 7777  # so the app's http link lands there too
+```
+
+The second line is worth the trouble: the Tailscale app offers the http
+address first, and http and https are separate origins with separate
+`localStorage`, so without it the same phone pairs twice and looks unpaired
+whenever it takes the other link. Published on both, the daemon answers a
+plain-http request with a redirect to the https address — it can tell, because
+the proxy sets `X-Forwarded-Proto` only on the https side. A request straight
+to the loopback carries no forwarded headers at all and is served as it is.
+
 The daemon has no judgement of its own: it authenticates the device, knows
 which projects are open, and hands everything else to `agency … --json` as a
 subprocess. The run it starts is the run the terminal starts, plus who asked

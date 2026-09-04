@@ -34,6 +34,7 @@ import dataclasses
 import hmac
 import json
 import os
+import re
 import secrets
 import subprocess
 import sys
@@ -668,7 +669,40 @@ class Handler(BaseHTTPRequestHandler):
             except OSError:
                 pass
 
+    def _https_redirect(self) -> bool:
+        """Send a phone that arrived over plain http to the https address.
+
+        `tailscale serve` can publish this daemon on both :80 and :443, and the
+        Tailscale app offers the http link first. Left alone the two are
+        separate origins with separate localStorage, so the same phone would
+        have to pair twice and would look unpaired whenever it took the other
+        link. The proxy sets X-Forwarded-Proto only on the https side.
+
+        A request straight to the loopback -- the CLI, the extension, a browser
+        on this machine -- carries no X-Forwarded-Host and is left alone; that
+        is also why the host is checked before it is echoed into Location,
+        since anything that can reach the loopback could otherwise name a
+        redirect target of its own.
+
+        The dot is not cosmetic. MagicDNS answers to the short name as well,
+        and a single-label name cannot hold a certificate, so sending a phone
+        from http://laptop to https://laptop would send it nowhere. Redirect
+        only where https can actually answer.
+        """
+        host = self.headers.get("X-Forwarded-Host")
+        if not host or self.headers.get("X-Forwarded-Proto") == "https":
+            return False
+        if not re.fullmatch(r"[A-Za-z0-9\-]{1,63}(\.[A-Za-z0-9\-]{1,63})+(:\d{1,5})?", host):
+            return False
+        self.send_response(301)
+        self.send_header("Location", f"https://{host}{self.path}")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+        return True
+
     def _get(self) -> None:
+        if self._https_redirect():
+            return
         url = urlparse(self.path)
         path, query = url.path, parse_qs(url.query)
 

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import time
+import http.client
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -648,3 +649,64 @@ def test_a_run_from_another_project_is_not_found(daemon, project, make_run):
                       f"/api/run/01NOSUCHRUN?project={project.root.name}", token)
 
     assert code == 404 and data["reason"] == "no-run"
+
+
+# --------------------------------------------------- http -> https
+
+def raw_get(daemon, path: str, headers: dict | None = None):
+    """One request, no redirect following, no JSON assumed.
+
+    `call` follows redirects and parses the body, which is exactly what a test
+    about a redirect must not do.
+    """
+    conn = http.client.HTTPConnection("127.0.0.1", daemon.port, timeout=10)
+    try:
+        conn.request("GET", path, headers=headers or {})
+        r = conn.getresponse()
+        r.read()
+        return r.status, r.getheader("Location")
+    finally:
+        conn.close()
+
+
+def test_a_phone_that_took_the_http_link_is_sent_to_the_https_one(daemon):
+    """`tailscale serve` can publish this daemon on :80 as well as :443, and
+    the Tailscale app offers the http link first. Two origins would mean two
+    localStorages and a phone that has to pair twice."""
+    status, location = raw_get(daemon, "/?x=1", {
+        "X-Forwarded-Host": "laptop.tailnet.ts.net"})
+
+    assert status == 301
+    assert location == "https://laptop.tailnet.ts.net/?x=1"
+
+
+def test_the_https_side_is_served_not_redirected(daemon):
+    status, location = raw_get(daemon, "/", {
+        "X-Forwarded-Host": "laptop.tailnet.ts.net", "X-Forwarded-Proto": "https"})
+
+    assert status == 200 and location is None
+
+
+def test_a_request_straight_to_the_loopback_is_left_alone(daemon):
+    """The CLI, the extension and a browser on this machine reach the daemon
+    directly. There is no https address for them to be sent to."""
+    status, location = raw_get(daemon, "/")
+
+    assert status == 200 and location is None
+
+
+def test_the_redirect_target_is_not_whatever_the_caller_says(daemon):
+    """Anything that can reach the loopback can set this header; echoing it
+    into Location unchecked would make the daemon an open redirect."""
+    status, location = raw_get(daemon, "/", {"X-Forwarded-Host": "evil.example.com/@x"})
+
+    assert status == 200 and location is None
+
+
+def test_the_short_magicdns_name_keeps_working_over_http(daemon):
+    """MagicDNS answers to `laptop` as well as `laptop.tailnet.ts.net`, but a
+    single-label name cannot hold a certificate. Redirecting it to https would
+    send the phone to an address nothing serves."""
+    status, location = raw_get(daemon, "/", {"X-Forwarded-Host": "laptop"})
+
+    assert status == 200 and location is None
