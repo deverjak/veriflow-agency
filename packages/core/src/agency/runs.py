@@ -632,6 +632,12 @@ def agent_env(run: Run, chain: dict | None = None) -> dict[str, str]:
     return env
 
 
+#: The whole of `cost` in run.v1. The schema refuses anything else, so this
+#: is what may survive from a record the agent has already written.
+COST_FIELDS = ("provider", "model", "credential", "inputTokens", "outputTokens",
+               "usd", "dimensions", "wallClockSeconds")
+
+
 def attend(project: Project, run: Run, launch: list[str], cwd: Path,
            dialect: str | None = None, on_event=None,
            chain: dict | None = None, timeout: float | None = None) -> dict:
@@ -671,8 +677,13 @@ def attend(project: Project, run: Run, launch: list[str], cwd: Path,
         agent["denied"] = {"count": denied, "tools": summary.get("denied") or []}
     rec["agent"] = agent
     tokens = summary.get("tokens") or {}
+    # The agent writes `run.json` too, and everything in `cost` is measured
+    # here rather than observed by it. Carrying its object over wholesale let
+    # a run invent `cost.note`, and the record then failed the schema this
+    # same tool validates it against — so only the fields run.v1 knows survive.
+    inherited = {k: v for k, v in (rec.get("cost") or {}).items() if k in COST_FIELDS}
     rec["cost"] = {
-        **(rec.get("cost") or {}),
+        **inherited,
         "provider": agent.get("provider"),
         "model": agent.get("model"),
         "credential": credential(agent.get("provider")),

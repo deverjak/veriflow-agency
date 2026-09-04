@@ -72,3 +72,30 @@ def test_projekt_bez_remote_je_platny(project, make_run, capsys):
 
     assert data["recordErrors"] == []
     assert code == 0
+
+
+def test_the_agent_does_not_get_to_invent_cost_fields(project, make_run, monkeypatch,
+                                                      capsys):
+    """The agent writes `run.json` too, and one run added `cost.note` to it.
+
+    Everything under `cost` is measured by this process, not observed by the
+    agent, but the merge carried its object over whole — so the record came
+    out of a successful run failing the very schema `agency validate` checks
+    it against. Seen on a real po run started from a phone.
+    """
+    from agency import proc, runs
+
+    run = make_run()
+    rec = run.record()
+    rec["cost"] = {"note": "not separately metered by this run", "dimensions": 6}
+    run.save_record(rec)
+    monkeypatch.setattr(proc, "attend", lambda args, cwd=None, env=None: 0)
+
+    runs.attend(project, run, ["claude", "-p"], project.root)
+
+    cost = run.record()["cost"]
+    assert "note" not in cost, "a key run.v1 refuses must not survive the merge"
+    assert cost["dimensions"] == 6, "a key it allows still comes through"
+
+    code, report = _validate(project, run, capsys)
+    assert code == 0, report
