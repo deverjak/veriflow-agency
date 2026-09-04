@@ -253,14 +253,22 @@
     head.className = 'head';
     const name = document.createElement('b');
     name.textContent = p.name;
-    const where = document.createElement('span');
-    where.className = 'where';
-    where.textContent = p.slug || p.root;
     const more = document.createElement('button');
     more.className = 'link more';
     more.textContent = 'runs';
     more.onclick = () => openRuns(p.key, p.name);
-    head.appendChild(name); head.appendChild(where); head.appendChild(more);
+    head.appendChild(name);
+    // A project whose name already is its slug printed the same string twice
+    // and cost the header a second line on a phone. Say where it lives only
+    // when that is not what the name already said.
+    const where = p.slug === p.name ? '' : (p.slug || p.root);
+    if (where) {
+      const span = document.createElement('span');
+      span.className = 'where';
+      span.textContent = where;
+      head.appendChild(span);
+    }
+    head.appendChild(more);
     el.appendChild(head);
 
     // What is happening right now comes first: a run in flight is the one
