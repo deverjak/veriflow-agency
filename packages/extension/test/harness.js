@@ -487,6 +487,23 @@ checkAsync('a preset\'s provider/model reach cli.run, alongside the prompt', asy
   assert.strictEqual(captured.prompt, 'try cancelling a booking');
 });
 
+checkAsync('a preset run without prompts keeps the preset\'s own runner', async () => {
+  // The two options travel together on this path: the preset decides the
+  // runner, the arrow decides the supervision. If one overwrote the other,
+  // the run would either ask fifty times anyway or quietly fall back to the
+  // default model — and the run record would name the wrong one.
+  const review = require(path.join(SRC, 'review.js'));
+  Object.assign(state.snapshot, { probe: { ok: true }, cwd: 'C:/project', packs: [QA_PACK] });
+
+  const { prepared } = supervisionHarness(['try cancelling a booking']);
+  await review.runOverWorkspace('C:/project', QA_PACK, { appendLine() {} },
+    { bypass: true, provider: 'codex', model: 'gpt-5' });
+
+  assert.strictEqual(prepared[0].opts.bypass, true);
+  assert.strictEqual(prepared[0].opts.provider, 'codex');
+  assert.strictEqual(prepared[0].opts.model, 'gpt-5');
+});
+
 check('a tree row carries a name, not an object', () => {
   // A command fired from a tree row gets a NODE, not a string. Without
   // unwrapping it, the object reaches execFile, stringifies, and the run
@@ -1069,6 +1086,33 @@ check('Clear all sits on the Runs view title, a preset runs inline', () => {
   assert.ok(run, 'missing agency.preset.run in the preset context menu');
   assert.strictEqual(run.when, 'viewItem == agencyPreset');
   assert.ok(run.group.startsWith('inline'));
+});
+
+check('a preset row carries both arrows, the same way its pack does', () => {
+  // A preset says WHICH RUNNER, and nothing more. If the only arrow on the
+  // row were the guarded one, then saving a model would silently decide
+  // that this specialist can never be run unguarded — and the pack row's
+  // ▶▶ is no help, since it would drop the preset's model on the floor.
+  const pkg = require(path.join(SRC, '..', 'package.json'));
+  const ctx = pkg.contributes.menus['view/item/context'];
+  const bypass = ctx.find((m) => m.command === 'agency.preset.runBypass');
+  assert.ok(bypass, 'missing agency.preset.runBypass in the preset context menu');
+  assert.strictEqual(bypass.when, 'viewItem == agencyPreset');
+  assert.ok(bypass.group.startsWith('inline'), 'the bypass arrow has to sit on the row');
+
+  const run = ctx.find((m) => m.command === 'agency.preset.run');
+  assert.ok(run.group < bypass.group,
+    'the guarded run stays first here too — the unguarded one is never the nearer click');
+
+  const decl = pkg.contributes.commands.find((c) => c.command === 'agency.preset.runBypass');
+  assert.ok(decl && decl.icon && decl.icon !== '$(play)',
+    'two identical icons on one row is one button the user cannot tell apart');
+  assert.ok(/permission/i.test(decl.title),
+    `the title has to say what it turns off, got ${decl && decl.title}`);
+
+  const palette = pkg.contributes.menus.commandPalette;
+  assert.ok(palette.some((m) => m.command === 'agency.preset.runBypass' && m.when === 'false'),
+    'without a row to run it on, the palette entry would have no preset');
 });
 
 check('no leftover roster, provider-registry or Playwright-config commands remain', () => {

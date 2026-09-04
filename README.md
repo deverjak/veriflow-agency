@@ -263,6 +263,9 @@ whole project has no short `needs` list (a strategy pack asked about fifty
 separate commands in a single run), and the honest answer to that is either
 a manifest nobody can keep true or a run you knowingly start unguarded. The
 run record says which it was: `agent.authorized` is `grant` or `bypass`.
+A saved preset row carries the same pair, because a preset only pins the
+runner and the model — it must not also decide, once and for all, that this
+specialist can only run supervised.
 
 ### A pack — `pack.json`
 

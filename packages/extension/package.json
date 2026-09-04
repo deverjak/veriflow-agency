@@ -2,7 +2,7 @@
   "name": "veriflow-agency",
   "displayName": "Agency",
   "description": "Specialists for this repository. Pull request reviews with evidence-backed findings, triage right next to the code, and measurable precision.",
-  "version": "0.7.3",
+  "version": "0.7.4",
   "publisher": "veriflow",
   "license": "UNLICENSED",
   "private": true,
@@ -276,6 +276,11 @@
         "icon": "$(play)"
       },
       {
+        "command": "agency.preset.runBypass",
+        "title": "Run with this preset, without permission prompts…",
+        "icon": "$(run-all)"
+      },
+      {
         "command": "agency.preset.remove",
         "title": "Remove preset",
         "icon": "$(trash)"
@@ -335,6 +340,10 @@
         },
         {
           "command": "agency.preset.run",
+          "when": "false"
+        },
+        {
+          "command": "agency.preset.runBypass",
           "when": "false"
         },
         {
@@ -443,6 +452,11 @@
         {
           "command": "agency.preset.run",
           "group": "inline@1",
+          "when": "viewItem == agencyPreset"
+        },
+        {
+          "command": "agency.preset.runBypass",
+          "group": "inline@2",
           "when": "viewItem == agencyPreset"
         },
         {

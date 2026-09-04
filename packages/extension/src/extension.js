@@ -484,16 +484,24 @@ function activate(context) {
   });
 
   // --- presets — a saved provider/model, run the same way a pack itself is.
-  reg('agency.preset.run', async (arg) => {
+  //
+  // Two arrows here as well. A preset decides the runner and the model, and
+  // nothing else — saying it ahead of time must not also decide, silently
+  // and forever, that this run is a supervised one. The row above offers the
+  // choice; a row that pins the model would otherwise take it away.
+  const runPreset = async (arg, extra = {}) => {
     if (!state.snapshot.probe.ok) return showNotReady();
     const info = presetArgOf(arg);
     if (!info) return;
-    const extra = { provider: info.preset.provider, model: info.preset.model };
+    const opts = { ...extra, provider: info.preset.provider, model: info.preset.model };
     const d = (info.pack.run && info.pack.run.target === 'workspace')
-      ? await review.runOverWorkspace(state.snapshot.cwd, info.pack, log, extra)
-      : await runOneOverPr(info.pack, extra);
+      ? await review.runOverWorkspace(state.snapshot.cwd, info.pack, log, opts)
+      : await runOneOverPr(info.pack, opts);
     if (d) setTimeout(() => refresh(), 2000);
-  });
+  };
+
+  reg('agency.preset.run', (arg) => runPreset(arg));
+  reg('agency.preset.runBypass', (arg) => runPreset(arg, { bypass: true }));
 
   reg('agency.preset.add', async (arg) => {
     let pack = null;

@@ -223,6 +223,11 @@ function presetNode(p, pack) {
     contextValue: 'agencyPreset',
     command: 'agency.preset.run',
     args: [{ preset: p, pack }],
+    tooltip: `**${presets.label(p)}**\n\n`
+      + `\`agency run ${pack.name}\` on ${[p.provider, p.model].filter(Boolean).join(' · ')}`
+      + ' — or the ▶ on this row.\n\n'
+      + '▶▶ is the same preset with the runner’s permission checks turned off '
+      + '(`--bypass`). A preset decides the runner, never whether the run is supervised.',
   });
   n._preset = p;
   n._pack = pack;
