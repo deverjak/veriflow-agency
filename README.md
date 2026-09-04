@@ -422,11 +422,18 @@ and from where — `trigger.origin` in the record is `cli`, `extension` or
 stream, tailed out of the run's `agent.jsonl` and translated by the same
 `events.py` the terminal prints from; nothing is recorded twice.
 
+What the phone opens is one page the daemon serves from the install — pair,
+pick a project, pick a specialist, write the prompt or choose the pull
+request, then watch. No build step and no deploy: it is a file read off disk
+on every request, so an edit at the machine is live on the next refresh. A
+connection lost in a lift resumes where it stopped, because the browser sends
+`Last-Event-ID` by itself and the daemon reads it.
+
 A run started this way is **unattended** by construction, because nobody is at
 the terminal to answer it. Taking over an attended session with Claude Code's
 Remote Control is the next step of
-[`docs/plans/remote.md`](docs/plans/remote.md), and so is the page the daemon
-will hand the phone — today it is an API.
+[`docs/plans/remote.md`](docs/plans/remote.md); until it lands, a specialist
+row has one button rather than two.
 
 ### Three rules the whole thing stands on
 

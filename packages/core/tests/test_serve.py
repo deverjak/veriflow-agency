@@ -138,6 +138,23 @@ def test_pairing_takes_the_code_printed_on_the_machine(daemon):
     assert again == 403, "one code pairs one device — a code read over a shoulder is spent"
 
 
+def test_a_console_that_cannot_print_does_not_fail_the_request(daemon, monkeypatch):
+    """Found by running the daemon outside `main()`: the `✓` of a successful
+    pairing hit a cp1250 console, raised `UnicodeEncodeError`, and the paired
+    phone got HTTP 500 for something that had already worked. The line on the
+    machine's console is a courtesy; the answer to the phone is the job."""
+    def explode(*a, **kw):
+        raise UnicodeEncodeError("charmap", "✓", 0, 1, "no")
+
+    monkeypatch.setattr(serve.out, "done", explode)
+    monkeypatch.setattr(serve.out, "say", explode)
+
+    code, data = call(daemon, "POST", "/api/pair",
+                      body={"code": daemon.pair_code, "name": "phone"})
+
+    assert code == 200 and data["token"]
+
+
 def test_guessing_the_code_runs_out(daemon):
     for _ in range(serve.PAIR_ATTEMPTS):
         call(daemon, "POST", "/api/pair", body={"code": "000000"})
@@ -324,19 +341,15 @@ def test_every_remote_action_leaves_a_line(daemon, project, monkeypatch):
 
 # ---------------------------------------------------------------- progress
 
-def stream(daemon, run_id: str, project_key: str, token: str,
-           offset: int = 0) -> tuple[list[dict], dict | None]:
-    """Read the SSE stream to its end — it ends by itself, the run is over.
+def split_sse(body: str) -> tuple[list[dict], dict | None]:
+    """The progress events and the closing state, separately.
 
-    Returns the progress events and the closing state separately, because they
-    are two different things on the wire: `data:` frames and the one `event:
-    done` that carries the run's own record.
+    They are two different things on the wire — plain `data:` frames and the
+    one `event: done` that carries the run's own record — and telling them
+    apart by looking for a key inside is how a test starts passing for the
+    wrong reason: the closing state has a `trigger.kind` in it.
     """
-    url = (f"http://127.0.0.1:{daemon.port}/api/run/{run_id}/events"
-           f"?project={project_key}&token={token}&offset={offset}")
-    with urllib.request.urlopen(url, timeout=30) as r:
-        lines = r.read().decode("utf-8").splitlines()
-
+    lines = body.splitlines()
     progress: list[dict] = []
     final = None
     i = 0
@@ -349,6 +362,16 @@ def stream(daemon, run_id: str, project_key: str, token: str,
             progress.append(json.loads(lines[i][6:]))
         i += 1
     return progress, final
+
+
+def stream(daemon, run_id: str, project_key: str, token: str,
+           offset: int = 0, headers: dict | None = None) -> tuple[list[dict], dict | None]:
+    """Read the SSE stream to its end — it ends by itself, the run is over."""
+    url = (f"http://127.0.0.1:{daemon.port}/api/run/{run_id}/events"
+           f"?project={project_key}&token={token}&offset={offset}")
+    req = urllib.request.Request(url, headers=headers or {})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return split_sse(r.read().decode("utf-8"))
 
 
 def test_the_progress_is_the_agents_own_stream(daemon, project, make_run):
@@ -402,6 +425,36 @@ def test_a_half_written_line_is_waited_for_not_skipped(daemon, project, make_run
 
     assert [e["kind"] for e in progress] == ["start"]
     assert final is not None, "the stream still closes — the run is over either way"
+
+
+def test_a_dropped_connection_resumes_from_the_browsers_own_header(daemon, project, make_run):
+    """`EventSource` reconnects by itself and sends `Last-Event-ID`. A resume
+    that only works when the client remembers to add `?offset=` is a resume
+    that will one day replay an hour of tool calls."""
+    token = pair(daemon)
+    run = make_run(status="ok")
+    (run.dir / "agent.jsonl").write_text("\n".join([
+        json.dumps({"type": "system", "subtype": "init", "session_id": "s1"}),
+        json.dumps({"type": "assistant", "message": {"content": [
+            {"type": "text", "text": "still here"}]}}),
+    ]) + "\n", encoding="utf-8")
+
+    progress, _ = stream(daemon, run.id, project.root.name, token,
+                         headers={"Last-Event-ID": "1"})
+
+    assert [e["kind"] for e in progress] == ["text"]
+
+
+def test_the_page_is_served_and_never_cached(daemon):
+    """The phone's client is a file on this machine, read on every request —
+    a phone holding yesterday's copy would be a bug with nowhere to look."""
+    with urllib.request.urlopen(f"http://127.0.0.1:{daemon.port}/", timeout=10) as r:
+        body = r.read().decode("utf-8")
+        assert r.headers["Content-Type"].startswith("text/html")
+        assert r.headers["Cache-Control"] == "no-store"
+
+    assert "<title>Agency</title>" in body
+    assert "EventSource" in body, "the live progress is the point of the page"
 
 
 def test_the_run_state_is_the_records_own_words(daemon, project, make_run):

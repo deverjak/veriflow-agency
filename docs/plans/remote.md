@@ -101,7 +101,7 @@ Párování: `agency serve` vypíše na konzoli šestimístný kód, telefon ho 
 - **`--pair` na běžícím démonu neexistuje.** Okno na párování se otevírá při startu (`--pair-window`, výchozí 5 minut, ne 60 s — za minutu se telefon nestihne ani odemknout) a zavírá se po prvním spárovaném zařízení nebo po pěti špatných kódech. Otevřít nové = restartovat `agency serve`, což je správně: je to rozhodnutí u toho počítače.
 - **Stav démona bydlí v `%LOCALAPPDATA%/agency/`.** Pravidlo „žádné `~/.agency/`" mířilo na konfiguraci — token o ničem nerozhoduje a druhé místo, kam ho dát, je komitnutý adresář.
 
-**Hotovo, když:** z telefonu v tailnetu spustím `po` s promptem nad `main-panel` a vidím, jak agent volá nástroje, a po doběhu počty z brány. — ⚠️ **API stojí a je otestované** (`tests/test_serve.py`, 22 testů: párování, okno aktivace, argv běhu, serializace, audit, stream včetně `offset` a rozepsaného řádku). Zbytek téhle věty je Krok 3: bez stránky se to z telefonu neodklikne.
+**Hotovo, když:** z telefonu v tailnetu spustím `po` s promptem nad `main-panel` a vidím, jak agent volá nástroje, a po doběhu počty z brány. — ✅ **postavené a otestované** (`tests/test_serve.py`: párování, okno aktivace, argv běhu, serializace, audit, stream včetně `offset`, `Last-Event-ID` a rozepsaného řádku; navrch smoke proti skutečnému projektu s packem, kde endpointy obsluhuje opravdový podproces). Poslední kus té věty — *z telefonu* — je na tobě: prohlížeč v ruce jsem neměl.
 
 ### Krok 2 — Remote Control jako druhý režim (~4 h)
 
@@ -110,9 +110,20 @@ Párování: `agency serve` vypíše na konzoli šestimístný kód, telefon ho 
 
 **Hotovo, když:** tlačítko **Převzít** otevře session, kterou v Claude appce najdu pod jménem specialisty, odpovím jí na dotaz na oprávnění a pak z mobilu pustím bránu.
 
-### Krok 3 — stránka (~4 h, souběžně s Krokem 1)
+### Krok 3 — stránka (~4 h, souběžně s Krokem 1) — **hotovo 4. 9. 2026**
 
 Jeden `index.html` v `packages/core/src/agency/_web/`, servírovaný démonem. Tři obrazovky: projekty → specialisté (řádek = titul, dvě tlačítka) → běh (průběh, pak výsledek brány). Prompt je `<textarea>`, PR je seznam z `agency prs`. Žádný framework; když stránka poroste přes jeden soubor, je to signál, že měla být PWA.
+
+**Co plán nepředpokládal**
+
+- **Obrazovky jsou čtyři.** První je párování — kód z konzole a jméno zařízení; token pak leží v `localStorage`. Bez ní by první otevření stránky bylo 401 bez vysvětlení.
+- **Tlačítko je jedno, ne dvě.** Druhé patří Kroku 2 a tlačítko, které vrací 501, není tlačítko. Přibude s ním.
+- **`EventSource` se po `done` zavírá z klienta.** Prohlížeč se po ukončeném streamu sám připojí znovu, takže bez toho by konec běhu přehrával dokola.
+- **Resume jede přes `Last-Event-ID`.** Tu hlavičku posílá prohlížeč při reconnectu sám; `?offset=` zůstává pro ruční otevření. Resume, který závisí na tom, že si klient vzpomene přidat parametr, je resume, který jednou přehraje hodinu volání nástrojů.
+- **Stránka se nikdy necachuje** (`Cache-Control: no-store`) a čte se z disku při každém požadavku — úprava na počítači je živá po přetažení prstem, ne po vyčištění cache telefonu.
+- **Konzole démona nesmí shodit request.** Nalezeno při smoke testu: `✓` po úspěšném párování narazilo na cp1250 konzoli, vyhodilo `UnicodeEncodeError` a telefon dostal 500 za něco, co už proběhlo. Řádek na konzoli je zdvořilost, odpověď telefonu je práce.
+
+**Hotovo, když:** stránka na telefonu spustí specialistu a ukáže jeho průběh. — ✅ postavené; ověřená je syntaxe skriptu, tvary všech odpovědí, které stránka čte, proti skutečnému projektu, a že se servíruje bez cache. Klik z telefonu je na tobě.
 
 ---
 

@@ -141,6 +141,21 @@ class Devices:
         return None
 
 
+def console(fn, *args) -> None:
+    """Say something on the machine's console, and never let that fail a request.
+
+    `agency serve` goes through `main()`, which wraps stdout in UTF-8 — but a
+    daemon started any other way inherits a Windows console in cp1250, where
+    printing the `✓` of a successful pairing raises `UnicodeEncodeError`. That
+    turned a paired device into HTTP 500. The line on the console is a
+    courtesy; the answer to the phone is the job.
+    """
+    try:
+        fn(*args)
+    except Exception:                               # noqa: BLE001
+        pass
+
+
 def append_audit(path: Path, entry: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "a", encoding="utf-8", newline="\n") as f:
@@ -407,7 +422,8 @@ class Handler(BaseHTTPRequestHandler):
     # -------------------------------------------------------- plumbing
 
     def log_message(self, fmt: str, *args) -> None:  # noqa: A003
-        out.say(f"  {out.dim(self.command + ' ' + self.path.split('?')[0])}  "
+        console(out.say,
+                f"  {out.dim(self.command + ' ' + self.path.split('?')[0])}  "
                 f"{out.dim(str(args[1]) if len(args) > 1 else '')}")
 
     def _send(self, code: int, data, headers: dict | None = None) -> None:
@@ -529,7 +545,12 @@ class Handler(BaseHTTPRequestHandler):
             if not run:
                 return self._fail(404, "no-run", f"No run {run_id} in {key}.")
             if tail == "events":
-                return self._events(project, run, int((query.get("offset") or ["0"])[0]))
+                # `Last-Event-ID` first: when the browser reconnects a dropped
+                # EventSource it sends that header by itself, and a resume that
+                # depends on the client remembering to add `?offset=` is a
+                # resume that will one day replay an hour of tool calls.
+                resume = self.headers.get("Last-Event-ID") or (query.get("offset") or ["0"])[0]
+                return self._events(project, run, _int(resume))
             if not tail:
                 return self._send(200, {"ok": True, **_run_state(run)})
 
@@ -553,8 +574,8 @@ class Handler(BaseHTTPRequestHandler):
             append_audit(self.daemon.audit_path,
                          {"action": "paired", "device": device.id, "deviceName": device.name,
                           "bypass": device.bypass})
-            out.done(f"paired: {device.name}  {out.dim(device.id)}"
-                     + ("  bypass allowed" if device.bypass else ""))
+            console(out.done, f"paired: {device.name}  {out.dim(device.id)}"
+                    + ("  bypass allowed" if device.bypass else ""))
             return self._send(200, {"ok": True, "deviceId": device.id,
                                     "token": device.token, "bypass": device.bypass})
 
@@ -605,10 +626,14 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
+            # Never cached: the page is read off disk on every request, so an
+            # edit on the machine is live on the next pull-to-refresh. A phone
+            # holding yesterday's copy would be a bug with no way to see it.
+            self.send_header("Cache-Control", "no-store")
             self.end_headers()
             return self.wfile.write(body)
-        text = ("agency serve is up. The page it is supposed to hand you is the next "
-                "step of docs/plans/remote.md; until then this is an API.\n").encode()
+        text = ("agency serve is up, and the page it should hand you is missing from "
+                "the install (src/agency/_web/index.html). This is the API.\n").encode()
         self.send_response(200)
         self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.send_header("Content-Length", str(len(text)))
@@ -699,6 +724,13 @@ class Handler(BaseHTTPRequestHandler):
         finally:
             if handle is not None:
                 handle.close()
+
+
+def _int(value, default: int = 0) -> int:
+    try:
+        return int(str(value))
+    except (TypeError, ValueError):
+        return default
 
 
 def _run_path(path: str) -> tuple[str | None, str | None]:

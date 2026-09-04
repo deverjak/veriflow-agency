@@ -1,0 +1,447 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Agency</title>
+<style>
+  /* One file, no framework, no build step — the same rule the extension
+     follows. When this page needs a second file, it needed to be a PWA. */
+  :root {
+    --bg: #fbfbfa; --fg: #1a1a19; --dim: #6b6b66; --line: #e3e3df;
+    --card: #ffffff; --accent: #1f6f4a; --warn: #9a6b00; --err: #a33;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16161a; --fg: #e8e8e4; --dim: #93938c; --line: #2a2a30;
+      --card: #1d1d22; --accent: #57b287; --warn: #d9a441; --err: #e07b7b;
+    }
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right)
+             env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  .wrap { max-width: 640px; margin: 0 auto; padding: 0 16px 48px; }
+  header {
+    position: sticky; top: 0; background: var(--bg); z-index: 2;
+    padding: 14px 0 10px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: baseline; gap: 10px;
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; letter-spacing: -0.01em; }
+  header .meta { font-size: 12px; color: var(--dim); margin-left: auto; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em;
+       color: var(--dim); font-weight: 600; margin: 26px 0 10px; }
+  p { margin: 0 0 12px; }
+  .dim { color: var(--dim); }
+  .row {
+    display: flex; gap: 12px; align-items: center; width: 100%; text-align: left;
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 14px; margin-bottom: 8px; color: inherit; font: inherit; cursor: pointer;
+  }
+  .row:active { border-color: var(--accent); }
+  .row .body { min-width: 0; flex: 1; }
+  .row .title { font-weight: 600; }
+  .row .sub { font-size: 13px; color: var(--dim);
+              overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row .go { color: var(--dim); font-size: 18px; }
+  button.primary {
+    width: 100%; padding: 14px; border-radius: 12px; border: 0; cursor: pointer;
+    background: var(--accent); color: #fff; font: inherit; font-weight: 600;
+  }
+  button.primary:disabled { opacity: .5; cursor: default; }
+  button.link { background: none; border: 0; color: var(--dim); font: inherit;
+                cursor: pointer; padding: 8px 0; text-decoration: underline; }
+  input, textarea, select {
+    width: 100%; padding: 12px; border-radius: 10px; font: inherit;
+    background: var(--card); color: var(--fg); border: 1px solid var(--line);
+  }
+  textarea { min-height: 96px; resize: vertical; }
+  label { display: block; font-size: 13px; color: var(--dim); margin: 14px 0 6px; }
+  .note { font-size: 13px; color: var(--dim); margin: 10px 0 0; }
+  .err { color: var(--err); font-size: 14px; margin: 12px 0; white-space: pre-wrap; }
+  .feed { font: 13px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace;
+          margin-top: 12px; }
+  .ev { display: flex; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--line); }
+  .ev .k { color: var(--dim); flex: 0 0 62px; }
+  .ev .d { min-width: 0; word-break: break-word; }
+  .ev.thinking .d, .ev.text .d { color: var(--dim); }
+  .ev.denied .k, .ev.denied .d { color: var(--err); }
+  .ev.done .k { color: var(--accent); }
+  .counts { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0; }
+  .count { background: var(--card); border: 1px solid var(--line);
+           border-radius: 10px; padding: 8px 12px; font-size: 13px; }
+  .count b { font-size: 17px; display: block; font-weight: 600; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Agency</h1>
+    <span class="meta" id="meta"></span>
+  </header>
+
+  <!-- 1 — pairing -->
+  <section id="view-pair" class="hidden">
+    <h2>Pair this device</h2>
+    <p class="dim">The code is printed by <code>agency serve</code> on the machine.
+      It is good for one device, for a few minutes.</p>
+    <label for="code">Code</label>
+    <input id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6"
+           placeholder="000000">
+    <label for="name">Name this device</label>
+    <input id="name" placeholder="phone">
+    <p class="note">Starting a run with the authorization checks off is a right the
+      machine grants at pairing, not something this page can ask for later.</p>
+    <div style="height:14px"></div>
+    <button class="primary" id="pair-go">Pair</button>
+    <p class="err" id="pair-err"></p>
+  </section>
+
+  <!-- 2 — projects -->
+  <section id="view-projects" class="hidden">
+    <h2>Projects</h2>
+    <div id="projects"></div>
+  </section>
+
+  <!-- 3 — specialists -->
+  <section id="view-packs" class="hidden">
+    <h2 id="packs-head">Specialists</h2>
+    <div id="packs"></div>
+    <h2>Recent runs</h2>
+    <div id="runs"></div>
+    <button class="link" id="switch-project">Another project</button>
+    <button class="link" id="forget">Forget this device</button>
+  </section>
+
+  <!-- 4 — starting a run -->
+  <section id="view-start" class="hidden">
+    <h2 id="start-head"></h2>
+    <p class="dim" id="start-desc"></p>
+    <div id="pr-field" class="hidden">
+      <label for="pr">Pull request</label>
+      <select id="pr"></select>
+    </div>
+    <div id="prompt-field" class="hidden">
+      <label for="prompt" id="prompt-label">What should this run focus on?</label>
+      <textarea id="prompt" placeholder="…"></textarea>
+    </div>
+    <p class="note">Unsupervised: nobody is at the terminal, so the run never stops
+      to ask. The gate runs by itself when it ends.</p>
+    <div style="height:14px"></div>
+    <button class="primary" id="start-go">Run unsupervised</button>
+    <p class="err" id="start-err"></p>
+    <button class="link" id="start-back">Back</button>
+  </section>
+
+  <!-- 5 — one run -->
+  <section id="view-run" class="hidden">
+    <h2 id="run-head">Run</h2>
+    <div class="counts" id="run-counts"></div>
+    <div class="feed" id="feed"></div>
+    <p class="err" id="run-err"></p>
+    <button class="link" id="run-back">Back to specialists</button>
+  </section>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  // ------------------------------------------------------------- state
+  const KEY_TOKEN = 'agency.token';
+  const KEY_PROJECT = 'agency.project';
+  const $ = (id) => document.getElementById(id);
+  const state = { token: null, project: null, packs: [], pack: null, stream: null };
+
+  try { state.token = localStorage.getItem(KEY_TOKEN); } catch (e) { /* private mode */ }
+  try { state.project = localStorage.getItem(KEY_PROJECT); } catch (e) { /* ditto */ }
+
+  function remember(key, value) {
+    try { value === null ? localStorage.removeItem(key) : localStorage.setItem(key, value); }
+    catch (e) { /* the daemon is the source of truth either way */ }
+  }
+
+  function show(name) {
+    for (const v of ['pair', 'projects', 'packs', 'start', 'run']) {
+      $('view-' + v).classList.toggle('hidden', v !== name);
+    }
+    window.scrollTo(0, 0);
+  }
+
+  // ------------------------------------------------------------- api
+  async function api(path, opts) {
+    const o = Object.assign({ headers: {} }, opts || {});
+    o.headers['Authorization'] = 'Bearer ' + state.token;
+    if (o.body) o.headers['Content-Type'] = 'application/json';
+    const r = await fetch(path, o);
+    const data = await r.json().catch(() => ({}));
+    if (r.status === 401) { signOut(); throw new Error('This device is not paired.'); }
+    if (!r.ok) throw new Error(data.message || ('HTTP ' + r.status));
+    return data;
+  }
+
+  function signOut() {
+    state.token = null;
+    remember(KEY_TOKEN, null);
+    $('meta').textContent = '';
+    show('pair');
+  }
+
+  // ------------------------------------------------------------- pairing
+  $('pair-go').onclick = async () => {
+    $('pair-err').textContent = '';
+    try {
+      const r = await fetch('/api/pair', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: $('code').value.trim(), name: $('name').value.trim() }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.message || 'Pairing failed.');
+      state.token = data.token;
+      remember(KEY_TOKEN, data.token);
+      await openProjects();
+    } catch (e) { $('pair-err').textContent = e.message; }
+  };
+
+  $('forget').onclick = () => { signOut(); };
+
+  // ------------------------------------------------------------- projects
+  async function openProjects() {
+    const data = await api('/api/projects');
+    const hours = Math.floor(data.activatedFor / 3600);
+    const mins = Math.round((data.activatedFor % 3600) / 60);
+    $('meta').textContent = (hours ? hours + ' h ' : '') + mins + ' min left';
+
+    const known = data.projects.map((p) => p.key);
+    if (state.project && known.indexOf(state.project) >= 0) return openPacks(state.project);
+    if (data.projects.length === 1) return openPacks(data.projects[0].key);
+
+    const box = $('projects');
+    box.innerHTML = '';
+    for (const p of data.projects) {
+      box.appendChild(row(p.name, p.slug || p.root, () => openPacks(p.key)));
+    }
+    show('projects');
+  }
+
+  $('switch-project').onclick = () => {
+    state.project = null;
+    remember(KEY_PROJECT, null);
+    openProjects().catch(fail);
+  };
+
+  // ------------------------------------------------------------- specialists
+  async function openPacks(key) {
+    state.project = key;
+    remember(KEY_PROJECT, key);
+    $('packs-head').textContent = key;
+
+    const packs = await api('/api/packs?project=' + encodeURIComponent(key));
+    state.packs = packs;
+    const box = $('packs');
+    box.innerHTML = '';
+    if (!packs.length) {
+      box.innerHTML = '<p class="dim">No specialist in this project yet. A pack is a '
+        + 'skill committed with the code — it is written at the machine, not here.</p>';
+    }
+    for (const p of packs) {
+      box.appendChild(row(p.title || p.name, p.description || p.skill,
+        () => openStart(p)));
+    }
+    show('packs');
+    loadRuns(key);
+  }
+
+  async function loadRuns(key) {
+    const box = $('runs');
+    box.innerHTML = '<p class="dim">…</p>';
+    try {
+      const data = await api('/api/runs?project=' + encodeURIComponent(key) + '&limit=6');
+      box.innerHTML = '';
+      if (!data.runs.length) box.innerHTML = '<p class="dim">Nothing has run here yet.</p>';
+      for (const r of data.runs) {
+        const when = (r.startedAt || '').replace('T', ' ').slice(0, 16);
+        box.appendChild(row(r.pack + ' · ' + r.status,
+          when + ' · ' + (r.targetLabel || '') + ' · ' + r.findings + ' findings',
+          () => openRun(r.id, r.pack, r.status === 'running')));
+      }
+    } catch (e) { box.innerHTML = '<p class="err">' + e.message + '</p>'; }
+  }
+
+  function row(title, sub, onClick) {
+    const el = document.createElement('button');
+    el.className = 'row';
+    el.innerHTML = '<span class="body"><span class="title"></span>'
+      + '<span class="sub"></span></span><span class="go">›</span>';
+    el.querySelector('.title').textContent = title;
+    el.querySelector('.sub').textContent = sub || '';
+    el.onclick = onClick;
+    return el;
+  }
+
+  // ------------------------------------------------------------- starting
+  async function openStart(pack) {
+    state.pack = pack;
+    $('start-head').textContent = pack.title || pack.name;
+    $('start-desc').textContent = pack.description || '';
+    $('start-err').textContent = '';
+    $('start-go').disabled = false;
+    $('start-go').textContent = 'Run unsupervised';
+
+    const wantsPrompt = pack.run.prompt !== 'none';
+    $('prompt-field').classList.toggle('hidden', !wantsPrompt);
+    $('prompt-label').textContent = pack.run.prompt === 'required'
+      ? 'What should this run work on? (required)'
+      : 'What should this run focus on? (optional)';
+    $('prompt').value = '';
+
+    const wantsPr = pack.run.target === 'pull-request';
+    $('pr-field').classList.toggle('hidden', !wantsPr);
+    show('start');
+    if (wantsPr) await fillPullRequests();
+  }
+
+  async function fillPullRequests() {
+    const sel = $('pr');
+    sel.innerHTML = '<option value="">…</option>';
+    try {
+      const prs = await api('/api/prs?project=' + encodeURIComponent(state.project)
+        + '&state=open&limit=20');
+      sel.innerHTML = '';
+      if (!prs.length) sel.innerHTML = '<option value="">no open pull request</option>';
+      for (const p of prs) {
+        const o = document.createElement('option');
+        o.value = String(p.number);
+        o.textContent = '#' + p.number + ' — ' + (p.title || '')
+          + (p.reviewed ? '  · already reviewed' : '');
+        sel.appendChild(o);
+      }
+    } catch (e) { $('start-err').textContent = e.message; }
+  }
+
+  $('start-back').onclick = () => openPacks(state.project).catch(fail);
+
+  $('start-go').onclick = async () => {
+    const pack = state.pack;
+    const body = { project: state.project, pack: pack.name, mode: 'unattended' };
+    const prompt = $('prompt').value.trim();
+    if (pack.run.prompt === 'required' && !prompt) {
+      $('start-err').textContent = 'This specialist needs to know what to work on.';
+      return;
+    }
+    if (prompt) body.prompt = prompt;
+    if (pack.run.target === 'pull-request') {
+      const pr = $('pr').value;
+      if (!pr) { $('start-err').textContent = 'Pick a pull request.'; return; }
+      body.pr = Number(pr);
+    }
+
+    $('start-err').textContent = '';
+    $('start-go').disabled = true;
+    // Preparation resolves the pull request and can build a worktree, so the
+    // answer takes seconds. Saying so beats a button that looks broken.
+    $('start-go').textContent = 'Preparing the run…';
+    try {
+      const data = await api('/api/run', { method: 'POST', body: JSON.stringify(body) });
+      openRun(data.runId, pack.name, true);
+    } catch (e) {
+      $('start-err').textContent = e.message;
+      $('start-go').disabled = false;
+      $('start-go').textContent = 'Run unsupervised';
+    }
+  };
+
+  // ------------------------------------------------------------- one run
+  function openRun(runId, packName, live) {
+    closeStream();
+    $('run-head').textContent = packName + ' · ' + runId.slice(0, 10);
+    $('run-counts').innerHTML = '';
+    $('feed').innerHTML = '';
+    $('run-err').textContent = '';
+    show('run');
+
+    const q = '?project=' + encodeURIComponent(state.project)
+      + '&token=' + encodeURIComponent(state.token);
+    if (!live) {
+      api('/api/run/' + runId + q).then(paintState).catch(fail);
+    }
+    // The stream is opened either way: a finished run replays what the agent
+    // did and closes itself, which is the same screen with no waiting.
+    const es = new EventSource('/api/run/' + runId + '/events' + q);
+    state.stream = es;
+    es.onmessage = (e) => {
+      $('run-err').textContent = '';   // whatever the last drop said, it is back
+      append(JSON.parse(e.data));
+    };
+    es.addEventListener('done', (e) => {
+      closeStream();                  // or the browser reconnects and replays it
+      paintState(JSON.parse(e.data));
+    });
+    es.onerror = () => {
+      // EventSource reconnects on its own and the server resumes from
+      // Last-Event-ID, so this is a note, not a failure.
+      $('run-err').textContent = 'Connection lost — reconnecting.';
+    };
+  }
+
+  function closeStream() {
+    if (state.stream) { state.stream.close(); state.stream = null; }
+  }
+
+  function append(ev) {
+    const feed = $('feed');
+    const el = document.createElement('div');
+    el.className = 'ev ' + ev.kind;
+    const k = document.createElement('span');
+    k.className = 'k';
+    k.textContent = ev.kind === 'tool' ? (ev.tool || 'tool') : ev.kind;
+    const d = document.createElement('span');
+    d.className = 'd';
+    d.textContent = ev.detail || '';
+    el.appendChild(k); el.appendChild(d);
+    const stuck = window.innerHeight + window.scrollY >= document.body.scrollHeight - 60;
+    feed.appendChild(el);
+    if (stuck) window.scrollTo(0, document.body.scrollHeight);
+  }
+
+  function paintState(s) {
+    $('run-err').textContent = '';
+    const c = s.counts || {};
+    const tiles = [['status', s.status]];
+    if (c.raw !== undefined) tiles.push(['written', c.raw]);
+    if (c.kept !== undefined) tiles.push(['kept', c.kept]);
+    if (c.gated !== undefined) tiles.push(['gated out', c.gated]);
+    if (c.duplicates !== undefined) tiles.push(['duplicates', c.duplicates]);
+    if (s.denied) tiles.push(['refused calls', s.denied]);
+    const box = $('run-counts');
+    box.innerHTML = '';
+    for (const [label, value] of tiles) {
+      const el = document.createElement('div');
+      el.className = 'count';
+      el.innerHTML = '<b></b><span></span>';
+      el.querySelector('b').textContent = String(value);
+      el.querySelector('span').textContent = label;
+      box.appendChild(el);
+    }
+    if (s.exitReason) $('run-err').textContent = s.exitReason;
+  }
+
+  $('run-back').onclick = () => { closeStream(); openPacks(state.project).catch(fail); };
+
+  // ------------------------------------------------------------- start
+  function fail(e) {
+    const target = document.querySelector('section:not(.hidden) .err');
+    if (target) target.textContent = e.message;
+  }
+
+  if (!state.token) show('pair');
+  else openProjects().catch((e) => { show('pair'); $('pair-err').textContent = e.message; });
+})();
+</script>
+</body>
+</html>
