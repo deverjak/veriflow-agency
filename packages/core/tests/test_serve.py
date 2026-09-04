@@ -21,6 +21,7 @@ import json
 import time
 import http.client
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -710,3 +711,61 @@ def test_the_short_magicdns_name_keeps_working_over_http(daemon):
     status, location = raw_get(daemon, "/", {"X-Forwarded-Host": "laptop"})
 
     assert status == 200 and location is None
+
+
+# --------------------------------------------------- the run's documents
+
+def test_a_run_lists_the_documents_it_actually_wrote(daemon, project, make_run):
+    """The list used to be three hardcoded names. A pack that answers a
+    question writes answer.md, and the phone never heard about it."""
+    token = pair(daemon)
+    run = make_run(status="ok")
+    (run.dir / "answer.md").write_text("the three tickets", encoding="utf-8")
+    (run.dir / "summary.md").write_text("what happened", encoding="utf-8")
+    (run.dir / "run.json").write_text("{}", encoding="utf-8")
+
+    code, data = call(daemon, "GET",
+                      f"/api/run/{run.id}?project={project.root.name}", token)
+
+    assert code == 200
+    assert data["outputs"] == ["answer.md", "summary.md"], "only what it wrote, and only prose"
+
+
+def test_a_document_can_be_read_from_the_phone(daemon, project, make_run):
+    token = pair(daemon)
+    run = make_run(status="ok")
+    (run.dir / "answer.md").write_text("# Top 3\n\n480, 343, 495\n", encoding="utf-8")
+
+    code, data = call(daemon, "GET",
+                      f"/api/run/{run.id}/output?project={project.root.name}"
+                      f"&name=answer.md", token)
+
+    assert code == 200 and data["clipped"] is False
+    assert data["text"] == "# Top 3\n\n480, 343, 495\n"
+
+
+def test_a_document_the_run_did_not_write_is_not_served(daemon, project, make_run):
+    """The listing is the guard: a name that is not in it is not a file to
+    read, which is also why there is no path here to traverse."""
+    token = pair(daemon)
+    run = make_run(status="ok")
+    (run.dir / "answer.md").write_text("answer", encoding="utf-8")
+
+    for name in ("run.json", "../../../../etc/passwd", r"..\..\run.json", ""):
+        code, data = call(daemon, "GET",
+                          f"/api/run/{run.id}/output?project={project.root.name}"
+                          f"&name={urllib.parse.quote(name)}", token)
+        assert code == 404 and data["reason"] == "no-output", name
+
+
+def test_a_long_document_is_clipped_rather_than_sent_whole(daemon, project, make_run):
+    token = pair(daemon)
+    run = make_run(status="ok")
+    (run.dir / "answer.md").write_text("x" * (serve.OUTPUT_MAX + 10), encoding="utf-8")
+
+    code, data = call(daemon, "GET",
+                      f"/api/run/{run.id}/output?project={project.root.name}"
+                      f"&name=answer.md", token)
+
+    assert code == 200 and data["clipped"] is True
+    assert len(data["text"]) == serve.OUTPUT_MAX

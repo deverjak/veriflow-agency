@@ -74,6 +74,13 @@
   label { display: block; font-size: 13px; color: var(--dim); margin: 14px 0 6px; }
   .note { font-size: 13px; color: var(--dim); margin: 10px 0 0; }
   .err { color: var(--err); font-size: 14px; margin: 12px 0; white-space: pre-wrap; }
+  /* Why the run ended is an explanation, not a failure — it was painted in the
+     error colour, which made a finished run look broken. */
+  .why { color: var(--dim); font-size: 14px; margin: 12px 0; white-space: pre-wrap; }
+  .doc { background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+         padding: 14px; margin: 8px 0; white-space: pre-wrap; word-break: break-word;
+         font: 14px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  .docs { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 0; }
   .feed { font: 13px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace;
           margin-top: 12px; }
   .ev { display: flex; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--line); }
@@ -153,6 +160,9 @@
     <h2 id="run-head">Run</h2>
     <div class="counts" id="run-counts"></div>
     <div class="feed" id="feed"></div>
+    <p class="why" id="run-why"></p>
+    <div class="docs" id="run-docs"></div>
+    <div id="run-doc"></div>
     <p class="err" id="run-err"></p>
     <button class="link" id="run-back">Back to projects</button>
   </section>
@@ -165,7 +175,7 @@
   // ------------------------------------------------------------- state
   const KEY_TOKEN = 'agency.token';
   const $ = (id) => document.getElementById(id);
-  const state = { token: null, project: null, pack: null, stream: null };
+  const state = { token: null, project: null, pack: null, stream: null, runId: null };
 
   try { state.token = localStorage.getItem(KEY_TOKEN); } catch (e) { /* private mode */ }
 
@@ -408,7 +418,11 @@
     $('run-head').textContent = packName + ' · ' + state.project;
     $('run-counts').innerHTML = '';
     $('feed').innerHTML = '';
+    $('run-docs').innerHTML = '';
+    $('run-doc').innerHTML = '';
+    $('run-why').textContent = '';
     $('run-err').textContent = '';
+    state.runId = runId;
     show('run');
 
     const q = '?project=' + encodeURIComponent(state.project)
@@ -473,7 +487,37 @@
       el.querySelector('span').textContent = label;
       box.appendChild(el);
     }
-    if (s.exitReason) $('run-err').textContent = s.exitReason;
+    $('run-why').textContent = s.exitReason || '';
+    paintDocs(s.outputs || []);
+  }
+
+  // The run's own documents. A summary that says "answered in answer.md" is
+  // only an answer if answer.md can be opened from here.
+  function paintDocs(names) {
+    const box = $('run-docs');
+    box.innerHTML = '';
+    for (const name of names) {
+      const b = document.createElement('button');
+      b.className = 'link';
+      b.textContent = name;
+      b.onclick = () => openDoc(name);
+      box.appendChild(b);
+    }
+  }
+
+  function openDoc(name) {
+    const box = $('run-doc');
+    box.innerHTML = '';
+    const q = '?project=' + encodeURIComponent(state.project)
+      + '&token=' + encodeURIComponent(state.token)
+      + '&name=' + encodeURIComponent(name);
+    api('/api/run/' + state.runId + '/output' + q).then((d) => {
+      const el = document.createElement('div');
+      el.className = 'doc';
+      el.textContent = d.text + (d.clipped ? '\n\n[…truncated]' : '');
+      box.appendChild(el);
+      el.scrollIntoView({ block: 'nearest' });
+    }).catch(fail);
   }
 
   $('run-back').onclick = () => { closeStream(); openHome().catch(fail); };

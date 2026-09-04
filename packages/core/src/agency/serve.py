@@ -72,6 +72,10 @@ SSE_HEARTBEAT = 20
 #: commits one; a pull-to-refresh should not cost a subprocess per project.
 PACKS_TTL = 60
 
+# A document meant to be read on a phone. The cap is not about disk: it is the
+# point past which handing the whole thing to a browser stops being a kindness.
+OUTPUT_MAX = 200_000
+
 
 # ---------------------------------------------------------------- state
 
@@ -766,6 +770,15 @@ class Handler(BaseHTTPRequestHandler):
                 # resume that will one day replay an hour of tool calls.
                 resume = self.headers.get("Last-Event-ID") or (query.get("offset") or ["0"])[0]
                 return self._events(project, run, _int(resume))
+            if tail == "output":
+                name = (query.get("name") or [""])[0]
+                if name not in _outputs(run):
+                    return self._fail(404, "no-output",
+                                      f"This run wrote no {name!r}.")
+                text = (run.dir / name).read_text(encoding="utf-8", errors="replace")
+                return self._send(200, {"ok": True, "name": name,
+                                        "text": text[:OUTPUT_MAX],
+                                        "clipped": len(text) > OUTPUT_MAX})
             if not tail:
                 return self._send(200, {"ok": True, **_run_state(run)})
 
@@ -977,9 +990,26 @@ def _run_state(run) -> dict:
         "denied": (agent.get("denied") or {}).get("count") or 0,
         "counts": rec.get("counts"),
         "findings": len(run.findings()),
-        "outputs": [n for n in ("summary.md", "handoff.md", "agent.md")
-                    if (run.dir / n).is_file()],
+        "outputs": _outputs(run),
     }
+
+
+def _outputs(run) -> list[str]:
+    """The documents this run left behind, as they are on disk.
+
+    This used to be a fixed list of the three names a review pack happens to
+    write. A pack that answers a question writes `answer.md`, and the phone
+    had no way to learn it existed -- the summary said "answered in answer.md"
+    and that was the end of the trail.
+
+    It doubles as the guard for reading one: a name is served only if it came
+    from this listing, so there is no path to traverse.
+    """
+    try:
+        return sorted(f.name for f in run.dir.iterdir()
+                      if f.is_file() and f.suffix == ".md")
+    except OSError:
+        return []
 
 
 # ---------------------------------------------------------------- entry
