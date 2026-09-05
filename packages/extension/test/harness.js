@@ -1202,6 +1202,45 @@ check('the author pack the client names is the one the repository ships', () => 
     'the author writes source, not findings — a sink would have nothing to send');
 });
 
+check('a project without the author pack is offered it, not told to copy a directory', () => {
+  // The regression this guards is not a crash — it is a dead end. Every new
+  // repository starts without `author`, and the panel used to answer that
+  // with a `cp -r` from a repository the user may not even have checked out.
+  const pkg = require(path.join(SRC, '..', 'package.json'));
+  const ids = pkg.contributes.commands.map((c) => c.command);
+  assert.ok(ids.includes('agency.pack.installAuthor'),
+    'the bootstrap has to be a command, or the welcome screen cannot offer it');
+
+  const welcome = pkg.contributes.viewsWelcome.find((w) => w.view === 'agency.tools');
+  assert.ok(welcome.contents.includes('command:agency.pack.installAuthor'),
+    'the one screen shown when there are no specialists must lead out of that state');
+  assert.ok(!/cp -r|copy `?packs\//i.test(welcome.contents),
+    'copying a directory by hand is what this replaced');
+});
+
+checkAsync('the bootstrap goes through `agency init`, and asks for nothing else', async () => {
+  const cli = require(path.join(SRC, 'cli.js'));
+  const cp = require('child_process');
+  const original = cp.execFile;
+  const calls = [];
+  cp.execFile = (bin, args, opts, done) => {
+    calls.push({ bin, args, cwd: opts.cwd });
+    done(null, '{"pack":{"created":true}}', '');
+  };
+  try {
+    const r = await cli.init('C:/project');
+    assert.ok(r.ok);
+    // `--json` is added by the client, as for every other command.
+    assert.deepStrictEqual(calls[0].args, ['init', '--json']);
+    assert.strictEqual(calls[0].cwd, 'C:/project');
+
+    await cli.init('C:/project', { force: true });
+    assert.deepStrictEqual(calls[1].args, ['init', '--force', '--json']);
+  } finally {
+    cp.execFile = original;
+  }
+});
+
 checkAsync('writing a specialist asks the description and the runner, then runs the author', async () => {
   const review = require(path.join(SRC, 'review.js'));
   const AUTHOR_PACK = {

@@ -110,6 +110,17 @@ const ingest = (cwd, runId) =>
   call(cwd, runId ? ['ingest', '--run', runId] : ['ingest'], { timeout: 180000 });
 
 /**
+ * The bootstrap — `agency init`. Copies the one generic pack, `author`, into
+ * the project as a skill, and keeps run records out of git.
+ *
+ * The only write in this client that puts a file into the user's repository.
+ * It is not an installer for packs in general: every other specialist is
+ * written for this project, by that one, in a run like any other.
+ */
+const init = (cwd, { force = false } = {}) =>
+  call(cwd, force ? ['init', '--force'] : ['init'], { timeout: 60000 });
+
+/**
  * The deterministic preparation of a run. Returns where it lives, where its
  * worktree is, and the exact command to finish it with — the shape of that
  * command belongs to the CLI, not to this client. If the client assembled it
@@ -159,5 +170,5 @@ const cleanup = (cwd, { run, unfinished, discard, all, force } = {}) => {
 module.exports = {
   bin, call, probe,
   doctor, packs, status, metrics, findings, prs,
-  note, ingest, run, cleanup,
+  note, ingest, init, run, cleanup,
 };

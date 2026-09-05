@@ -457,16 +457,60 @@ function activate(context) {
   // again, which is exactly what agency-v1 §5 deleted. All that is decided
   // here is the two things a run needs anyway — the assignment and the
   // runner — and the rest happens in the terminal, where the agent can ask.
+  // The one thing a fresh repository cannot do for itself. `author` is
+  // generic — its subject is this system, not any project — so the core
+  // ships with it and `agency init` copies it in. Everything else stays
+  // uninstalled: the specialists this project actually needs are written
+  // here, by the run below, against this repository.
+  //
+  // Returns the pack once it is really there, so the caller can go on rather
+  // than send the user round the panel again.
+  const installAuthor = async () => {
+    const r = await cli.init(state.snapshot.cwd);
+    if (!r.ok) {
+      vscode.window.showErrorMessage(`Agency: \`agency init\` failed — ${r.error}`);
+      return null;
+    }
+    await refresh();
+    return (state.snapshot.packs || []).find((x) => x.name === review.AUTHOR_PACK) || null;
+  };
+
+  reg('agency.pack.installAuthor', async () => {
+    if (!state.snapshot.probe.ok) return showNotReady();
+    const author = await installAuthor();
+    if (!author) return;
+    vscode.window.showInformationMessage(
+      `Agency: \`.claude/skills/agency-${review.AUTHOR_PACK}/\` is in the working tree — `
+      + 'read it, commit it, and write this project’s first specialist with it.',
+      'Write a new specialist…',
+    ).then((a) => {
+      if (a) vscode.commands.executeCommand('agency.pack.create');
+    });
+  });
+
   reg('agency.pack.create', async () => {
     if (!state.snapshot.probe.ok) return showNotReady();
 
-    const author = (state.snapshot.packs || []).find((x) => x.name === review.AUTHOR_PACK);
+    let author = (state.snapshot.packs || []).find((x) => x.name === review.AUTHOR_PACK);
     if (!author) {
-      vscode.window.showWarningMessage(
-        `Agency: this project has no “${review.AUTHOR_PACK}” pack, and nothing here installs `
-        + 'one. Copy `packs/author/` from the agency repository to '
-        + `\`.claude/skills/agency-${review.AUTHOR_PACK}/\` and reload.`);
-      return;
+      // Modal, because the answer decides whether anything happens at all —
+      // and because a notification that scrolls away is how this ended up
+      // being a copy instruction nobody followed.
+      const yes = 'Put it in this project';
+      const pick = await vscode.window.showWarningMessage(
+        `Writing a specialist is itself a run, and this project has no “${review.AUTHOR_PACK}” `
+        + 'pack to do it with.',
+        {
+          modal: true,
+          detail: `${review.AUTHOR_PACK} is the one pack that is not written per project — it is `
+            + 'what writes the others. It arrives as an ordinary skill directory in the working '
+            + 'tree, uncommitted, for you to read before you keep it.',
+        },
+        yes,
+      );
+      if (pick !== yes) return;
+      author = await installAuthor();
+      if (!author) return;
     }
 
     // Asked here rather than through review.askPrompt, whose wording is

@@ -155,6 +155,24 @@ pwsh scripts/install.ps1
 Installs the core via `uv` (editable) and the extension as a VSIX. Individually:
 `-Core`, `-Extension`.
 
+Then, once per project:
+
+```
+cd <project>
+agency init
+```
+
+That copies `author` into `.claude/skills/agency-author/` and writes
+`.agency/.gitignore` so run records stay out of git. Nothing else is
+installed and nothing is configured: from here on the project writes its own
+specialists with `agency run author --prompt "…"`, or with **Write a new
+specialist…** in the panel, which offers the same thing when the pack is
+missing.
+
+(In *this* repository the same command would put a second copy of
+`packs/author` under `.claude/skills/` — the source and the copy would then
+drift apart, so run it in the projects being worked on, not here.)
+
 Prerequisites: `git`, `uv`, VS Code 1.85+; a reviewer additionally needs `gh`
 (logged in) and a code graph tool; QA needs Playwright's browsers installed.
 `agency doctor` checks all of it — **before** a run, not halfway through —
@@ -171,9 +189,9 @@ veriflow-agency/                     this repository
                                      Knows nothing about any target project.
   packages/extension/                VIEWER — runs, findings next to the line, read-only.
                                      Talks only to `agency … --json`.
-  packs/                             EXAMPLES — reference copies of main-panel's and kvesteros-platform's packs, for the next project;
-                                     `author/` is the exception: generic, copied unchanged, and it writes the others.
-                                     Not bundled, not installed.
+  packs/                             EXAMPLES — reference copies of main-panel's and kvesteros-platform's packs, for the next project.
+                                     Not bundled, not installed — except `author/`, which is generic, ships with the
+                                     core, is what `agency init` copies in, and is what writes all the others.
 
 <target-project>/
   .claude/skills/agency-po/          PACK = skill. Committed and versioned with the project.
@@ -190,7 +208,13 @@ veriflow-agency/                     this repository
 There is no `~/.agency/`. There is no project configuration file. A pack
 lives where Claude Code already looks for a skill, and the runner finds it
 there too — `pack.json` next to `SKILL.md`. No `agency add`, no
-`installed.json`, no install step at all.
+`installed.json`, no registry of who is hired.
+
+The one exception is the bootstrap, and it is an exception on purpose: a
+fresh repository has no pack, and the pack that writes packs cannot write
+itself. `agency init` copies `author` in — one skill directory, uncommitted,
+for you to read and commit like any other source — and everything after that
+is written by it, here, against this repository.
 
 ### The runner — `agency --help`
 
@@ -198,6 +222,7 @@ there too — `pack.json` next to `SKILL.md`. No `agency add`, no
 agency — specialists for this repository — skills in .claude/skills/agency-<name>/.
 Attended, on your own login, with evidence-backed findings that stay.
 
+  init        put the one generic pack — `author` — into this project
   packs       the specialists in this project
   doctor      check the prerequisites BEFORE a run starts
   prs         pull requests to review — open and merged
@@ -217,7 +242,9 @@ Attended, on your own login, with evidence-backed findings that stay.
   serve       open this project to a paired phone on the tailnet, for a while
 ```
 
-Seventeen commands. There is no `init`, `add`, `hire`, `fire`, `roster`,
+Eighteen commands. `init` is the whole of the setup and it takes no
+decisions: it copies the one generic pack into the project and keeps run
+records out of git. There is no `add`, `hire`, `fire`, `roster`,
 `providers`, `projects`, `config`, `brief`, `backlog`, or `export` — a
 one-way push to a board is the pack's own `sink`, called by `ingest`, not a
 separate step. `agency run <pack>`
@@ -350,17 +377,19 @@ instance, has the board's field names and constants written into it — copy
 it and change the constants). Run `agency doctor` in the target project;
 it reports what is still missing.
 
-The one pack worth copying **unchanged** is `packs/author` — it is the only
-generic one, because its subject is this system rather than any project:
+The one pack that is never copied by hand is `author` — it is the only
+generic one, because its subject is this system rather than any project, so
+it ships with the core and a command puts it in place:
 
 ```
-cp -r packs/author <target-project>/.claude/skills/agency-author
+agency init
 ```
 
 After that, `agency run author --prompt "…"` writes the project's own
-specialists in place, and there is nothing left to copy by hand. This is
-also why the extension knows one pack by name: a run that writes a
-specialist cannot be started from a row that does not exist yet.
+specialists in place, and there is nothing left to copy at all. This is also
+why the extension knows one pack by name: a run that writes a specialist
+cannot be started from a row that does not exist yet — so the row's absence
+is what offers the bootstrap.
 
 ### Contracts
 
@@ -592,7 +621,7 @@ what happened and shows it, it does not decide.
 |---|---|
 | `packages/core/` | the runner and CLI (Python, `uv`) |
 | `packages/extension/` | the VS Code extension (plain JS, no build step) |
-| `packs/` | reference copies of packs living in `main-panel` and `kvesteros-platform`, for the next project to copy — plus `author/`, the generic one that writes the rest |
+| `packs/` | reference copies of packs living in `main-panel` and `kvesteros-platform`, for the next project to copy — plus `author/`, the generic one, which ships with the core and is what `agency init` puts into a project |
 | `schemas/` | `run.v1`, `finding.v1` — the contract across the boundary |
 | `docs/` | decisions and plans, including what changed in them and why |
 

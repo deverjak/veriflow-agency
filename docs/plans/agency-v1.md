@@ -289,6 +289,7 @@ Každý krok končí zelenou sadou testů a funkčním `agency` v main-panelu; n
 
 - `packs.available(project)` čte `.claude/skills/*/pack.json`; `packs.py` je ~60 řádků; `load(name)` bez `--from`.
 - Pryč: `plan`/`apply`/hash, `installed.json`, `cmd_add`, `materialize_pack` se zúží na „zkopíruj `.claude/skills/agency-<pack>/` do worktree" (recenzent ve worktree na cizí hlavičce skill potřebuje), `[tool.hatch…force-include]` packů z `pyproject.toml` — schémata se bundlují dál.
+- **Dodatek 2026-09-05 — `agency init`.** Jedna výjimka z „nic se neinstaluje", protože ji vynutil první nový repozitář: bez `author` nejde napsat první pack, a pack, který píše packy, se nenapíše sám. Bundluje se proto **jediný** pack (`packs/author` → `agency/_bundled/packs/author`) a `agency init` ho zkopíruje do `.claude/skills/agency-author/` + založí `.agency/.gitignore` s `runs/`. Idempotentní, bez konfigurace, bez `installed.json`, bez hashe — co po něm zůstane, je necommitnutý adresář v pracovním stromu. Ostatní packy zůstávají příklady: nesou fakta jednoho projektu a kopírovat je nezměněné by najalo specialistu, který soudí cizí repozitář.
 - `pack.json` podle §3.2: plochý, 11 klíčů; `run_policy` čte přímo. `agency packs` a `doctor` nad tím.
 - main-panel: do každého `.claude/skills/agency-*/` přibude `pack.json`; smažou se `.agency/{po,qa,legal,review-graph}.json`, `hires.json`, `installed.json`; `.gitignore` z `.agency/` na `.agency/runs/` + `.agency/*.local.json`.
 
@@ -358,7 +359,7 @@ Dohromady **~6 dní**.
 ## 6. Co se vědomě nedělá
 
 - **Nepřepisuje se od nuly.** Brána, dedup, kotvy, řetěz, stream a ledger jsou správně a mají testy; „od začátku" se týká definice, ne souborů.
-- **Žádný generic pack.** Druhý projekt = kopie. Třetí ukáže, co je společné.
+- **Žádný generic pack — kromě `author`.** Druhý projekt = kopie. Třetí ukáže, co je společné. Výjimkou je `author`, jehož předmětem je tenhle systém, ne projekt: ten se bundluje a instaluje `agency init` (viz dodatek v Kroku 2).
 - **Žádný registr ničeho.** Providery jsou tabulka, packy jsou adresáře, projekt je `cwd`.
 - **Žádná konfigurace.** Co se má změnit, změní se ve skillu, ve skriptu nebo v kódu. Když někdo napíše `.agency/<něco>.json`, je to chyba návrhu, ne feature request.
 - **Extension nic nenastavuje.** Ukazuje a spouští.
@@ -373,7 +374,7 @@ Dohromady **~6 dní**.
 |---|---|
 | *Specialista — Nainstalovatelný odborník s vlastní metodou. Jedna verze metody pro všechny projekty.* | *Specialista — skill v repozitáři projektu, s fakty projektu natvrdo. Jedna verze na projekt; další projekt dostane kopii.* |
 | pravidlo 5: *Metoda patří specialistovi, stav patří projektu.* | *Jádro patří všem, pack patří projektu. Sdílený je kontrakt, ne konfigurace.* |
-| *Nový projekt je hotový za deset minut* přes `agency init` + `agency add` | zkopíruj čtyři adresáře, přepiš Project facts, `agency doctor` |
+| *Nový projekt je hotový za deset minut* přes `agency init` + `agency add` | `agency init` (jen `author`), zbytek si projekt napíše sám přes `agency run author`; hotové packy se kopírují a přepíší se jim Project facts, pak `agency doctor` |
 | „Potom — obchod se specialisty" mezi věcmi, které mají spouštěč | není a nebude; specialisty se kopírují |
 
 Zbylých pět pravidel platí beze změny — a Agency v1 je poprvé plní všech pět naráz: bez důkazu není nález (brána), nic ven bez člověka (`triage` → `export`), neopakovat se (dedup + živý board), bez tebe se neběhá (attended `run`, řetěz jen když sedíš u terminálu), vypnutí nic neztratí (`.agency/knowledge/` v gitu).

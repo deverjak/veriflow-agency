@@ -96,7 +96,7 @@
       {
         "view": "agency.tools",
         "when": "agency.ready",
-        "contents": "No specialist found in this project.\n\nA pack is a skill directory — `pack.json` next to `SKILL.md`, under `.claude/skills/agency-<name>/`. Nothing here installs one; it is written for this project and committed with it.\n\nWriting one is a code-writing task, so an agent does it: describe what the specialist should do, and it reads the repository, asks you the rest in the terminal and writes the directory for you to review.\n\n[Write a new specialist](command:agency.pack.create)\n\nThat needs the `author` pack itself — copy `packs/author/` from the agency repository into `.claude/skills/agency-author/` once."
+        "contents": "No specialist found in this project.\n\nA pack is a skill directory — `pack.json` next to `SKILL.md`, under `.claude/skills/agency-<name>/`. It is written for this project and committed with it, not installed.\n\nWriting one is a code-writing task, so an agent does it: describe what the specialist should do, and it reads the repository, asks you the rest in the terminal and writes the directory for you to review.\n\n[Write a new specialist](command:agency.pack.create)\n\nThat first run is done by `author` — the one generic pack, and the only one this tool brings with it. It is offered above, or on its own:\n\n[Put the author pack in this project](command:agency.pack.installAuthor)"
       }
     ],
     "configuration": {
@@ -222,6 +222,12 @@
         "title": "Write a new specialist…",
         "category": "Agency",
         "icon": "$(person-add)"
+      },
+      {
+        "command": "agency.pack.installAuthor",
+        "title": "Put the author pack in this project",
+        "category": "Agency",
+        "icon": "$(cloud-download)"
       },
       {
         "command": "agency.view.tools.focus",

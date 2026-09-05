@@ -31,6 +31,46 @@ def _project(args) -> config.Project:
     return config.require(getattr(args, "repo", None))
 
 
+# ---------------------------------------------------------------- init
+
+def cmd_init(args) -> int:
+    """The bootstrap — and deliberately the only thing here that installs anything.
+
+    A project still has no configuration afterwards. What it gets is one
+    generic skill directory in its working tree, uncommitted, to read and
+    commit like any other source, plus the one .gitignore line that keeps run
+    records out of git. Everything else about this project is written BY that
+    pack, in this repository, against this repository.
+
+    Safe to run twice: an `agency-author` already there is left alone.
+    """
+    project = _project(args)
+    seeded = packs.seed(project, packs.AUTHOR, force=args.force)
+    ignored = packs.ignore_run_records(project)
+    nxt = f'agency run {packs.AUTHOR} --prompt "what the new specialist should do"'
+    data = {"project": project.name, "pack": seeded,
+            "gitignore": ignored, "next": nxt}
+
+    def line(icon: str, path: str, note: str) -> None:
+        print(f"  {icon} {path}")
+        print(f"      {out.dim(note)}")
+
+    def human():
+        print(f"\n  {out.bold(project.name)}\n")
+        if seeded["created"]:
+            line(out.ok("✓"), seeded["path"],
+                 "the one generic pack — it writes this project’s own specialists")
+        else:
+            line(out.warn("!"), seeded["path"],
+                 "already here, left as it is — `--force` copies over it")
+        if ignored:
+            line(out.ok("✓"), ".agency/.gitignore",
+                 "run records stay out of git; knowledge/ is committed on purpose")
+        print(f"\n  {out.dim(nxt)}\n")
+
+    return _emit(args, data, human)
+
+
 # ---------------------------------------------------------------- packs
 
 def cmd_packs(args) -> int:
@@ -87,7 +127,11 @@ def cmd_doctor(args) -> int:
         if value:
             check(name, True, value, fatal=needed(tool))
         elif needed(tool):
-            check(name, False, missing)
+            # Fatal only once somebody is hired. A project with no packs has no
+            # run to fail, and the one command it does have — `agency init` —
+            # needs none of this; saying "a run would fail" there is answering
+            # about a run nobody can start yet.
+            check(name, False, missing, fatal=bool(hired))
         else:
             check(name, True, "not needed by the specialists in this project", fatal=False)
 
@@ -105,9 +149,13 @@ def cmd_doctor(args) -> int:
     login = proc.gh_login()
     tool_check("gh auth", "gh", f"signed in as {login}" if login else None,
                "not signed in — `gh auth login`")
-    check("repo slug", project.slug or not hired,
-          project.slug or "no remote — the specialists in this project do not need one",
-          fatal=bool(hired))
+    # A slug is a GitHub fact, so it is wanted by whoever wants `gh` — the same
+    # question, asked once. A pack that only reads the working tree does not
+    # care that there is no remote, and marking that fatal is how a project
+    # that has just run `agency init` gets told a run would fail when nothing
+    # about it would.
+    tool_check("repo slug", "gh", project.slug,
+               "no remote — the specialists in this project need one")
 
     if needed("code-review-graph"):
         g = graph.state(project.root).data
@@ -163,7 +211,8 @@ def cmd_doctor(args) -> int:
         if fatal:
             print(f"  {out.err('A run would fail.')} Fix the items marked ✗.\n")
         else:
-            hints = [f"agency run {p.name}{_run_hint(p)}" for p in hired] or ["agency packs"]
+            # No packs yet: the bootstrap is the only move there is.
+            hints = [f"agency run {p.name}{_run_hint(p)}" for p in hired] or ["agency init"]
             print(f"  {out.ok('Ready.')}  " +
                   f"  {out.dim('·')}  ".join(out.dim(h) for h in hints) + "\n")
 
@@ -1680,6 +1729,12 @@ def build_parser() -> argparse.ArgumentParser:
                     "Attended, on your own login, with evidence-backed findings that stay.",
     )
     sub = p.add_subparsers(dest="cmd", required=True)
+
+    s = sub.add_parser("init", parents=[common],
+                       help="put the one generic pack — `author` — into this project")
+    s.add_argument("--force", action="store_true",
+                   help="copy it in again over the one already there")
+    s.set_defaults(fn=cmd_init)
 
     s = sub.add_parser("packs", parents=[common], help="the specialists in this project")
     s.set_defaults(fn=cmd_packs)

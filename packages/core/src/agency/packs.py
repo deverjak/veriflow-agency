@@ -14,13 +14,20 @@ reads them; the core never does.
 
 from __future__ import annotations
 
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
 from .config import Project
-from .util import read_json
+from .util import bundled, posix, read_json
 
 PROMPT_MODES = ("required", "optional", "none")
+
+# The one pack that ships with the tool. Its subject is this system rather
+# than any project, which is what makes it copyable unchanged — and it is
+# the pack that writes the project-specific ones, so without it a fresh
+# repository has no way to get its first specialist. See `seed` below.
+AUTHOR = "author"
 
 
 def graph_policy(value) -> dict | None:
@@ -117,6 +124,71 @@ def load(name: str, project: Project) -> Pack:
         if p.name == name:
             return p
     known = ", ".join(p.name for p in available(project)) or "(none)"
+    # The bootstrap is the one missing pack this tool can do something about,
+    # so it is the one that gets a command instead of a path to copy by hand.
+    hint = (f"\n“{AUTHOR}” is the generic one — `agency init` puts it here."
+            if name == AUTHOR else "")
     raise SystemExit(
         f"Unknown pack “{name}” in {project.name}. Available: {known}\n"
-        f"A pack is a skill: {project.skills_dir}/agency-{name}/pack.json")
+        f"A pack is a skill: {project.skills_dir}/agency-{name}/pack.json{hint}")
+
+
+# ---------------------------------------------------------------- the bootstrap
+#
+# `agency init` is not an installer, and this is the whole of it: one generic
+# pack copied into the project as ordinary, uncommitted source. Every other
+# pack in the agency repository is an EXAMPLE — its `SKILL.md` carries one
+# project's facts, and copying it unchanged would hire a specialist that
+# judges the wrong repository. Those get written per project, by `author`,
+# which is exactly why `author` is the one worth shipping.
+
+RUN_RECORDS_IGNORE = """\
+# Run records: evidence, transcripts and findings.json from one machine at
+# one moment, about commits this clone may not even have. The memory beside
+# them (`knowledge/`) is committed on purpose — that is the part a colleague,
+# and the next run, are meant to read.
+runs/
+"""
+
+
+def seed(project: Project, name: str = AUTHOR, force: bool = False) -> dict:
+    """Copies a bundled pack into the project as a skill.
+
+    Idempotent: a pack already there is LEFT as it is, because by then it is
+    the project's own file — possibly edited, certainly committable — and
+    this command has no business overwriting it. `force` copies over it, and
+    even then only adds and replaces files, never deletes one the project put
+    there itself.
+    """
+    src = bundled("packs", name)
+    if not (src / "pack.json").is_file():
+        raise SystemExit(
+            f"This installation carries no “{name}” pack ({src}). Reinstall the core: "
+            f"`uv tool install --editable <veriflow-agency>/packages/core`.")
+
+    dst = project.skills_dir / f"agency-{name}"
+    rel = posix(dst.relative_to(project.root))
+    if dst.exists() and not force:
+        return {"pack": name, "path": rel, "created": False, "files": []}
+
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(src, dst, dirs_exist_ok=True)
+    files = sorted(posix(f.relative_to(project.root))
+                   for f in dst.rglob("*") if f.is_file())
+    return {"pack": name, "path": rel, "created": True, "files": files}
+
+
+def ignore_run_records(project: Project) -> bool:
+    """Keeps `.agency/runs/` out of git. True when it wrote the file.
+
+    In `.agency/.gitignore` rather than the project's own, so that a project
+    that has never heard of this tool does not get its root file rewritten,
+    and so that deleting `.agency/` takes the rule with it. An existing file
+    is never touched — by then it is the project's answer, not ours.
+    """
+    path = project.agency_dir / ".gitignore"
+    if path.exists():
+        return False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(RUN_RECORDS_IGNORE, encoding="utf-8")
+    return True

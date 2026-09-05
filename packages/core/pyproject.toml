@@ -19,10 +19,17 @@ packages = ["src/agency"]
 
 # Schemas live at the repo root, not inside the package — the extension
 # reads them too. Bundled into the wheel so `uv tool install` works from
-# anywhere. Packs are not bundled: a pack is a skill in the target project,
-# never installed from here.
+# anywhere.
+#
+# Of the packs, exactly ONE ships: `author`. A pack is normally a skill in
+# the target project, written for it and never installed from here — which
+# holds for every pack in `packs/` except this one, whose subject is this
+# system rather than any project. Without it a fresh repository has no way to
+# write its first specialist, so `agency init` copies it in and the rest get
+# written by it, in place.
 [tool.hatch.build.targets.wheel.force-include]
 "../../schemas" = "agency/_bundled/schemas"
+"../../packs/author" = "agency/_bundled/packs/author"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
