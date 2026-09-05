@@ -167,6 +167,12 @@ Vyšlo najevo hned prvním skutečným použitím Kroku 2: **session předaná C
 - **Stav je `abandoned`, ne `failed`,** a přesně v tom významu, který mu `run.v1` dal odjakživa: příprava proběhla, agent běžel a terminál zmizel dřív, než skončil. Nový stav pro tohle nebyl potřeba.
 - **Brána zůstává tlačítkem.** Ukončená session mohla `findings.json` napsat; `Run the gate` na té obrazovce je pořád, takže se z přerušeného běhu dá vytěžit, co stihl.
 
+**Bypass byl práva bez dveří.** Tlačítko *Open one with no permission checks* se ukazuje jen zařízení, které má `device.bypass` — a to nešlo nastavit nijak. Párovací formulář posílal jen `{code, name}` a `agency serve` na to neměl přepínač; jediný zapisovatel byl `bool(body.get("bypass"))` v `/api/pair`, tedy **telefon si to právo uděloval sám**, přesně proti tomu, co pod formulářem stálo napsané. Kdo měl kód, měl i bypass.
+
+- [x] `agency serve --allow-bypass` (a `scripts/serve.ps1 -AllowBypass`). Uděluje ho stroj, v tom párovacím okně, které sám otevřel — `pair()` už jen hlásí odpověď. `bypass` v těle požadavku se ignoruje.
+- [x] Konzole to říká při každém startu, i když se neuděluje. Okno, které rozdává právo běžet bez jakýchkoli kontrol, se nemá poznávat zpětně z logu.
+- [x] Chybějící tlačítko na obrazovce spuštění říká, proč chybí, a co s tím u stroje. Nepřítomná věc je hádanka, dokud neřekne, na co čeká.
+
 **Hotovo, když:** okno, které si z telefonu otevřu, z telefonu i zavřu a projekt je hned volný pro další běh. — ✅ testy (`test_serve.py`: zabití, pořadí vůči worktree, odmítnutí cizího běhu, `canStop`, audit, obě větve `kill_tree`). Klik z telefonu je na tobě.
 
 ---

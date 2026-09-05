@@ -351,7 +351,8 @@
 
     v.append(codeLabel, code, nameLabel, name,
       text('p', 'note', 'Starting a run with the authorization checks off is a right '
-        + 'the machine grants at pairing, not something this page can ask for later.'),
+        + 'the machine grants at pairing — `agency serve --allow-bypass` — and this '
+        + 'page cannot ask for it, here or later.'),
       text('div', 'gap'), go, err);
     code.focus();
   }
@@ -517,6 +518,14 @@
         + (state.device && state.device.bypass
           ? ' The last one starts it with --dangerously-skip-permissions: it will not '
             + 'ask you about anything it does.' : '')));
+      // An absent button is a puzzle unless it says what it is waiting for.
+      // This one is waiting on a decision made at the machine, and the phone
+      // has no way to reach it — so the note is the whole of the answer.
+      if (!(state.device && state.device.bypass)) {
+        v.appendChild(text('p', 'note', 'This device was not paired with the right to '
+          + 'turn the authorization checks off. `agency serve --allow-bypass` at the '
+          + 'machine opens a pairing window that grants it; pair again from there.'));
+      }
     }
     v.appendChild(err);
 

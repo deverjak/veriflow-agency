@@ -1612,7 +1612,8 @@ def cmd_serve(args) -> int:
 
     try:
         daemon = serving.serve(projects, args.host, args.port, args.hours,
-                               pair_window=args.pair_window)
+                               pair_window=args.pair_window,
+                               allow_bypass=bool(getattr(args, "allow_bypass", False)))
     except OSError as e:
         raise SystemExit(
             f"Cannot listen on {args.host}:{args.port} — {e}. Another `agency serve` "
@@ -1629,6 +1630,16 @@ def cmd_serve(args) -> int:
     out.say()
     out.say(f"  {out.bold('Pairing code:')}  {out.bold(daemon.pair_code)}"
             f"   {out.dim(f'valid for {args.pair_window // 60} minutes, for one device')}")
+    if daemon.allow_bypass:
+        # Printed loudly and every time. A window that hands out the right to
+        # run with no authorization checks at all is not something to learn
+        # about afterwards, from a log.
+        out.say(f"  {out.err('This window grants --bypass')}"
+                f"   {out.dim('the device paired with this code may run')}")
+        out.say(f"  {out.dim('with the authorization checks off. Restart without the flag to stop offering it.')}")
+    else:
+        offer = "Pairs without the right to skip authorization checks — --allow-bypass grants it."
+        out.say(f"  {out.dim(offer)}")
     known = daemon.devices.all()
     if known:
         out.say(f"  {out.dim('Already paired:')} "
@@ -1857,6 +1868,11 @@ def build_parser() -> argparse.ArgumentParser:
                    metavar="SECONDS",
                    help="how long the pairing code printed at startup is accepted "
                         f"(default: {serving.PAIR_WINDOW})")
+    s.add_argument("--allow-bypass", action="store_true",
+                   help="let the device paired in this window start a run with the "
+                        "authorization checks off (--dangerously-skip-permissions). "
+                        "Asked here because it is a decision about this machine; the "
+                        "phone cannot ask for it.")
     s.set_defaults(fn=cmd_serve)
 
     return p

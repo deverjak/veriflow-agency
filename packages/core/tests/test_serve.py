@@ -69,9 +69,16 @@ def call(daemon, method: str, path: str, token: str | None = None, body=None):
 
 
 def pair(daemon, name: str = "phone", bypass: bool = False) -> str:
+    """Pair a device — and, when the test wants one with the bypass right, let
+    the MACHINE offer it. There is deliberately no way to ask for it from the
+    request, so a test that pretended otherwise would be testing a door that
+    does not exist."""
+    if bypass:
+        daemon.allow_bypass = True
     code, data = call(daemon, "POST", "/api/pair",
-                      body={"code": daemon.pair_code, "name": name, "bypass": bypass})
+                      body={"code": daemon.pair_code, "name": name})
     assert code == 200, data
+    assert data["bypass"] is bypass
     return data["token"]
 
 
@@ -282,6 +289,35 @@ def test_a_console_that_cannot_print_does_not_fail_the_request(daemon, monkeypat
                       body={"code": daemon.pair_code, "name": "phone"})
 
     assert code == 200 and data["token"]
+
+
+def test_a_phone_cannot_pair_itself_into_the_bypass_right(daemon):
+    """The right to run with no authorization checks used to be read off the
+    pairing request, so anybody holding the code could claim it while the page
+    below the form promised that only the machine could grant it. A credential
+    that hands itself privileges is not a credential."""
+    code, data = call(daemon, "POST", "/api/pair",
+                      body={"code": daemon.pair_code, "name": "phone", "bypass": True})
+
+    assert code == 200, data
+    assert data["bypass"] is False
+    assert daemon.devices.all()[0].bypass is False
+
+
+def test_the_machine_grants_it_at_the_window_it_opened(daemon, project, monkeypatch):
+    """And the way it IS granted: an argument to `agency serve`, decided in
+    front of the person who owns the machine."""
+    daemon.allow_bypass = True
+    seen = spawns(daemon, monkeypatch)
+
+    _, data = call(daemon, "POST", "/api/pair",
+                   body={"code": daemon.pair_code, "name": "phone"})
+    assert data["bypass"] is True
+
+    call(daemon, "POST", "/api/run", data["token"],
+         {"project": project.root.name, "pack": "review-graph", "bypass": True})
+
+    assert "--bypass" in seen["argv"]
 
 
 def test_guessing_the_code_runs_out(daemon):

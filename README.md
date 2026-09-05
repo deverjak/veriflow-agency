@@ -435,7 +435,11 @@ phone types once; what comes back is a per-device token, kept outside the
 project (a token in `.agency/` is a token in a pull request) next to
 `remote.jsonl`, where every remote action lands as a line. Starting a run
 with the authorization checks off is a right a device is paired with, not a
-checkbox in a request.
+checkbox in a request: `agency serve --allow-bypass` opens a pairing window
+that grants it, and without that flag no device has it and no request can ask
+for one. That last half is not decoration — the right used to be read off the
+pairing request itself, which meant anybody holding the code could claim it
+while the page below the form promised the opposite.
 
 **Which projects, and where that is written down: nowhere.** `--scan` walks a
 tree two levels deep and opens every repository that has a specialist in it —
@@ -504,7 +508,8 @@ session this daemon knows nothing about. It also does not end by itself, so the
 phone gets the gate as a button. A device paired with the bypass right gets a
 third button for the same session with `--dangerously-skip-permissions`, the
 way the editor has a second arrow — the daemon refuses it from any other
-device.
+device, and a device without the right is told so on that screen rather than
+left to puzzle over a button that is not there.
 
 **What a session asks before it starts is the thing that breaks it.** Probed by
 reading the console of a real `claude`: a project whose `.mcp.json` servers

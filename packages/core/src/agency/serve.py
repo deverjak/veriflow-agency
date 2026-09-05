@@ -381,10 +381,15 @@ class Daemon:
     """Everything the request handler is allowed to know."""
 
     def __init__(self, projects: list[config.Project], hours: float,
-                 pair_window: int = PAIR_WINDOW) -> None:
+                 pair_window: int = PAIR_WINDOW, allow_bypass: bool = False) -> None:
         self.projects = project_keys(projects)
         self.started = time.time()
         self.expires_at = self.started + hours * 3600
+        #: Whether the device paired in this window may run with the
+        #: authorization checks off. It is an argument to `agency serve`, which
+        #: is to say a decision made at the machine, in front of the person who
+        #: owns it — see `pair()`.
+        self.allow_bypass = allow_bypass
         self.state = state_dir()
         self.devices = Devices(self.state / "devices.json")
         self.audit_path = self.state / "remote.jsonl"
@@ -418,7 +423,17 @@ class Daemon:
     def pair_open(self) -> bool:
         return time.time() < self.pair_until and self.pair_attempts < PAIR_ATTEMPTS
 
-    def pair(self, code: str, name: str, bypass: bool) -> Device | None:
+    def pair(self, code: str, name: str) -> Device | None:
+        """Turn the printed code into a device token.
+
+        The bypass right comes from `self.allow_bypass` and from nowhere else.
+        It used to be read off the pairing request, which made it a right the
+        phone claimed for itself: anyone holding the code could ask for it and
+        be given it, while the page below the form promised the opposite. A
+        credential that grants its own privileges is not a credential, so the
+        question is asked at the machine (`agency serve --allow-bypass`) and
+        this only reports the answer.
+        """
         if not self.pair_open():
             return None
         if not hmac.compare_digest(self.pair_code.encode(),
@@ -428,7 +443,7 @@ class Daemon:
         # One code, one device. Leaving it open would mean a code read over a
         # shoulder stays useful for the rest of the window.
         self.pair_until = 0
-        return self.devices.add(name, bypass)
+        return self.devices.add(name, self.allow_bypass)
 
     # -------------------------------------------------------- delegation
 
@@ -1043,8 +1058,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/pair":
             device = self.daemon.pair(str(body.get("code") or ""),
-                                      str(body.get("name") or "phone"),
-                                      bool(body.get("bypass")))
+                                      str(body.get("name") or "phone"))
             if not device:
                 append_audit(self.daemon.audit_path,
                              {"action": "pair-refused", "from": self.client_address[0]})
@@ -1291,10 +1305,11 @@ def _outputs(run) -> list[str]:
 # ---------------------------------------------------------------- entry
 
 def serve(projects: list[config.Project], host: str, port: int, hours: float,
-          pair_window: int = PAIR_WINDOW) -> Daemon:
+          pair_window: int = PAIR_WINDOW, allow_bypass: bool = False) -> Daemon:
     """Build the server and start it on its own thread. Returns the daemon so
     a test can drive it without a terminal."""
-    daemon = Daemon(projects, hours, pair_window=pair_window)
+    daemon = Daemon(projects, hours, pair_window=pair_window,
+                    allow_bypass=allow_bypass)
 
     class Server(ThreadingHTTPServer):
         daemon_threads = True
