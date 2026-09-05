@@ -255,7 +255,8 @@ def launch_argv(memory_dir: str, prompt: str,
                 stream: bool = False,
                 bypass: bool = False,
                 resume: str | None = None,
-                remote_control: str | None = None) -> tuple[list[str], dict]:
+                remote_control: str | None = None,
+                no_questions: bool = False) -> tuple[list[str], dict]:
     """What to finish the run with.
 
     `memory_dir` is what the agent is allowed to read outside its working
@@ -274,6 +275,11 @@ def launch_argv(memory_dir: str, prompt: str,
     names an interactive session the Claude app can drive — both are shapes
     from `providers.py`, not commands assembled here, for the same reason the
     rest of this function is a table lookup.
+
+    `no_questions` is for a session started where nobody is standing: it adds
+    the flags that stop the runner asking something before it starts. It costs
+    the session something (see `providers.starts_without_asking`), which is why
+    it is asked for rather than assumed.
     """
     name = provider or "claude"
     spec = providers.spec(name)
@@ -294,6 +300,8 @@ def launch_argv(memory_dir: str, prompt: str,
         argv += [str(x).format(session=resume) for x in spec["resumeShape"]]
     if remote_control and spec.get("remoteControlFlag"):
         argv += [str(spec["remoteControlFlag"]), str(remote_control)]
+    if no_questions:
+        argv += providers.starts_without_asking(name)
     if model and spec.get("modelFlag"):
         argv += [spec["modelFlag"], model]
     argv += [str(x) for x in (spec.get("extraArgs") or [])]

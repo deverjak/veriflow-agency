@@ -27,6 +27,8 @@ import pytest
 
 from agency import cli, proc, providers, runs
 
+from conftest import install_pack
+
 INIT = '{"type":"system","subtype":"init","session_id":"abc-123"}'
 RESULT = ('{"type":"result","subtype":"success","is_error":false,"num_turns":4,'
           '"total_cost_usd":0.25,"session_id":"abc-123","result":"Yes — twice.",'
@@ -309,3 +311,80 @@ def test_a_runner_that_cannot_be_driven_says_so_before_it_starts(project, capsys
                   "--repo", str(project.root)])
 
     assert "Remote Control" in str(e.value)
+
+
+# ------------------------------------------------------------- what it asks first
+#
+# Probed on 2026-09-05 by attaching to the console of a real `claude` and
+# reading its screen. Both of these stop an interactive session BEFORE it
+# starts, which from a phone looks like a window that opened and hung.
+
+def test_a_session_nobody_can_answer_is_not_asked_anything():
+    """`--strict-mcp-config` is the difference between a session that comes up
+    and one parked on "New MCP server found in this project". It costs the
+    project's MCP servers, which is why it is only for a session nobody is
+    standing at."""
+    argv, _ = runs.launch_argv("C:/p/.agency", "take a look", provider="claude",
+                               unattended=False, remote_control="agency-po-01k",
+                               no_questions=True)
+
+    assert "--strict-mcp-config" in argv
+    assert providers.starts_without_asking("codex") == []
+
+
+def test_at_the_machine_nothing_is_given_up():
+    argv, _ = runs.launch_argv("C:/p/.agency", "take a look", provider="claude",
+                               unattended=False, remote_control="agency-po-01k")
+
+    assert "--strict-mcp-config" not in argv
+
+
+def test_whether_the_runner_has_been_let_into_a_directory(tmp_path):
+    """The other question has no flag: a directory Claude Code has never been
+    opened in gets "Is this a project you trust?", and
+    `--dangerously-skip-permissions` does not skip it either. The answer it
+    recorded last time is the only way to know in advance."""
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".claude.json").write_text(json.dumps({"projects": {
+        "C:/work/known": {"hasTrustDialogAccepted": True},
+        "C:/work/refused": {"hasTrustDialogAccepted": False},
+    }}), encoding="utf-8")
+
+    assert providers.trusted("claude", "C:/work/known", home=home) is True
+    assert providers.trusted("claude", r"C:\work\known", home=home) is True
+    assert providers.trusted("claude", "C:/work/refused", home=home) is False
+    assert providers.trusted("claude", "C:/work/never-seen", home=home) is False
+
+
+def test_an_answer_that_cannot_be_read_is_not_a_no(tmp_path):
+    """A guess that refuses a session which would have worked is worse than the
+    hang it was trying to prevent."""
+    assert providers.trusted("claude", "C:/anything", home=tmp_path) is None
+    assert providers.trusted("codex", "C:/anything", home=tmp_path) is None
+
+
+def test_a_session_is_not_opened_into_a_question_nobody_can_answer(
+        project, monkeypatch, capsys):
+    """What the phone saw before this: a window that opened, asked about the
+    folder and waited forever, while the run sat at `running` with nothing
+    happening in it."""
+    monkeypatch.setattr(providers, "trusted", lambda *a, **k: False)
+    monkeypatch.setattr(proc, "attend", lambda *a, **k: pytest.fail("must not launch"))
+    monkeypatch.setattr(runs, "resolve_workspace_target", lambda *a, **k: {
+        "kind": "workspace", "ref": "main", "dirty": False,
+        "headRefOid": "a" * 40, "_files": ["src/auth.ts"]})
+    install_pack(project, "po", {"target": "workspace", "worktree": False,
+                                 "prompt": "optional"})
+
+    code = cli.main(["run", "po", "--remote-control", "--wait", "--origin", "remote",
+                     "--repo", str(project.root)])
+    out = capsys.readouterr().out
+
+    assert code == 1
+    assert "trusted" in out
+    # The run is closed rather than left looking alive, and the phone reads the
+    # reason off the record instead of a window that is not there.
+    run = runs.load_runs(project)[0]
+    assert run.record()["status"] == "abandoned"
+    assert "nobody is at the machine" in run.record()["exitReason"]

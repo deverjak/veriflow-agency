@@ -472,12 +472,16 @@ def cmd_run(args, chain: dict | None = None) -> int:
     remote = None
     if wants_remote:
         remote = str(args.remote_control or "").strip() or runs.session_name(pack.name, run.id)
+    # Nobody at this machine, and an interactive runner: the flags that stop it
+    # asking something before the session is up. At the terminal the question
+    # can simply be answered, and giving things up to avoid it would be a loss.
+    alone = remote is not None and getattr(args, "origin", "cli") == "remote"
     launch, agent_info = runs.launch_argv(
         posix(project.agency_dir), prompt, provider=provider,
         model=getattr(args, "model", None), unattended=unattended,
         needs=needs, stream=unattended,
         bypass=bool(getattr(args, "bypass", False)),
-        remote_control=remote)
+        remote_control=remote, no_questions=alone)
     rec = run.record()
     rec["agent"] = agent_info
     run.save_record(rec)
@@ -519,6 +523,16 @@ def cmd_run(args, chain: dict | None = None) -> int:
                 f"{out.bold(remote)}")
         out.say(f"  {out.dim('Open that name in the Claude app to keep talking to it.')}")
     out.say()
+
+    if alone and providers.trusted(provider, wt) is False:
+        # The one question that has no flag. Opening the window anyway would
+        # park a session on "Is this a project you trust?" where nobody can
+        # answer it — and the phone would watch a run that never started.
+        info = runs.abandon(project, run, _untrusted(provider, wt, wt_owned))
+        out.fail(_untrusted(provider, wt, wt_owned))
+        if info.get("worktreeRemoved"):
+            out.note("the worktree was removed again")
+        return 1
 
     if args.wait:
         dialect = providers.streaming(agent_info["provider"])[1] if unattended else None
@@ -727,6 +741,22 @@ def _progress(event) -> None:
             out.say(f"  {out.dim('›' if i == 0 else ' ')} {line}")
 
 
+def _untrusted(provider: str, wt: Path, throwaway: bool) -> str:
+    """Why a session cannot be opened here, and what to do instead.
+
+    Said in one place because `run` and `follow` hit it for the same reason and
+    a person reading it on a phone should not have to tell two versions of it
+    apart.
+    """
+    where = ("this specialist works in a throwaway worktree, and that is a new "
+             "directory every time" if throwaway
+             else f"{provider} has not been opened in {posix(wt)} before")
+    return (f"A session to talk to cannot start here: {where}, so {provider} would "
+            "stop and ask whether the folder is trusted — and nobody is at the machine "
+            "to answer. Run it unsupervised instead, or open that directory in "
+            f"{provider} once at the machine.")
+
+
 def _hold_window(hold: bool) -> None:
     """Keep a window that was opened for this run from closing on the message.
 
@@ -884,12 +914,15 @@ def cmd_follow(args) -> int:
                  "the follow-up runs with no commands granted")
 
     wd = runs.working_dir(project, run)
+    alone = interactive and getattr(args, "origin", "cli") == "remote"
+    if alone and providers.trusted(provider, wd) is False:
+        return refuse(_untrusted(provider, wd, wd != project.root))
     launch, info = runs.launch_argv(
         posix(project.agency_dir), prompt_text, provider=provider,
         model=agent.get("model"), unattended=not interactive,
         needs=needs, stream=not interactive,
         bypass=bool(getattr(args, "bypass", False)),
-        resume=session, remote_control=remote)
+        resume=session, remote_control=remote, no_questions=alone)
 
     out.say(f"\n  {out.bold('follow-up')}  {out.dim(pack_name + ' · ' + run.id[:10])}"
             f" → {project.name}\n")

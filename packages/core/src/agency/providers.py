@@ -12,7 +12,9 @@ positionally or behind a flag.
 
 from __future__ import annotations
 
+import json
 import re
+from pathlib import Path
 
 from . import proc
 
@@ -68,6 +70,27 @@ BUILTIN: dict[str, dict] = {
         # session with Remote Control enabled (optionally named)". The name is
         # how the session is recognised in the app, so the core always names it.
         "remoteControlFlag": "--remote-control",
+        # What an interactive session asks BEFORE it starts, when the project
+        # has an `.mcp.json` whose servers nobody has decided about yet:
+        #
+        #   New MCP server found in this project: <name>
+        #   ❯ Continue without using this MCP server
+        #
+        # Probed on 2026-09-05 by reading the child's own console: bare
+        # `claude` stops on that dialog and never reaches Remote Control, so a
+        # session started from a phone hangs on a question nobody is there to
+        # answer. `--strict-mcp-config` ("only use MCP servers from
+        # --mcp-config") makes the question moot — the session comes straight
+        # up, with the project's MCP servers off. That is the honest trade: a
+        # session nobody can ask starts with less, rather than not at all.
+        "noQuestionsArgs": ["--strict-mcp-config"],
+        # The OTHER question, and this one has no flag: a directory Claude Code
+        # has never been opened in gets "Is this a project you trust?", which
+        # `--dangerously-skip-permissions` does not skip either (probed) — it
+        # is skipped only in non-interactive mode. The answer is recorded per
+        # directory in this file, so it can be read in advance and a session
+        # that would hang can be refused with a reason instead.
+        "trustFile": ".claude.json",
         # An event stream instead of silence. Without `--verbose`, `-p` emits
         # nothing until the very end, so ten minutes of work is indistinguishable
         # from a hung process.
@@ -126,6 +149,8 @@ BUILTIN: dict[str, dict] = {
         # the answer: `agency follow --remote-control` over a codex run says so
         # instead of inventing a flag.
         "remoteControlFlag": None,
+        "noQuestionsArgs": [],
+        "trustFile": None,
         "streamArgs": ["--json"],
         "streamDialect": "codex-jsonl",
         "extraArgs": [],
@@ -164,6 +189,7 @@ def spec(provider_id: str) -> dict:
              "editsGrant": [], "allowFlag": None, "allowShapes": [],
              "bypassArgs": [], "streamArgs": [], "streamDialect": None,
              "resumeShape": [], "remoteControlFlag": None,
+             "noQuestionsArgs": [], "trustFile": None,
              "models": [], "defaultModel": None, "unregistered": True}
     out = dict(s)
     out["id"] = provider_id
@@ -196,6 +222,49 @@ def resumes(provider_id: str) -> bool:
 def remote_controls(provider_id: str) -> bool:
     """Can this runner start a session the phone's own app can drive?"""
     return bool(spec(provider_id).get("remoteControlFlag"))
+
+
+def starts_without_asking(provider_id: str) -> list[str]:
+    """Flags that keep a session from stopping on a question before it starts.
+
+    Only for a session nobody is standing at: they buy the start by giving
+    something up (for `claude`, the project's own MCP servers), and at the
+    machine that trade is a loss, because there the question can just be
+    answered.
+    """
+    return [str(x) for x in (spec(provider_id).get("noQuestionsArgs") or [])]
+
+
+def trusted(provider_id: str, cwd, home=None) -> bool | None:
+    """Has this runner been let into that directory? `None` = cannot tell.
+
+    Claude Code asks about a folder it has never been opened in, and there is
+    no flag to skip it — so the only way to keep a session started from a phone
+    from hanging on it is to read the answer it recorded last time. That answer
+    is in `~/.claude.json`, keyed by the directory with forward slashes.
+
+    `None` rather than `False` when the file cannot be read or does not have
+    the shape expected: a guess that refuses a session which would have worked
+    is worse than the hang it was trying to prevent, so an unreadable answer
+    lets the launch go ahead.
+    """
+    name = spec(provider_id).get("trustFile")
+    if not name:
+        return None
+    path = Path(home or Path.home()) / str(name)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        projects = data["projects"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    if not isinstance(projects, dict):
+        return None
+    key = str(cwd).replace("\\", "/").rstrip("/")
+    for candidate, block in projects.items():
+        if str(candidate).replace("\\", "/").rstrip("/").lower() == key.lower():
+            return bool(isinstance(block, dict)
+                        and block.get("hasTrustDialogAccepted"))
+    return False
 
 
 def authorization(provider_id: str, needs: list[str], mode: str = "grant") -> list[str]:

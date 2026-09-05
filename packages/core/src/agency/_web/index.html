@@ -492,20 +492,32 @@
       () => start('unattended'));
     const takeover = button('Open a session I can talk to', 'secondary',
       () => start('interactive'));
+    // The same session with the authorization checks off. A separate button
+    // rather than a switch, for the reason the editor has a second arrow: it
+    // is a different thing to start, not a setting of the first one — and it
+    // is offered only to a device that was paired with that right, because
+    // the daemon will refuse it from any other.
+    const wideOpen = button('Open one with no permission checks', 'secondary',
+      () => start('interactive', true));
 
     v.append(text('p', 'note', 'Unsupervised: nobody is at the terminal, so the run '
       + 'never stops to ask, and the gate runs by itself when it ends.'),
       text('div', 'gap'), unsupervised);
     if (state.canOpenSession) {
       v.appendChild(takeover);
-      v.appendChild(text('p', 'note', 'The second one opens Claude Code in a window on '
-        + 'the machine with Remote Control on — you carry on with it in the Claude app, '
-        + 'and run the gate from here when you are done.'));
+      if (state.device && state.device.bypass) v.appendChild(wideOpen);
+      v.appendChild(text('p', 'note', 'A session opens Claude Code in a window on the '
+        + 'machine with Remote Control on — you carry on with it in the Claude app, and '
+        + 'run the gate from here when you are done.'
+        + (state.device && state.device.bypass
+          ? ' The last one starts it with --dangerously-skip-permissions: it will not '
+            + 'ask you about anything it does.' : '')));
     }
     v.appendChild(err);
 
-    async function start(mode) {
+    async function start(mode, bypass) {
       const body = { project: key, pack: pack.name, mode: mode };
+      if (bypass) body.bypass = true;
       const q = prompt ? prompt.value.trim() : '';
       if (pack.run.prompt === 'required' && !q) {
         err.textContent = 'This specialist needs to know what to work on.';
@@ -517,7 +529,7 @@
         body.pr = Number(prSelect.value);
       }
       err.textContent = '';
-      unsupervised.disabled = takeover.disabled = true;
+      unsupervised.disabled = takeover.disabled = wideOpen.disabled = true;
       // Preparation resolves the pull request and can build a worktree, so the
       // answer takes seconds. Saying so beats a button that looks broken.
       unsupervised.textContent = 'Preparing the run…';
@@ -526,7 +538,7 @@
         nav(runPath(key, data.runId));
       } catch (e) {
         err.textContent = e.message;
-        unsupervised.disabled = takeover.disabled = false;
+        unsupervised.disabled = takeover.disabled = wideOpen.disabled = false;
         unsupervised.textContent = 'Run unsupervised';
       }
     }

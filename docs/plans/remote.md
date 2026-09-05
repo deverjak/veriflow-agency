@@ -111,6 +111,9 @@ Párování: `agency serve` vypíše na konzoli šestimístný kód, telefon ho 
 
 **Co plán nepředpokládal**
 
+- **Session se ptá dřív, než začne — a na to spike nemyslel.** Ověřeno 5. 9. 2026 čtením konzole skutečného `claude` (attach na konzoli dítěte, `ReadConsoleOutputCharacterW`): v projektu s nerozhodnutým `.mcp.json` stojí *„New MCP server found in this project"* a v adresáři, ve kterém Claude Code nikdy nebyl, *„Is this a project you trust?"*. Druhou nepřeskočí ani `--dangerously-skip-permissions` (help to říká: přeskakuje se jen v neinteraktivním režimu). Obě otázky čekají na člověka, který u toho stroje není — přesně tak vypadalo první skutečné použití: okno se otevřelo a zaseklo.
+  - MCP: session spuštěná z telefonu jde s `--strict-mcp-config`, takže otázka nemá jak vzniknout. Cena je, že projektové MCP servery nejsou k dispozici; to je poctivá výměna — session, které nemá kdo odpovědět, začne s méně, místo aby nezačala.
+  - Důvěra: flag na to není, ale odpověď se zapisuje do `~/.claude.json` (`projects[<cesta>].hasTrustDialogAccepted`), takže se dá **přečíst dopředu**. Když adresář důvěru nemá — a pack s worktree je nový adresář pokaždé — běh se zavře s tímhle jako `exitReason` místo aby se otevřelo okno, které visí. Když se soubor přečíst nedá, spouští se dál: odhad, který odmítne session, jež by fungovala, je horší než to viset.
 - **Brána nemusí být ruční.** Bod §3.7 počítal s tím, že démon nemá exit code, na který by čekal. `--wait` ho má i u attended běhu: `runs.attend()` pustí `claude` s poděděným stdio a čeká, až ho člověk zavře — pak sama proběhne brána. Tlačítko v mobilu zůstává pro session, kterou nikdo nezavře.
 - **Tlačítko je jedno, ne dvě.** Na řádku specialisty ne — obě tlačítka jsou až na obrazovce spuštění, protože vedle titulu se druhá akce na mobilu nevejde a řádek se stane hádankou.
 

@@ -501,7 +501,25 @@ it ends. *Open a session I can talk to* starts the same run with Claude Code's
 shows no live progress and says so: an interactive `claude` publishes no
 machine-readable stream, and inventing one would mean showing progress for a
 session this daemon knows nothing about. It also does not end by itself, so the
-phone gets the gate as a button.
+phone gets the gate as a button. A device paired with the bypass right gets a
+third button for the same session with `--dangerously-skip-permissions`, the
+way the editor has a second arrow — the daemon refuses it from any other
+device.
+
+**What a session asks before it starts is the thing that breaks it.** Probed by
+reading the console of a real `claude`: a project whose `.mcp.json` servers
+nobody has decided about stops on *"New MCP server found in this project"*, and
+a directory Claude Code has never been opened in stops on *"Is this a project
+you trust?"* — which `--dangerously-skip-permissions` does not skip either. Both
+land in front of a person who is not there. So a session started from a phone is
+launched with `--strict-mcp-config` (the MCP question cannot arise; the price is
+that the project's MCP servers are off), and the trust answer is **read in
+advance** out of `~/.claude.json`: when the directory is one the runner has
+never been let into — a specialist that works in a throwaway worktree is a new
+directory every time — the run is closed with that as its reason instead of
+opening a window that hangs. If that answer cannot be read at all, the launch
+goes ahead: a guess that refuses a session which would have worked is worse than
+the hang it was avoiding.
 
 **A finished run can be asked one more thing.** The run screen of an unattended
 run carries a question box: *Ask* resumes the session and the answer arrives in
