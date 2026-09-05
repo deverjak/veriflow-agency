@@ -103,12 +103,47 @@ Párování: `agency serve` vypíše na konzoli šestimístný kód, telefon ho 
 
 **Hotovo, když:** z telefonu v tailnetu spustím `po` s promptem nad `main-panel` a vidím, jak agent volá nástroje, a po doběhu počty z brány. — ✅ **postavené a otestované** (`tests/test_serve.py`: párování, okno aktivace, argv běhu, serializace, audit, stream včetně `offset`, `Last-Event-ID` a rozepsaného řádku; navrch smoke proti skutečnému projektu s packem, kde endpointy obsluhuje opravdový podproces). Poslední kus té věty — *z telefonu* — je na tobě: prohlížeč v ruce jsem neměl.
 
-### Krok 2 — Remote Control jako druhý režim (~4 h)
+### Krok 2 — Remote Control jako druhý režim (~4 h) — **hotovo 5. 9. 2026**
 
-- `providers.py` — u `claude` přibude `remoteControlArgs: ["--remote-control"]` (ověřeno proti `claude --help`: *„Start an interactive session with Remote Control enabled (optionally named)"*). `launch_argv()` je přidá, když si o ně volající řekne; jméno session je `agency-<pack>-<runId první 8>`, aby šlo v Claude appce poznat, co to je.
-- **Spike, který se musí udělat první:** attended `claude` chce terminál, a démon žádný nemá. Pořadí pokusů: `CREATE_NEW_CONSOLE` (na PC se otevře okno, což doma nevadí a večer je to i vodítko), pak `claude --bg` + `attach`. Když ani jedno nedrží, krok se odloží a v mobilu zůstane jen **Spustit** — režim, který uživatel stejně vybral jako první.
+- [x] `providers.py` — u `claude` přibyl `remoteControlFlag: "--remote-control"` (ověřeno proti `claude --help`: *„Start an interactive session with Remote Control enabled (optionally named)"*). `launch_argv()` ho přidá, když si o něj volající řekne; jméno session je `agency-<pack>-<runId prvních 8>`, aby šlo v Claude appce poznat, co to je.
+- [x] **Spike dopadl na prvním pokusu.** `CREATE_NEW_CONSOLE` drží: démon spustí `agency run <pack> --remote-control --wait` v novém okně, dítě má vlastní stdio a `claude` v něm běží jako v terminálu. `claude --bg` + `attach` se tím pádem nezkoušelo. Na systému, kde konzoli dát nejde, režim **odmítne** (`no-console`) místo aby otevřel session, kterou nikdo neuvidí.
+- [x] `--remote-control` je vlastní přepínač `agency run`, ne odvozenina z `--launch`: `--launch` znamená „převezmi tenhle terminál", `--remote-control` znamená „ať se do toho dá mluvit odjinud". Dohromady se `--unattended` se vylučuje a odmítá se to **před** stavbou worktree.
 
-**Hotovo, když:** tlačítko **Převzít** otevře session, kterou v Claude appce najdu pod jménem specialisty, odpovím jí na dotaz na oprávnění a pak z mobilu pustím bránu.
+**Co plán nepředpokládal**
+
+- **Brána nemusí být ruční.** Bod §3.7 počítal s tím, že démon nemá exit code, na který by čekal. `--wait` ho má i u attended běhu: `runs.attend()` pustí `claude` s poděděným stdio a čeká, až ho člověk zavře — pak sama proběhne brána. Tlačítko v mobilu zůstává pro session, kterou nikdo nezavře.
+- **Tlačítko je jedno, ne dvě.** Na řádku specialisty ne — obě tlačítka jsou až na obrazovce spuštění, protože vedle titulu se druhá akce na mobilu nevejde a řádek se stane hádankou.
+
+**Hotovo, když:** tlačítko **Otevřít session, se kterou si můžu psát** otevře session, kterou v Claude appce najdu pod jménem specialisty. — ✅ postavené a otestované (`tests/test_serve.py`: argv, vyžádaná konzole, odmítnutí tam, kde konzole není; `tests/test_follow.py`: tvar spuštění a že se u ní nestreamuje). Klik z telefonu je na tobě.
+
+---
+
+### Krok 5 — navázat otázkou a nepřijít o místo v aplikaci (~4 h) — **hotovo 5. 9. 2026**
+
+Dvě věci, které vyšly najevo až prvním skutečným použitím z telefonu:
+
+**1. Zpět v mobilu vyhazovalo z aplikace.** Stránka byla jedna URL a pět skrytých sekcí, takže gesto zpět neznamenalo „o obrazovku zpátky", ale „pryč ze stránky". Běh, na který se člověk dívá, se navíc nedal ani obnovit, ani otevřít z plochy.
+
+- [x] Každá obrazovka má vlastní cestu: `/`, `/pair`, `/p/<projekt>/runs`, `/p/<projekt>/start/<pack>`, `/p/<projekt>/run/<id>`, `/p/<projekt>/run/<id>/doc/<soubor>`. Klient je `history.pushState` + `popstate`, žádný router z npm.
+- [x] Démon servíruje stránku na **každé cestě, která není `/api/`** — jinak by první reload takové URL byl 404. `/api/…` zůstává chybou, aby se z chyby klienta nestala stránka HTML tam, kde se čeká JSON.
+- [x] Dokument běhu je obrazovka, ne panel: zavře se gestem zpět.
+- [x] Hlubokým odkazem se dá začít. Obrazovka spuštění si dotáhne pack z `agency packs`, když přehled v téhle relaci nikdo nenačetl, a co smí zařízení a jestli stroj umí otevřít okno se ptá `/api/projects` — endpoint, který nespouští žádný podproces.
+
+**2. Na unsupervised běh se nedalo navázat.** Odpověď přišla, agent skončil a další otázka znamenala celý druhý běh, který si musel všechno přečíst znovu.
+
+- [x] Sedmnáctý příkaz: `agency follow --run <id> --prompt "…"` — `claude --resume <sessionId>`, tedy **táž session**. `sessionId` se do záznamu psalo odjakživa (`run.v1`, „lets a run be replayed in the provider's tooling"), jen ho nikdo nečetl.
+- [x] Odpověď je součástí běhu, ne nový běh: stream se **přidává** do `agent.jsonl` (telefon ji vidí ve stejném feedu, stačí otevřít stream tam, kde přestal číst) a turny, tokeny i cena se **přičítají**. Nahradit je by znamenalo, že běh stál tolik, co jeho poslední otázka.
+- [x] Brána svůj verdikt nemění. `follow` si `running` jen půjčí, aby telefon věděl, že je co sledovat, a na konci vrátí stav, který dal gate. Když se `findings.json` změnil, řekne to a nechá `agency ingest` na člověku.
+- [x] `POST /api/run/<id>/follow` čeká, až záznam řekne `running` — telefon otevírá stream hned po odpovědi a stream otevřený o chvíli dřív by skončil okamžitým `done`.
+- [x] `agency follow --remote-control` je tatáž otázka položená session, se kterou si chceš psát. Tím se kruh uzavírá: pustím běh z telefonu, přečtu si výsledek, a když je o čem mluvit, převezmu ho v Claude appce.
+
+**Co se u toho ukázalo**
+
+- **Běh spuštěný v terminálu navázat nejde** a je to tak správně: attended běh nic nestreamuje, takže žádné `sessionId` nemá. Stránka se proto ptá záznamu (`canFollow`), místo aby nabídla tlačítko, které skončí chybou.
+- **`--bypass` u navázání dědí běh, ne zařízení.** Otázka pokračuje v session, která už jednou běžela bez kontrol; posílá se `bypass` jen tehdy, když ho má i zařízení — jinak by šlo přes telefon bez toho práva pokračovat v čemkoli.
+- **Codex má `resume`, Remote Control ne.** Obojí je řádek v tabulce providerů (`resumeShape`, `remoteControlFlag`), takže odmítnutí je fakt z tabulky, ne větev v příkazu.
+
+**Hotovo, když:** z telefonu pustím `po`, přečtu odpověď, zeptám se na druhou věc a odpověď přijde do téhož feedu — a gesto zpět mě přitom nevyhodí z aplikace. — ✅ testy (`test_follow.py`, doplněné `test_serve.py`); ověření prstem je na tobě.
 
 ### Krok 3 — stránka (~4 h, souběžně s Krokem 1) — **hotovo 4. 9. 2026**
 
@@ -178,6 +213,9 @@ Kolize jmen už démona neshodí: klíč je jméno adresáře, a když ho mají 
 - **Fronta pro vypnuté PC.** Vypnuté PC znamená „nejde to", ne „spustí se to potom". Fronta chce relay a relay chce provoz.
 - **Notifikace.** Stránka drží SSE, dokud je otevřená. Push potřebuje PWA a HTTPS, tedy Krok „Cloudflare" níž.
 - ~~**Druhý projekt na jedno kliknutí.**~~ — Přehodnoceno 4. 9. 2026, viz Krok 4.
+- ~~**Převzetí session z telefonu.**~~ — Hotovo 5. 9. 2026, viz Krok 2.
+- ~~**Navázat na doběhnutý běh další otázkou.**~~ — Hotovo 5. 9. 2026, viz Krok 5.
+- **Živý průběh Remote Control session.** Nezmění se: interaktivní `claude` strojový stream nevydává (§3.6). Telefon ukáže jméno session a to, že skončila; co se v ní dělo, je v Claude appce.
 
 ---
 

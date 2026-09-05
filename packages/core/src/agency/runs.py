@@ -253,7 +253,9 @@ def launch_argv(memory_dir: str, prompt: str,
                 unattended: bool = False,
                 needs: list[str] | None = None,
                 stream: bool = False,
-                bypass: bool = False) -> tuple[list[str], dict]:
+                bypass: bool = False,
+                resume: str | None = None,
+                remote_control: str | None = None) -> tuple[list[str], dict]:
     """What to finish the run with.
 
     `memory_dir` is what the agent is allowed to read outside its working
@@ -266,6 +268,12 @@ def launch_argv(memory_dir: str, prompt: str,
     strongest one and run reviews cheaper. The choice goes into the run
     record, because "which model produces better findings" is a question
     this tool is supposed to answer with numbers.
+
+    `resume` continues a session the runner already had, so a follow-up
+    question carries everything the first one established. `remote_control`
+    names an interactive session the Claude app can drive — both are shapes
+    from `providers.py`, not commands assembled here, for the same reason the
+    rest of this function is a table lookup.
     """
     name = provider or "claude"
     spec = providers.spec(name)
@@ -279,6 +287,13 @@ def launch_argv(memory_dir: str, prompt: str,
     # subcommand (`exec`), not a flag.
     if unattended:
         argv += [str(x) for x in (spec.get("unattendedPrefix") or [])]
+    # Right after the prefix, because for codex resuming is `exec resume <id>`
+    # — a subcommand of a subcommand. For claude it is an ordinary flag and the
+    # position does not matter; one rule that satisfies both beats two.
+    if resume and spec.get("resumeShape"):
+        argv += [str(x).format(session=resume) for x in spec["resumeShape"]]
+    if remote_control and spec.get("remoteControlFlag"):
+        argv += [str(spec["remoteControlFlag"]), str(remote_control)]
     if model and spec.get("modelFlag"):
         argv += [spec["modelFlag"], model]
     argv += [str(x) for x in (spec.get("extraArgs") or [])]
@@ -306,8 +321,38 @@ def launch_argv(memory_dir: str, prompt: str,
         if spec.get("promptSeparator"):
             argv.append(spec["promptSeparator"])
         argv.append(prompt)
-    return argv, {"provider": name, "model": model, "bin": argv[0],
-                  "authorized": mode}
+    info = {"provider": name, "model": model, "bin": argv[0], "authorized": mode}
+    if remote_control and spec.get("remoteControlFlag"):
+        # Recorded, because "which session in the app is this run" is a
+        # question only the record can answer once the terminal is gone.
+        info["remoteControl"] = str(remote_control)
+    return argv, info
+
+
+def session_name(pack_name: str, run_id: str) -> str:
+    """What the Claude app will call this session.
+
+    The pack and the run are both in it because the app shows a list of names
+    and nothing else: `agency-po-01k5m2rr` says which specialist is asking and
+    which run it belongs to, and `agency findings --run 01k5m2rr` finds the
+    rest. A hostname-prefixed default would say only which computer it is.
+    """
+    return f"agency-{pack_name}-{run_id[:8].lower()}"
+
+
+def working_dir(project: Project, run: Run) -> Path:
+    """Where a session of this run belongs — its worktree while there is one.
+
+    A resumed session has to start in the directory the first one worked in:
+    the transcript is full of paths from it, and `claude --resume` looks up the
+    session by the directory it ran in. Once `agency cleanup` has taken the
+    worktree, the project itself is the only honest answer left.
+    """
+    ctx = read_json(run.dir / "context.json", default={})
+    wt = ctx.get("worktree")
+    if wt and Path(wt).is_dir():
+        return Path(wt)
+    return project.root
 
 
 # The provider is in the path on purpose. Two specialists over one pull
@@ -638,16 +683,39 @@ COST_FIELDS = ("provider", "model", "credential", "inputTokens", "outputTokens",
                "usd", "dimensions", "wallClockSeconds")
 
 
+def _sum(*values) -> int | float | None:
+    """Add up what is there, and stay None when nothing is.
+
+    A follow-up continues the same run, so its turns and its cost belong to
+    that run's totals. Replacing them — which is what a plain assignment does
+    — would say the run cost whatever its last question cost, and the numbers
+    this tool exists to produce would quietly stop adding up.
+    """
+    present = [v for v in values if v is not None]
+    if not present:
+        return None
+    total = sum(present)
+    return round(total, 6) if any(isinstance(v, float) for v in present) else total
+
+
 def attend(project: Project, run: Run, launch: list[str], cwd: Path,
            dialect: str | None = None, on_event=None,
-           chain: dict | None = None, timeout: float | None = None) -> dict:
-    """Start the agent, wait for it, and record how it went."""
+           chain: dict | None = None, timeout: float | None = None,
+           append: bool = False, message_file: str = "agent.md") -> dict:
+    """Start the agent, wait for it, and record how it went.
+
+    `append` is a follow-up: the session is being continued, so its stream is
+    added to the run's own `agent.jsonl` rather than replacing it, and what it
+    spends is added to what the run already spent. A phone watching the stream
+    sees the answer arrive in the same feed — which is the whole reason a
+    follow-up is part of the run instead of a new one.
+    """
     env = agent_env(run, chain)
     started = time.monotonic()
     collected: list = []
 
     if dialect:
-        raw = (run.dir / "agent.jsonl").open("w", encoding="utf-8")
+        raw = (run.dir / "agent.jsonl").open("a" if append else "w", encoding="utf-8")
 
         def line(text: str) -> None:
             raw.write(text + "\n")
@@ -666,15 +734,25 @@ def attend(project: Project, run: Run, launch: list[str], cwd: Path,
     summary = events.summarize(collected) if collected else {}
 
     rec = run.record()
-    agent = {**(rec.get("agent") or {}), "exitCode": code}
+    prior = rec.get("agent") or {}
+    prior_denied = (prior.get("denied") or {}) if append else {}
+    agent = {**prior, "exitCode": code}
     if collected:
         if summary.get("last"):
-            (run.dir / "agent.md").write_text(str(summary["last"]).rstrip() + "\n",
-                                              encoding="utf-8")
-        agent["sessionId"] = summary.get("session")
-        agent["turns"] = summary.get("turns")
-        denied = events.denial_count(collected)
-        agent["denied"] = {"count": denied, "tools": summary.get("denied") or []}
+            (run.dir / message_file).write_text(str(summary["last"]).rstrip() + "\n",
+                                                encoding="utf-8")
+        # A resumed session keeps its id, so the follow-up after the follow-up
+        # has something to resume. When the runner reports none, the id already
+        # recorded is still the truth.
+        agent["sessionId"] = summary.get("session") or prior.get("sessionId")
+        agent["turns"] = (_sum(prior.get("turns"), summary.get("turns"))
+                          if append else summary.get("turns"))
+        denied = events.denial_count(collected) + (prior_denied.get("count") or 0)
+        tools = list(prior_denied.get("tools") or [])
+        for t in summary.get("denied") or []:
+            if t not in tools:
+                tools.append(t)
+        agent["denied"] = {"count": denied, "tools": tools}
     rec["agent"] = agent
     tokens = summary.get("tokens") or {}
     # The agent writes `run.json` too, and everything in `cost` is measured
@@ -682,15 +760,20 @@ def attend(project: Project, run: Run, launch: list[str], cwd: Path,
     # a run invent `cost.note`, and the record then failed the schema this
     # same tool validates it against — so only the fields run.v1 knows survive.
     inherited = {k: v for k, v in (rec.get("cost") or {}).items() if k in COST_FIELDS}
+    # A follow-up adds to the run's totals; a first run has nothing to add to.
+    was = inherited if append else {}
+    usd = _sum(was.get("usd"), summary.get("usd"))
     rec["cost"] = {
         **inherited,
         "provider": agent.get("provider"),
         "model": agent.get("model"),
         "credential": credential(agent.get("provider")),
-        "wallClockSeconds": seconds,
-        **({"usd": summary["usd"]} if summary.get("usd") is not None else {}),
-        **({"inputTokens": tokens["input"]} if tokens.get("input") is not None else {}),
-        **({"outputTokens": tokens["output"]} if tokens.get("output") is not None else {}),
+        "wallClockSeconds": _sum(was.get("wallClockSeconds"), seconds),
+        **({"usd": usd} if usd is not None else {}),
+        **({"inputTokens": _sum(was.get("inputTokens"), tokens["input"])}
+           if tokens.get("input") is not None else {}),
+        **({"outputTokens": _sum(was.get("outputTokens"), tokens["output"])}
+           if tokens.get("output") is not None else {}),
     }
     rec["finishedAt"] = now()
     run.save_record(rec)

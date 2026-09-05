@@ -252,6 +252,21 @@ def cmd_run(args, chain: dict | None = None) -> int:
     # and the pack's `needsUnattended` commands are granted up front, because
     # there is nobody to ask about them.
     unattended = chain is not None or bool(getattr(args, "unattended", False))
+    # Remote Control is an interactive session, and the two things that make a
+    # run unattended — `-p` and the machine-readable stream — exist only
+    # without one. Refused here, before a worktree is built for a run that
+    # could not start.
+    wants_remote = getattr(args, "remote_control", None) is not None
+    if wants_remote:
+        if unattended:
+            raise SystemExit(
+                "--remote-control and --unattended are two different runs: Remote "
+                "Control hands you a session to talk to, --unattended is one nobody "
+                "can answer. Pick one.")
+        if not providers.remote_controls(provider):
+            raise SystemExit(
+                f"{provider} has no Remote Control — only `claude` does. "
+                "Run it unattended and follow up with `agency follow` instead.")
 
     # In --json mode progress output is suppressed, or it would mix with the
     # output and the extension would fail to parse it.
@@ -262,6 +277,7 @@ def cmd_run(args, chain: dict | None = None) -> int:
         if out.quiet:
             print(json.dumps({"ok": False, "reason": code, "message": reason},
                              ensure_ascii=False, indent=2))
+        _hold_window(wants_remote and getattr(args, "origin", "cli") == "remote")
         return 1
 
     out.say(f"\n  {out.bold(pack.title)}  {out.dim(pack.name + '@' + provider)} → {project.name}\n")
@@ -450,11 +466,18 @@ def cmd_run(args, chain: dict | None = None) -> int:
     needs = list(policy.get("needs") or [])
     if unattended:
         needs += policy.get("needsUnattended") or []
+    # The session's name is the run's own, so what shows up in the Claude app
+    # can be matched back to a record here. A name given on the command line
+    # wins: somebody typing one has a reason.
+    remote = None
+    if wants_remote:
+        remote = str(args.remote_control or "").strip() or runs.session_name(pack.name, run.id)
     launch, agent_info = runs.launch_argv(
         posix(project.agency_dir), prompt, provider=provider,
         model=getattr(args, "model", None), unattended=unattended,
         needs=needs, stream=unattended,
-        bypass=bool(getattr(args, "bypass", False)))
+        bypass=bool(getattr(args, "bypass", False)),
+        remote_control=remote)
     rec = run.record()
     rec["agent"] = agent_info
     run.save_record(rec)
@@ -490,6 +513,11 @@ def cmd_run(args, chain: dict | None = None) -> int:
     if prompt_text:
         out.say()
         out.say(f"  {out.dim('Prompt:')} {_one_line(prompt_text, 120)}")
+    if remote:
+        out.say()
+        out.say(f"  {out.bold('Remote Control')}  {out.dim('the session is called')} "
+                f"{out.bold(remote)}")
+        out.say(f"  {out.dim('Open that name in the Claude app to keep talking to it.')}")
     out.say()
 
     if args.wait:
@@ -699,6 +727,30 @@ def _progress(event) -> None:
             out.say(f"  {out.dim('›' if i == 0 else ' ')} {line}")
 
 
+def _hold_window(hold: bool) -> None:
+    """Keep a window that was opened for this run from closing on the message.
+
+    A run started as a session to talk to gets a console of its own, opened by
+    `agency serve` because the daemon has none to lend. When preparation
+    refuses — a draft pull request, a commit this specialist has already
+    reviewed — the reason is printed into that console and the process then
+    ends, taking the window and the only copy of the reason with it. The phone
+    cannot be told either: this run's stdout is the window, not a pipe.
+
+    So the window waits. Nothing is holding a worktree at this point, and the
+    daemon forgets a job that produced no record, so an open window costs
+    nothing but the pixels.
+    """
+    if not hold:
+        return
+    try:
+        if sys.stdin.isatty():
+            out.say()
+            input("  Nothing started. Press Enter to close this window. ")
+    except (EOFError, KeyboardInterrupt, OSError):
+        pass
+
+
 def _wait_for_agent(project, run, launch: list[str], wt: Path, wt_owned: bool,
                     dialect: str | None = None, chain: dict | None = None) -> int:
     """`--wait`: start the agent, wait for it, and run the gate right away."""
@@ -750,6 +802,175 @@ def _wait_for_agent(project, run, launch: list[str], wt: Path, wt_owned: bool,
     if wt_owned:
         print(f"  {out.dim('Cleanup:')}  agency cleanup --run {run.id[:8]}\n")
     return 0 if (code == 0 and not gated.get("noOutput")) else 1
+
+
+def cmd_follow(args) -> int:
+    """`agency follow -p "and what about the migration?"` — one more question.
+
+    Not a second run. The runner's own session is resumed, so everything the
+    specialist established the first time is still in front of it: the target,
+    the evidence it read, the findings it wrote and why. Asking the same thing
+    as a new run would mean paying to re-read a pull request in order to answer
+    "and the second one?".
+
+    Two ways to ask, and they are the two this product has everywhere else:
+    printed — the answer arrives in the run's own stream, which is what a phone
+    watches — or as a session to talk to (`--remote-control`, driven from the
+    Claude app). What a follow-up does NOT do is re-run the gate: the gate's
+    verdict belongs to what the agent wrote, and if the answer changed that,
+    `agency ingest` is the step that says so.
+    """
+    if getattr(args, "json", False):
+        raise SystemExit(
+            "--json and `follow` do not go together: the agent writes to this same "
+            "stdout. Read the record afterwards with `agency status --json`.")
+    runs.refuse_nested("agency follow")
+    project = _project(args)
+
+    run = runs.find_run(project, getattr(args, "run", None))
+    if run is None:
+        which = getattr(args, "run", None)
+        raise SystemExit(
+            f"No run {which} in {project.name}." if which
+            else f"{project.name} has no run to follow up on yet.")
+
+    rec = run.record()
+    agent = rec.get("agent") or {}
+    provider = agent.get("provider") or "claude"
+    session = agent.get("sessionId")
+    pack_name = rec.get("pack") or "?"
+
+    def refuse(reason: str) -> int:
+        out.note(reason)
+        return 1
+
+    if rec.get("status") == "running":
+        return refuse(f"{pack_name} is still working on {run.id[:10]}. A follow-up "
+                      "joins a session that has stopped — this one has not.")
+    if not session:
+        return refuse(
+            f"Run {run.id[:10]} left no session to resume. Only a streamed run records "
+            "one, so a run started in a terminal cannot be followed up on from here — "
+            "that terminal is where it continues.")
+    if not providers.resumes(provider):
+        return refuse(f"{provider} cannot resume a session — there is nothing to "
+                      "continue.")
+
+    prompt_text = (getattr(args, "prompt", None) or "").strip()
+    if not prompt_text:
+        return refuse("A follow-up is a question. Pass --prompt “…”.")
+
+    interactive = getattr(args, "remote_control", None) is not None
+    if interactive and not providers.remote_controls(provider):
+        return refuse(f"{provider} has no Remote Control — only `claude` does. Ask "
+                      "without it and the answer arrives here.")
+    remote = None
+    if interactive:
+        remote = str(args.remote_control or "").strip() or runs.session_name(pack_name, run.id)
+
+    # The pack's `needs` again, because authorization is granted to a process,
+    # not to a session: an agent that could call `agency triage` an hour ago is
+    # refused it now unless it is granted again.
+    needs: list[str] = []
+    try:
+        policy = packs.load(pack_name, project).run_policy
+        needs = list(policy.get("needs") or [])
+        if not interactive:
+            needs += policy.get("needsUnattended") or []
+    except SystemExit:
+        # The pack was renamed or removed since the run. The session can still
+        # answer a question — it just answers it with fewer commands.
+        out.note(f"the pack “{pack_name}” is no longer in this project — "
+                 "the follow-up runs with no commands granted")
+
+    wd = runs.working_dir(project, run)
+    launch, info = runs.launch_argv(
+        posix(project.agency_dir), prompt_text, provider=provider,
+        model=agent.get("model"), unattended=not interactive,
+        needs=needs, stream=not interactive,
+        bypass=bool(getattr(args, "bypass", False)),
+        resume=session, remote_control=remote)
+
+    out.say(f"\n  {out.bold('follow-up')}  {out.dim(pack_name + ' · ' + run.id[:10])}"
+            f" → {project.name}\n")
+    out.done(f"resuming session {out.dim(session)}")
+    out.done(("in the run's worktree  " if wd != project.root else "in the project itself  ")
+             + out.dim(posix(wd)))
+
+    # The record says a person asked again BEFORE the agent starts: a phone
+    # decides from `status` whether there is a live stream to watch, and it
+    # asks the moment this command answers.
+    prior_status = rec.get("status") or "ok"
+    entry = {"at": runs.now(), "prompt": prompt_text,
+             "origin": getattr(args, "origin", None) or "cli",
+             "attended": interactive}
+    if getattr(args, "device", None):
+        entry["device"] = args.device
+    ups = list(rec.get("followUps") or []) + [entry]
+    rec["followUps"] = ups
+    rec["status"] = "running"
+    if remote:
+        rec["agent"] = {**agent, "remoteControl": remote}
+    run.save_record(rec)
+
+    if remote:
+        out.say()
+        out.say(f"  {out.bold('Remote Control')}  {out.dim('the session is called')} "
+                f"{out.bold(remote)}")
+        out.say(f"  {out.dim('Open that name in the Claude app to keep talking to it.')}")
+    out.say()
+    out.say(f"  {out.bold('launching ' + launch[0] + '…')}  {out.dim('Ctrl-C stops it')}\n")
+
+    dialect = providers.streaming(provider)[1] if not interactive else None
+    findings_before = _mtime(run.findings_path)
+    try:
+        result = runs.attend(project, run, launch, wd, dialect=dialect,
+                             append=True, message_file=f"answer-{len(ups)}.md",
+                             on_event=_progress if dialect else None)
+    except KeyboardInterrupt:
+        _close_follow(run, prior_status, None)
+        out.say()
+        out.note("stopped — the run is back to what it was before the question")
+        return 130
+    _close_follow(run, prior_status, result["exitCode"])
+
+    out.say()
+    out.say(f"  {out.dim('the session finished')}  exit {result['exitCode']}  "
+            f"{out.dim('·')}  {_duration(result['wallClockSeconds'])}"
+            + (f"  {out.dim('·')}  {result['turns']} turns" if result.get("turns") else "")
+            + (f"  {out.dim('·')}  ${result['usd']:.2f}" if result.get("usd") else ""))
+    answer = run.dir / f"answer-{len(ups)}.md"
+    if answer.is_file():
+        out.say(f"  {out.dim('the answer:')}  {posix(answer)}")
+    if result.get("denied"):
+        out.say(f"  {out.err(str(result['denied']) + ' tool calls were denied')}")
+    if _mtime(run.findings_path) != findings_before:
+        out.say()
+        out.note(f"findings.json changed — `agency ingest --run {run.id[:8]}` gates it again")
+    out.say()
+    return 0 if result["exitCode"] == 0 else 1
+
+
+def _mtime(path) -> float | None:
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return None
+
+
+def _close_follow(run: runs.Run, status: str, code: int | None) -> None:
+    """Give the run back the status the gate gave it.
+
+    A follow-up borrows `running` so a phone knows there is a stream to watch;
+    it does not get to overturn what the gate decided about the findings, which
+    is what any other status here would mean.
+    """
+    rec = run.record()
+    rec["status"] = status
+    ups = rec.get("followUps") or []
+    if ups:
+        ups[-1]["exitCode"] = code
+    run.save_record(rec)
 
 
 def cmd_cleanup(args) -> int:
@@ -1438,6 +1659,10 @@ def build_parser() -> argparse.ArgumentParser:
     start = s.add_mutually_exclusive_group()
     start.add_argument("--launch", action="store_true",
                        help="start the agent right away and hand this terminal over to it")
+    s.add_argument("--remote-control", nargs="?", const="", metavar="NAME",
+                   help="start an interactive session the Claude app can drive, named "
+                        "agency-<pack>-<run> unless NAME says otherwise. Interactive by "
+                        "definition, so not with --unattended.")
     start.add_argument("--wait", action="store_true",
                        help="start the agent, wait for it, and run the gate when it ends")
     s.add_argument("--model", help="model for this run (default: the runner's named "
@@ -1457,6 +1682,20 @@ def build_parser() -> argparse.ArgumentParser:
                    help=argparse.SUPPRESS)
     s.add_argument("--device", help=argparse.SUPPRESS)
     s.set_defaults(fn=cmd_run)
+
+    s = sub.add_parser("follow", parents=[common],
+                       help="ask the specialist of a finished run one more thing — "
+                            "the same session, not a new run")
+    s.add_argument("--run", help="run id (default: the latest)")
+    s.add_argument("--prompt", "-p", help="the question")
+    s.add_argument("--remote-control", nargs="?", const="", metavar="NAME",
+                   help="reopen the session as one you can talk to, from the Claude app")
+    s.add_argument("--bypass", action="store_true",
+                   help="no authorization checks at all, for this question")
+    s.add_argument("--origin", choices=["cli", "extension", "remote"], default="cli",
+                   help=argparse.SUPPRESS)
+    s.add_argument("--device", help=argparse.SUPPRESS)
+    s.set_defaults(fn=cmd_follow)
 
     s = sub.add_parser("chain", parents=[common],
                        help="run specialists one after another, each judging what the previous one found")

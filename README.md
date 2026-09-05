@@ -213,16 +213,18 @@ Attended, on your own login, with evidence-backed findings that stay.
   triage      accept (send to the board) or reject a finding — an agent calls this too
   note        a note on a finding — free text, not a decision
   status      overview of the project's runs
+  follow      ask the specialist of a finished run one more thing — the same session
   serve       open this project to a paired phone on the tailnet, for a while
 ```
 
-Sixteen commands. There is no `init`, `add`, `hire`, `fire`, `roster`,
+Seventeen commands. There is no `init`, `add`, `hire`, `fire`, `roster`,
 `providers`, `projects`, `config`, `brief`, `backlog`, or `export` — a
 one-way push to a board is the pack's own `sink`, called by `ingest`, not a
 separate step. `agency run <pack>`
 prepares the run and prints the ready command; `--wait` launches the agent
 and runs the gate itself when it finishes; `--launch` hands this terminal
-over to the agent directly; `--json` only prepares, for the extension.
+over to the agent directly; `--remote-control` starts it as a session the
+Claude app can drive; `--json` only prepares, for the extension.
 
 ### Supervised, or on its own
 
@@ -247,6 +249,32 @@ for it, so there is nobody there to answer. The run record says which it was
 In the extension the same choice is a question: a pack that declares
 `needsUnattended` asks **Supervised** or **Unsupervised** when you start it,
 and any other pack is never asked, because for it the answer changes nothing.
+
+### One more question — `agency follow`
+
+An unattended run answers once and the process ends. What it worked out along
+the way — the target, what it read, why it wrote what it wrote — is not gone
+though: the runner keeps the session, and the run record keeps its id.
+
+```
+agency follow --prompt "and what does that mean for the migration?"
+agency follow --run 01K5M2RR --remote-control
+```
+
+The first resumes that session with another question, prints the answer as it
+arrives and leaves it in `RUN_DIR/answer-1.md`. The second reopens the same
+session as one you can talk to, named `agency-<pack>-<run>` so it can be found
+in the Claude app.
+
+It is the run continuing, not a new one: the stream is **appended** to the same
+`agent.jsonl`, and turns, tokens and cost are **added** to the run's totals
+rather than replacing them — a run whose cost quietly became the cost of its
+last question would answer "which model is worth it" wrong, and nothing would
+look broken. What a follow-up does not do is re-gate: the run keeps the status
+the gate gave it, and `agency ingest --run <id>` is the step that says the
+findings changed. A run started in a terminal has no session id to resume,
+because nothing streamed one; `follow` says so rather than starting an agent
+with an empty context.
 
 Providers are **two, and they are in code** — a table of `claude` and
 `codex` in `providers.py`: binary, flags, authorization shape, streaming
@@ -457,11 +485,30 @@ is live on the next refresh. A connection lost in a lift resumes where it
 stopped, because the browser sends `Last-Event-ID` by itself and the daemon
 reads it.
 
-A run started this way is **unattended** by construction, because nobody is at
-the terminal to answer it. Taking over an attended session with Claude Code's
-Remote Control is the next step of
-[`docs/plans/remote.md`](docs/plans/remote.md); until it lands, a specialist
-row has one button rather than two.
+Every screen has a URL — `/p/<project>/run/<id>`, down to the document being
+read. That is not decoration on a phone: without it the back gesture leaves the
+site instead of going back one screen, which is what it did until the page
+learned to route, and a run being watched could not be reloaded or reopened
+from the home screen. The daemon serves the page for every path that is not the
+API, so those URLs survive a refresh.
+
+**Two ways to start a specialist, because supervision is a choice and not a
+property of the pack.** *Run unsupervised* is the one above: nobody can answer
+it, so it never asks, it streams to the phone, and the gate runs by itself when
+it ends. *Open a session I can talk to* starts the same run with Claude Code's
+**Remote Control** — a window opens on the machine and the session is named
+`agency-<pack>-<run>`, which is what you look for in the Claude app. That mode
+shows no live progress and says so: an interactive `claude` publishes no
+machine-readable stream, and inventing one would mean showing progress for a
+session this daemon knows nothing about. It also does not end by itself, so the
+phone gets the gate as a button.
+
+**A finished run can be asked one more thing.** The run screen of an unattended
+run carries a question box: *Ask* resumes the session and the answer arrives in
+the same feed the run was watched in (the page reopens the stream where it
+stopped reading, so nothing is replayed), and *Carry on in the Claude app*
+reopens that same session with Remote Control instead. Both are `agency follow`
+on the machine — the daemon adds who asked and nothing else.
 
 ### Three rules the whole thing stands on
 

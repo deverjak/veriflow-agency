@@ -448,12 +448,19 @@
           ],
           "description": "The runner's own id for the session, when it reports one. Lets a run be replayed in the provider's tooling — `claude --resume <id>` — which is the only way to see what the agent actually did after the terminal is gone."
         },
+        "remoteControl": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Name of the Remote Control session this run was launched under (`claude --remote-control <name>`), when it was. It is what the run is called in the Claude app — without it, a session started from a phone is a row in a list nobody can match to a run."
+        },
         "turns": {
           "type": [
             "integer",
             "null"
           ],
-          "description": "How many turns the agent took. Only a streamed unattended run has one; attended runs inherit the terminal and nothing counts for them."
+          "description": "How many turns the agent took, summed over the first session and every follow-up. Only a streamed run has one; an attended session inherits the terminal and nothing counts for it."
         },
         "denied": {
           "type": [
@@ -519,6 +526,51 @@
         "null"
       ],
       "description": "POSIX path of the throwaway worktree the run holds while it is running. It is recorded so a parallel run by another specialist can tell an occupied directory from an abandoned one instead of force-deleting a review in progress."
+    },
+    "followUps": {
+      "type": "array",
+      "description": "Questions asked of this run's session after it finished (`agency follow`). A follow-up is not a new run — it resumes the same session, adds to the same stream and to the same totals — so what would otherwise be lost is the fact that a person asked again, and what they asked.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "at",
+          "prompt"
+        ],
+        "properties": {
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "origin": {
+            "enum": [
+              "cli",
+              "extension",
+              "remote"
+            ]
+          },
+          "device": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Which paired device asked, when origin is `remote`."
+          },
+          "attended": {
+            "type": "boolean",
+            "description": "Was the session reopened as one a person can talk to (Remote Control), rather than as one more printed answer?"
+          },
+          "exitCode": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        }
+      }
     },
     "chain": {
       "type": [

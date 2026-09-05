@@ -21,11 +21,14 @@ Three properties it does not get to be talked out of:
 * **A device is a credential, not a setting.** Tokens live outside the project
   (a token in `.agency/` is a token in a pull request) and every remote action
   is appended to `remote.jsonl` next to them.
-* **A run started from a phone is unattended by construction.** Nobody is at
-  the terminal to answer the agent, so the only mode this step implements is
-  the one that does not ask. Taking over an attended session from the phone is
-  the Remote Control step of `docs/plans/remote.md`, and it is deliberately not
-  here yet.
+* **A run started from a phone is either unattended or handed back.** Nobody is
+  standing at the machine, so a run that streams is a run that never asks. The
+  other shape does not pretend otherwise: it opens an interactive session in a
+  window on the PC with Remote Control on, and the phone is told to go and talk
+  to it in the Claude app — this daemon has no channel for a conversation and
+  does not invent one. Between the two sits `follow`: a question asked of a
+  session that already ended, answered into the same stream the phone was
+  already watching.
 """
 
 from __future__ import annotations
@@ -75,6 +78,28 @@ PACKS_TTL = 60
 # A document meant to be read on a phone. The cap is not about disk: it is the
 # point past which handing the whole thing to a browser stops being a kindness.
 OUTPUT_MAX = 200_000
+
+#: What a client may ask for besides the run nobody watches. `remote-control`
+#: is the name `docs/plans/remote.md` gave the mode before it existed and the
+#: page used to get a 501 for it; both names mean the same session now.
+INTERACTIVE_MODES = ("interactive", "remote-control")
+
+
+def console_flags() -> dict | None:
+    """How to give a child process a terminal of its own — None where there is
+    none to give.
+
+    An interactive agent wants a console and the daemon has none: it was
+    started from a terminal that may already be closed, and it hands its
+    children a pipe. On Windows `CREATE_NEW_CONSOLE` opens a window on the
+    machine, which is exactly the promise — the run shows up in Claude Code on
+    the PC. Elsewhere there is no such thing without guessing at somebody's
+    terminal emulator, and a guess that fails leaves a session nobody can see;
+    the mode says so instead.
+    """
+    if os.name == "nt":
+        return {"creationflags": subprocess.CREATE_NEW_CONSOLE}
+    return None
 
 
 # ---------------------------------------------------------------- state
@@ -474,13 +499,18 @@ class Daemon:
                          "message": f"“{pack_name}” is not a specialist in {key}."}
 
         mode = body.get("mode") or "unattended"
-        if mode != "unattended":
-            # Naming the step rather than saying "unsupported": the client is
-            # ours and the contract for the second mode is already written.
-            return 501, {"ok": False, "reason": "mode-not-here",
-                         "message": "Only unattended runs start from a phone so far. "
-                                    "Taking over a session with Remote Control is the "
-                                    "next step of docs/plans/remote.md."}
+        interactive = mode in INTERACTIVE_MODES
+        if not interactive and mode != "unattended":
+            return 400, {"ok": False, "reason": "no-mode",
+                         "message": f"“{mode}” is not a way to run a specialist. "
+                                    "There are two: unattended, and interactive."}
+        console = console_flags() if interactive else None
+        if interactive and console is None:
+            return 501, {"ok": False, "reason": "no-console",
+                         "message": "An interactive session needs a terminal, and this "
+                                    "machine gives the daemon no way to open one. On "
+                                    "Windows it opens a window; here, run it unattended "
+                                    "and follow up with a question afterwards."}
 
         bypass = bool(body.get("bypass"))
         if bypass and not device.bypass:
@@ -497,8 +527,14 @@ class Daemon:
                                         "project go one at a time.",
                              "runId": running.runId}
 
-            argv = ["run", pack_name, "--unattended", "--wait",
-                    "--origin", "remote", "--device", device.id,
+            # Two shapes, one flag apart, and both are the terminal's own:
+            # `--unattended --wait` streams into the run directory for the
+            # phone to watch, `--remote-control --wait` opens a session in a
+            # window on the machine and waits for the person to close it. The
+            # name of that session is the core's to choose, not the daemon's.
+            argv = ["run", pack_name,
+                    *(["--remote-control"] if interactive else ["--unattended"]),
+                    "--wait", "--origin", "remote", "--device", device.id,
                     "--repo", str(project.root)]
             if body.get("pr"):
                 argv += ["--pr", str(int(body["pr"]))]
@@ -516,13 +552,14 @@ class Daemon:
                 argv.append("--bypass")
 
             before = {r.id for r in runs.load_runs(project)}
-            job = self._spawn(key, pack_name, device, argv)
+            job = self._spawn(key, pack_name, device, argv, console=console)
             self.jobs[job.id] = job
 
         run_id = self._await_record(project, device, before, job)
         append_audit(self.audit_path, {
             "action": "run", "device": device.id, "deviceName": device.name,
             "project": key, "pack": pack_name, "bypass": bypass,
+            "mode": "interactive" if interactive else "unattended",
             "runId": run_id, "job": job.id,
         })
         if not run_id:
@@ -530,12 +567,101 @@ class Daemon:
             # draft PR, a commit already reviewed, a missing prompt. Those
             # refusals are printed, not returned, so the log is the honest
             # answer rather than a reason invented here.
+            #
+            # And the job is forgotten: it claimed no worktree and owns no run,
+            # so leaving it in the list would make the project look busy for as
+            # long as somebody leaves the window it printed into open.
+            self.jobs.pop(job.id, None)
             return 400, {"ok": False, "reason": "not-started", "job": job.id,
-                         "message": "The run did not start.", "output": job.tail()}
+                         "message": ("The run did not start. It said why in the window "
+                                     "it opened on the machine — most often a draft pull "
+                                     "request, or a commit this specialist has already "
+                                     "reviewed." if interactive
+                                     else "The run did not start."),
+                         "output": job.tail()}
         return 200, {"ok": True, "runId": run_id, "job": job.id, "pack": pack_name,
-                     "project": key}
+                     "project": key,
+                     "mode": "interactive" if interactive else "unattended"}
 
-    def _spawn(self, key: str, pack_name: str, device: Device, argv: list[str]) -> Job:
+    def follow_run(self, project: config.Project, key: str, device: Device,
+                   run, body: dict) -> tuple[int, dict]:
+        """One more question for a run that has stopped — `agency follow`.
+
+        The daemon adds nothing to it but who asked. Whether there is a session
+        to resume, what it costs and where the answer goes are all the core's
+        to know; here the only new thing is that the answer has to be waited
+        for the same way a run's id is — by watching the record, because the
+        phone opens the stream as soon as this call returns and a stream opened
+        a moment too early ends immediately with `done`.
+        """
+        prompt = str(body.get("prompt") or "").strip()
+        if not prompt:
+            return 400, {"ok": False, "reason": "no-prompt",
+                         "message": "A follow-up is a question."}
+
+        rec = run.record()
+        agent = rec.get("agent") or {}
+        if rec.get("status") == "running":
+            return 409, {"ok": False, "reason": "still-running",
+                         "message": "This run has not stopped yet — a follow-up joins a "
+                                    "session that has.", "runId": run.id}
+        if not agent.get("sessionId") or not providers.resumes(agent.get("provider") or ""):
+            return 400, {"ok": False, "reason": "no-session",
+                         "message": "This run left no session to resume, so there is "
+                                    "nothing to continue. Start a new run instead."}
+
+        mode = body.get("mode") or "unattended"
+        interactive = mode in INTERACTIVE_MODES
+        if not interactive and mode != "unattended":
+            return 400, {"ok": False, "reason": "no-mode",
+                         "message": f"“{mode}” is not a way to ask."}
+        console = console_flags() if interactive else None
+        if interactive and console is None:
+            return 501, {"ok": False, "reason": "no-console",
+                         "message": "Reopening the session as one you can talk to needs a "
+                                    "terminal this machine cannot give the daemon."}
+
+        bypass = bool(body.get("bypass"))
+        if bypass and not device.bypass:
+            return 403, {"ok": False, "reason": "no-bypass",
+                         "message": "This device is not allowed to run anything with the "
+                                    "authorization checks turned off."}
+
+        pack_name = rec.get("pack") or "?"
+        with self.lock:
+            running = self.busy(key)
+            if running:
+                return 409, {"ok": False, "reason": "busy",
+                             "message": f"{running.pack} is running in {key}. One at a "
+                                        "time over one project.",
+                             "runId": running.runId}
+            argv = ["follow", "--run", run.id, "--prompt", prompt,
+                    "--origin", "remote", "--device", device.id,
+                    "--repo", str(project.root)]
+            if interactive:
+                argv.append("--remote-control")
+            if bypass:
+                argv.append("--bypass")
+            job = self._spawn(key, pack_name, device, argv, console=console)
+            job.runId = run.id
+            self.jobs[job.id] = job
+
+        started = self._await_running(run, job)
+        append_audit(self.audit_path, {
+            "action": "follow", "device": device.id, "deviceName": device.name,
+            "project": key, "pack": pack_name, "runId": run.id, "job": job.id,
+            "bypass": bypass, "mode": "interactive" if interactive else "unattended",
+            "prompt": prompt,
+        })
+        if not started:
+            return 400, {"ok": False, "reason": "not-started", "job": job.id,
+                         "message": "The follow-up did not start.", "output": job.tail()}
+        return 200, {"ok": True, "runId": run.id, "job": job.id, "pack": pack_name,
+                     "project": key,
+                     "mode": "interactive" if interactive else "unattended"}
+
+    def _spawn(self, key: str, pack_name: str, device: Device, argv: list[str],
+               console: dict | None = None) -> Job:
         jobs_dir = self.state / "jobs"
         jobs_dir.mkdir(parents=True, exist_ok=True)
         job_id = secrets.token_hex(4)
@@ -545,6 +671,18 @@ class Daemon:
         # anyway, because when preparation refuses, this file is the only
         # place that says why.
         flags = {}
+        if console:
+            # The opposite decision, for the opposite run: this one is meant to
+            # be seen. Its stdio IS that window, so nothing is redirected into
+            # the job log — which is why a refusal in this mode has to be read
+            # off the screen on the machine rather than sent to the phone.
+            flags = dict(console)
+            process = subprocess.Popen(
+                [sys.executable, "-m", "agency", *argv],
+                cwd=str(self.projects[key].root),
+                env={**os.environ, "PYTHONIOENCODING": "utf-8"}, **flags)
+            return Job(id=job_id, project=key, pack=pack_name, device=device.id,
+                       log=log, argv=argv, process=process)
         if os.name == "nt":
             # No console window for a run nobody is watching. It also stops the
             # child from taking Ctrl-C aimed at the daemon.
@@ -585,6 +723,23 @@ class Daemon:
                 return None
             time.sleep(0.1)
         return None
+
+    def _await_running(self, run, job: Job) -> bool:
+        """Wait until the run says it is running again.
+
+        `agency follow` writes that before it launches the agent, on purpose:
+        it is the only signal that tells the phone its stream has something to
+        carry. Without waiting for it here, the page would open the stream, be
+        told the run is finished, and show the answer only after a reload.
+        """
+        deadline = time.monotonic() + RUN_ID_TIMEOUT
+        while time.monotonic() < deadline:
+            if run.record().get("status") == "running":
+                return True
+            if not job.alive():
+                return False
+            time.sleep(0.1)
+        return False
 
 
 # ---------------------------------------------------------------- HTTP
@@ -710,11 +865,13 @@ class Handler(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         path, query = url.path, parse_qs(url.query)
 
-        if path in ("/", "/index.html"):
-            return self._page()
-
+        # Every path that is not the API is the page. The client keeps its
+        # place in `history` — a project, a run, an open document each have a
+        # URL — and on a phone that is not a nicety: without it the back
+        # gesture leaves the app on the first screen you looked at, which is
+        # what it did until the page learned to route.
         if not path.startswith("/api/"):
-            return self._fail(404, "no-route", "No such path.")
+            return self._page()
 
         device = self._device(query)
         if not device:
@@ -729,6 +886,10 @@ class Handler(BaseHTTPRequestHandler):
                 "ok": True,
                 "activatedFor": self.daemon.remaining(),
                 "device": {"id": device.id, "name": device.name, "bypass": device.bypass},
+                # Whether this machine can open a session to talk to at all. A
+                # button that always 501s is not a button, and the client would
+                # otherwise have to press one to find out.
+                "canOpenSession": console_flags() is not None,
                 "projects": [
                     {"key": key, "name": p.name, "slug": p.slug,
                      "root": posix(p.root), "defaultBranch": p.default_branch}
@@ -740,6 +901,7 @@ class Handler(BaseHTTPRequestHandler):
                 "ok": True,
                 "activatedFor": self.daemon.remaining(),
                 "device": {"id": device.id, "name": device.name, "bypass": device.bypass},
+                "canOpenSession": console_flags() is not None,
                 "projects": self.daemon.overview(),
             })
 
@@ -826,12 +988,15 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(code, data)
 
         run_id, tail = _run_path(path)
-        if run_id and tail == "ingest":
+        if run_id and tail in ("ingest", "follow"):
             if not project:
                 return self._fail(404, "no-project", f"“{key}” is not an activated project.")
             run = runs.find_run(project, run_id)
             if not run:
                 return self._fail(404, "no-run", f"No run {run_id} in {key}.")
+            if tail == "follow":
+                code, data = self.daemon.follow_run(project, key, device, run, body)
+                return self._send(code, data)
             append_audit(self.daemon.audit_path,
                          {"action": "ingest", "device": device.id, "project": key,
                           "runId": run.id})
@@ -977,6 +1142,7 @@ def _run_state(run) -> dict:
     """
     rec = run.record()
     agent = rec.get("agent") or {}
+    trigger = rec.get("trigger") or {}
     return {
         "runId": run.id,
         "pack": rec.get("pack"),
@@ -984,9 +1150,26 @@ def _run_state(run) -> dict:
         "startedAt": rec.get("startedAt"),
         "finishedAt": rec.get("finishedAt"),
         "exitReason": rec.get("exitReason"),
-        "trigger": rec.get("trigger") or {},
+        "trigger": trigger,
+        "attended": bool(trigger.get("attended")),
         "provider": agent.get("provider"),
         "model": agent.get("model"),
+        # The name of the session in the Claude app, and whether one more
+        # question can reach it at all. Both are answers only the record has:
+        # a phone cannot tell a run that streamed from one that inherited a
+        # terminal, and offering a follow-up that cannot work is worse than
+        # not offering one.
+        "remoteControl": agent.get("remoteControl"),
+        # What the first session was allowed to do, so a follow-up can ask for
+        # the same and not be refused halfway through the answer.
+        "authorized": agent.get("authorized"),
+        "canFollow": bool(agent.get("sessionId"))
+                     and providers.resumes(agent.get("provider") or ""),
+        "canTakeOver": bool(agent.get("sessionId"))
+                       and providers.remote_controls(agent.get("provider") or ""),
+        "followUps": [{"at": f.get("at"), "prompt": f.get("prompt"),
+                       "attended": bool(f.get("attended"))}
+                      for f in (rec.get("followUps") or [])],
         "denied": (agent.get("denied") or {}).get("count") or 0,
         "counts": rec.get("counts"),
         "findings": len(run.findings()),

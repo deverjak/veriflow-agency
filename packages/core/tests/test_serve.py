@@ -80,9 +80,10 @@ def spawns(daemon, monkeypatch, target: dict | None = None):
     `agency run` would have written a second later."""
     seen: dict = {}
 
-    def fake_spawn(self, key, pack_name, device, argv):
+    def fake_spawn(self, key, pack_name, device, argv, console=None):
         seen["argv"] = argv
         seen["key"] = key
+        seen["console"] = console
         run = runs.start(self.projects[key], pack_name,
                          target or {"kind": "workspace", "ref": "main",
                                     "headRefOid": "a" * 40},
@@ -465,15 +466,65 @@ def test_one_run_at_a_time_over_one_project(daemon, project, monkeypatch):
     assert code == 409 and data["reason"] == "busy"
 
 
-def test_taking_over_a_session_is_named_not_pretended(daemon, project, monkeypatch):
+def test_a_session_to_talk_to_is_the_same_run_one_flag_apart(daemon, project,
+                                                             monkeypatch):
+    """The second mode of `docs/plans/remote.md`: nobody at the machine can
+    answer an agent, so the run that a person means to talk to is not streamed
+    to the phone at all — it is opened in a window on the PC with Remote
+    Control on, and the conversation happens in the Claude app."""
+    seen = spawns(daemon, monkeypatch)
+    monkeypatch.setattr(serve, "console_flags", lambda: {"creationflags": 16})
+    token = pair(daemon)
+
+    code, data = call(daemon, "POST", "/api/run", token,
+                      {"project": project.root.name, "pack": "review-graph",
+                       "mode": "interactive", "prompt": "walk me through it"})
+
+    assert code == 200, data
+    assert data["mode"] == "interactive"
+    argv = seen["argv"]
+    assert argv[:4] == ["run", "review-graph", "--remote-control", "--wait"]
+    assert "--unattended" not in argv
+    assert seen["console"], "an interactive agent needs a terminal of its own"
+
+
+def test_the_old_name_for_that_mode_still_answers(daemon, project, monkeypatch):
+    """The page asked for `remote-control` and got a 501 for a year. A client
+    that never updated must not now get "no such mode" for the same word."""
     spawns(daemon, monkeypatch)
+    monkeypatch.setattr(serve, "console_flags", lambda: {"creationflags": 16})
     token = pair(daemon)
 
     code, data = call(daemon, "POST", "/api/run", token,
                       {"project": project.root.name, "pack": "review-graph",
                        "mode": "remote-control"})
 
-    assert code == 501 and data["reason"] == "mode-not-here"
+    assert code == 200, data
+
+
+def test_a_machine_that_cannot_open_a_window_says_so(daemon, project, monkeypatch):
+    """A promise this daemon cannot keep is refused rather than half-kept: a
+    session nobody can see is worse than no session."""
+    spawns(daemon, monkeypatch)
+    monkeypatch.setattr(serve, "console_flags", lambda: None)
+    token = pair(daemon)
+
+    code, data = call(daemon, "POST", "/api/run", token,
+                      {"project": project.root.name, "pack": "review-graph",
+                       "mode": "interactive"})
+
+    assert code == 501 and data["reason"] == "no-console"
+
+
+def test_a_mode_that_is_not_a_mode(daemon, project, monkeypatch):
+    spawns(daemon, monkeypatch)
+    token = pair(daemon)
+
+    code, data = call(daemon, "POST", "/api/run", token,
+                      {"project": project.root.name, "pack": "review-graph",
+                       "mode": "supervised-ish"})
+
+    assert code == 400 and data["reason"] == "no-mode"
 
 
 def test_a_run_that_never_started_answers_with_what_was_printed(daemon, project,
@@ -485,7 +536,7 @@ def test_a_run_that_never_started_answers_with_what_was_printed(daemon, project,
     log.write_text("  ! The pull request is a draft. Continue with --force.\n",
                    encoding="utf-8")
 
-    def fake_spawn(self, key, pack_name, device, argv):
+    def fake_spawn(self, key, pack_name, device, argv, console=None):
         return serve.Job(id="job", project=key, pack=pack_name, device=device.id,
                          log=log, argv=argv, process=FakeProcess(running=False))
 
@@ -497,6 +548,11 @@ def test_a_run_that_never_started_answers_with_what_was_printed(daemon, project,
 
     assert code == 400 and data["reason"] == "not-started"
     assert "draft" in data["output"]
+    # And the project is not left looking busy. A run that refused claimed no
+    # worktree and owns no record; an interactive one may also still be holding
+    # the window it printed the reason into, and that must not be an activation
+    # nobody can clear.
+    assert daemon.busy(project.root.name) is None
 
 
 def test_every_remote_action_leaves_a_line(daemon, project, monkeypatch):
@@ -509,6 +565,7 @@ def test_every_remote_action_leaves_a_line(daemon, project, monkeypatch):
              daemon.audit_path.read_text(encoding="utf-8").splitlines()]
 
     assert [x["action"] for x in lines] == ["paired", "run"]
+    assert lines[1]["mode"] == "unattended"
     assert lines[1]["device"] == daemon.devices.all()[0].id
     assert lines[1]["pack"] == "review-graph"
 
@@ -769,3 +826,199 @@ def test_a_long_document_is_clipped_rather_than_sent_whole(daemon, project, make
 
     assert code == 200 and data["clipped"] is True
     assert len(data["text"]) == serve.OUTPUT_MAX
+
+
+# ---------------------------------------------------------------- follow-ups
+
+def followable(make_run, **over):
+    """A run as an unattended one leaves it: finished, and with the session id
+    its own stream reported."""
+    over.setdefault("status", "ok")
+    over.setdefault("agent", {"provider": "claude", "model": "sonnet",
+                              "bin": "claude", "sessionId": "sess-1"})
+    return make_run(**over)
+
+
+def test_one_more_question_goes_to_the_same_session(daemon, project, monkeypatch,
+                                                    make_run):
+    """The point of a follow-up: `agency follow` resumes the run's own session,
+    so the daemon passes the run id and the question and nothing else. What it
+    must NOT do is turn the question into a second run."""
+    run = followable(make_run)
+    seen = spawns(daemon, monkeypatch)
+
+    def running(self, r, job):          # the child would flip the record
+        rec = r.record()
+        rec["status"] = "running"
+        r.save_record(rec)
+        return True
+
+    monkeypatch.setattr(serve.Daemon, "_await_running", running)
+    token = pair(daemon)
+
+    code, data = call(daemon, "POST", f"/api/run/{run.id}/follow", token,
+                      {"project": project.root.name, "prompt": "and the migration?"})
+
+    assert code == 200, data
+    assert data["runId"] == run.id
+    argv = seen["argv"]
+    assert argv[:2] == ["follow", "--run"]
+    assert argv[2] == run.id
+    assert argv[argv.index("--prompt") + 1] == "and the migration?"
+    assert argv[argv.index("--origin") + 1] == "remote"
+    assert "--remote-control" not in argv
+
+
+def test_a_follow_up_can_be_a_session_to_talk_to(daemon, project, monkeypatch,
+                                                 make_run):
+    run = followable(make_run)
+    seen = spawns(daemon, monkeypatch)
+    monkeypatch.setattr(serve, "console_flags", lambda: {"creationflags": 16})
+    monkeypatch.setattr(serve.Daemon, "_await_running", lambda self, r, j: True)
+    token = pair(daemon)
+
+    code, data = call(daemon, "POST", f"/api/run/{run.id}/follow", token,
+                      {"project": project.root.name, "prompt": "take it from here",
+                       "mode": "interactive"})
+
+    assert code == 200, data
+    assert "--remote-control" in seen["argv"]
+    assert seen["console"]
+
+
+def test_a_run_that_left_no_session_cannot_be_followed(daemon, project, monkeypatch,
+                                                       make_run):
+    """An attended run inherits a terminal and streams nothing, so no session id
+    was ever recorded. Offering a follow-up that cannot work would be worse than
+    not offering one — the phone is told which it is."""
+    run = make_run(status="ok")
+    spawns(daemon, monkeypatch)
+    token = pair(daemon)
+
+    code, data = call(daemon, "POST", f"/api/run/{run.id}/follow", token,
+                      {"project": project.root.name, "prompt": "well?"})
+
+    assert code == 400 and data["reason"] == "no-session"
+
+
+def test_a_run_still_going_is_not_followed_up_on(daemon, project, monkeypatch,
+                                                 make_run):
+    run = followable(make_run, status="running")
+    spawns(daemon, monkeypatch)
+    token = pair(daemon)
+
+    code, data = call(daemon, "POST", f"/api/run/{run.id}/follow", token,
+                      {"project": project.root.name, "prompt": "well?"})
+
+    assert code == 409 and data["reason"] == "still-running"
+
+
+def test_a_question_with_no_question_in_it(daemon, project, monkeypatch, make_run):
+    run = followable(make_run)
+    spawns(daemon, monkeypatch)
+    token = pair(daemon)
+
+    code, data = call(daemon, "POST", f"/api/run/{run.id}/follow", token,
+                      {"project": project.root.name, "prompt": "   "})
+
+    assert code == 400 and data["reason"] == "no-prompt"
+
+
+def test_the_follow_up_waits_until_there_is_a_stream_to_watch(daemon, project,
+                                                              monkeypatch, make_run):
+    """The phone opens the stream the moment this call answers. Answering
+    before `agency follow` has reopened the run would hand it a stream that
+    ends immediately with `done` — the answer would appear only on a reload."""
+    run = followable(make_run)
+    spawns(daemon, monkeypatch)
+    token = pair(daemon)
+    monkeypatch.setattr(serve, "RUN_ID_TIMEOUT", 0.3)
+
+    code, data = call(daemon, "POST", f"/api/run/{run.id}/follow", token,
+                      {"project": project.root.name, "prompt": "well?"})
+
+    assert code == 400 and data["reason"] == "not-started"
+
+
+def test_the_question_that_was_asked_leaves_a_line(daemon, project, monkeypatch,
+                                                   make_run):
+    run = followable(make_run)
+    spawns(daemon, monkeypatch)
+    monkeypatch.setattr(serve.Daemon, "_await_running", lambda self, r, j: True)
+    token = pair(daemon)
+
+    call(daemon, "POST", f"/api/run/{run.id}/follow", token,
+         {"project": project.root.name, "prompt": "and the migration?"})
+
+    lines = [json.loads(x) for x in
+             daemon.audit_path.read_text(encoding="utf-8").splitlines()]
+    assert [x["action"] for x in lines] == ["paired", "follow"]
+    assert lines[1]["prompt"] == "and the migration?"
+    assert lines[1]["runId"] == run.id
+
+
+def test_the_state_says_whether_another_question_can_reach_it(daemon, project,
+                                                              make_run):
+    run = followable(make_run)
+    token = pair(daemon)
+
+    code, data = call(daemon, "GET",
+                      f"/api/run/{run.id}?project={project.root.name}", token)
+
+    assert code == 200
+    assert data["canFollow"] is True
+    assert data["canTakeOver"] is True
+    assert data["attended"] is True or data["attended"] is False
+
+
+def test_a_run_with_no_session_says_no(daemon, project, make_run):
+    run = make_run(status="ok")
+
+    token = pair(daemon)
+    code, data = call(daemon, "GET",
+                      f"/api/run/{run.id}?project={project.root.name}", token)
+
+    assert data["canFollow"] is False
+
+
+def test_the_questions_already_asked_are_part_of_the_run(daemon, project, make_run):
+    """The phone shows the conversation, not just the last answer — a run with
+    three questions in it is three questions, and the record is where they are."""
+    run = followable(make_run)
+    rec = run.record()
+    rec["followUps"] = [{"at": "2026-09-04T10:00:00Z", "prompt": "and the migration?",
+                         "origin": "remote", "attended": False}]
+    run.save_record(rec)
+    token = pair(daemon)
+
+    code, data = call(daemon, "GET",
+                      f"/api/run/{run.id}?project={project.root.name}", token)
+
+    assert [f["prompt"] for f in data["followUps"]] == ["and the migration?"]
+
+
+# ---------------------------------------------------------------- routing
+
+def test_a_deep_link_is_the_page_not_a_404(daemon):
+    """The client keeps its place in `history`, so a run has a URL of its own.
+    Without this, the first thing a phone does with such a URL — reload it, or
+    come back to it from the home screen — is a 404."""
+    url = f"http://127.0.0.1:{daemon.port}/p/main-panel/run/01K5M2RR/doc/answer-1.md"
+    with urllib.request.urlopen(url, timeout=10) as r:
+        body = r.read().decode("utf-8")
+        assert r.status == 200
+        assert r.headers["Content-Type"].startswith("text/html")
+
+    assert "<title>Agency</title>" in body
+
+
+def test_the_api_still_has_paths_that_do_not_exist(daemon, project):
+    """The fallback is for the client's routes, not for the API: a mistyped
+    endpoint must stay an error, or every client bug becomes a page of HTML
+    where JSON was expected."""
+    token = pair(daemon)
+
+    code, data = call(daemon, "GET", "/api/nonsense?project=" + project.root.name,
+                      token)
+
+    assert code == 404 and data["reason"] == "no-route"

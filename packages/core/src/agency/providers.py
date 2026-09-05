@@ -57,6 +57,17 @@ BUILTIN: dict[str, dict] = {
         # `Bash(git status *)` on its own does not cover a bare `git status`.
         "allowShapes": ["Bash({cmd} *)", "Bash({cmd})"],
         "bypassArgs": ["--dangerously-skip-permissions"],
+        # Continuing a session that already happened. `claude --resume <id>`
+        # takes the id the stream reported as `session_id` and starts where it
+        # stopped — which is what makes a follow-up question a follow-up and
+        # not a second run with none of the context. Verified against
+        # `claude --help` (2.1.258): `-r, --resume [value]`.
+        "resumeShape": ["--resume", "{session}"],
+        # Remote Control: an interactive session the Claude app can drive.
+        # `--remote-control [name]` per its own help — "Start an interactive
+        # session with Remote Control enabled (optionally named)". The name is
+        # how the session is recognised in the app, so the core always names it.
+        "remoteControlFlag": "--remote-control",
         # An event stream instead of silence. Without `--verbose`, `-p` emits
         # nothing until the very end, so ten minutes of work is indistinguishable
         # from a hung process.
@@ -106,6 +117,15 @@ BUILTIN: dict[str, dict] = {
         "allowFlag": None,
         "allowShapes": [],
         "bypassArgs": ["--dangerously-bypass-approvals-and-sandbox"],
+        # `codex exec resume <SESSION_ID> [PROMPT]` — a subcommand of `exec`,
+        # so it follows `unattendedPrefix` and the shape stays a list. Read off
+        # the 0.144.3 help, NOT verified by a real run, like the rest of this
+        # branch.
+        "resumeShape": ["resume", "{session}"],
+        # Codex has no Remote Control. An empty entry here is not a gap, it is
+        # the answer: `agency follow --remote-control` over a codex run says so
+        # instead of inventing a flag.
+        "remoteControlFlag": None,
         "streamArgs": ["--json"],
         "streamDialect": "codex-jsonl",
         "extraArgs": [],
@@ -143,6 +163,7 @@ def spec(provider_id: str) -> dict:
              "dirFlag": None, "promptFlag": None, "extraArgs": [],
              "editsGrant": [], "allowFlag": None, "allowShapes": [],
              "bypassArgs": [], "streamArgs": [], "streamDialect": None,
+             "resumeShape": [], "remoteControlFlag": None,
              "models": [], "defaultModel": None, "unregistered": True}
     out = dict(s)
     out["id"] = provider_id
@@ -159,6 +180,22 @@ def authorizes(provider_id: str) -> bool:
     """
     s = spec(provider_id)
     return bool(s.get("editsGrant") or s.get("bypassArgs"))
+
+
+def resumes(provider_id: str) -> bool:
+    """Can a finished session of this runner be picked up again?
+
+    Without it a follow-up question is a new run with none of the context — it
+    would re-read the whole target to answer "and what about the second one?".
+    A runner that cannot resume says so here, and the follow-up is refused
+    rather than quietly turned into something else.
+    """
+    return bool(spec(provider_id).get("resumeShape"))
+
+
+def remote_controls(provider_id: str) -> bool:
+    """Can this runner start a session the phone's own app can drive?"""
+    return bool(spec(provider_id).get("remoteControlFlag"))
 
 
 def authorization(provider_id: str, needs: list[str], mode: str = "grant") -> list[str]:
