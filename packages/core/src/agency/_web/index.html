@@ -90,6 +90,26 @@
     width: 100%; padding: 12px; border-radius: 10px; font: inherit;
     background: var(--card); color: var(--fg); border: 1px solid var(--line);
   }
+  /* A row you tap anywhere on, because a 20px box is not a phone target. The
+     box needs its own size back: the rule above stretches every input to the
+     full width, which turns a checkbox into a bar. */
+  .check {
+    display: flex; align-items: center; gap: 12px; cursor: pointer;
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 12px; padding: 14px; margin: 14px 0 0;
+  }
+  /* The rule above does not only stretch it — it also puts a card background,
+     a border and a radius on the box, which is enough to smother the native
+     control on some engines. Hand all four back and let the platform draw its
+     own checkbox; `accent-color` is the only part worth colouring. */
+  .check input { width: 20px; height: 20px; flex: 0 0 auto; padding: 0; margin: 0;
+                 background: none; border: 0; border-radius: 0;
+                 accent-color: var(--err); }
+  .check span { font-weight: 600; }
+  /* Red once it is on, and not before: a screen that shouts about a setting
+     nobody has chosen is a screen you stop reading. */
+  .check.on { border-color: var(--err); }
+  .check.on span { color: var(--err); }
   textarea { min-height: 96px; resize: vertical; }
   label { display: block; font-size: 13px; color: var(--dim); margin: 14px 0 6px; }
   .note { font-size: 13px; color: var(--dim); margin: 10px 0 0; }
@@ -498,40 +518,52 @@
       () => start('unattended'));
     const takeover = button('Open a session I can talk to', 'secondary',
       () => start('interactive'));
-    // The same session with the authorization checks off. A separate button
-    // rather than a switch, for the reason the editor has a second arrow: it
-    // is a different thing to start, not a setting of the first one — and it
-    // is offered only to a device that was paired with that right, because
-    // the daemon will refuse it from any other.
-    const wideOpen = button('Open one with no permission checks', 'secondary',
-      () => start('interactive', true));
+
+    // The authorization checks are a property of whichever run you start, not
+    // a third thing to start. It used to be its own button next to the other
+    // two, which made the same session look like a different one and only
+    // covered the interactive shape — an unsupervised run could not be given
+    // the same freedom at all. A box above both says what it really is: a
+    // setting the buttons below it are read with.
+    const skip = document.createElement('input');
+    skip.type = 'checkbox';
+    const allowed = !!(state.device && state.device.bypass);
+    if (allowed) {
+      const row = text('label', 'check');
+      row.append(skip, text('span', null, 'Without permission checks'));
+      // The row turns red only once it is on, so the screen does not shout
+      // about a setting nobody has chosen yet.
+      skip.onchange = () => row.classList.toggle('on', skip.checked);
+      v.append(row, text('p', 'note', 'Starts it with --dangerously-skip-permissions: '
+        + 'the agent will not ask you about anything it does. It holds for whichever '
+        + 'of the two below you press.'));
+    }
 
     v.append(text('p', 'note', 'Unsupervised: nobody is at the terminal, so the run '
       + 'never stops to ask, and the gate runs by itself when it ends.'),
       text('div', 'gap'), unsupervised);
     if (state.canOpenSession) {
       v.appendChild(takeover);
-      if (state.device && state.device.bypass) v.appendChild(wideOpen);
       v.appendChild(text('p', 'note', 'A session opens Claude Code in a window on the '
         + 'machine with Remote Control on — you carry on with it in the Claude app, and '
-        + 'run the gate from here when you are done.'
-        + (state.device && state.device.bypass
-          ? ' The last one starts it with --dangerously-skip-permissions: it will not '
-            + 'ask you about anything it does.' : '')));
-      // An absent button is a puzzle unless it says what it is waiting for.
-      // This one is waiting on a decision made at the machine, and the phone
-      // has no way to reach it — so the note is the whole of the answer.
-      if (!(state.device && state.device.bypass)) {
-        v.appendChild(text('p', 'note', 'This device was not paired with the right to '
-          + 'turn the authorization checks off. `agency serve --allow-bypass` at the '
-          + 'machine opens a pairing window that grants it; pair again from there.'));
-      }
+        + 'run the gate from here when you are done.'));
+    }
+    // An absent box is a puzzle unless it says what it is waiting for. This one
+    // waits on a decision made at the machine, which the phone has no way to
+    // reach — so the note is the whole of the answer.
+    if (!allowed) {
+      v.appendChild(text('p', 'note', 'This device was not paired with the right to '
+        + 'turn the authorization checks off. `agency serve --allow-bypass` at the '
+        + 'machine opens a pairing window that grants it; pair again from there.'));
     }
     v.appendChild(err);
 
-    async function start(mode, bypass) {
+    async function start(mode) {
       const body = { project: key, pack: pack.name, mode: mode };
-      if (bypass) body.bypass = true;
+      // `allowed` and not just `skip.checked`: a box that was never shown is
+      // a box nobody ticked, and asking for a right this device does not have
+      // is a 403 halfway to the run.
+      if (allowed && skip.checked) body.bypass = true;
       const q = prompt ? prompt.value.trim() : '';
       if (pack.run.prompt === 'required' && !q) {
         err.textContent = 'This specialist needs to know what to work on.';
@@ -543,7 +575,7 @@
         body.pr = Number(prSelect.value);
       }
       err.textContent = '';
-      unsupervised.disabled = takeover.disabled = wideOpen.disabled = true;
+      unsupervised.disabled = takeover.disabled = skip.disabled = true;
       // Preparation resolves the pull request and can build a worktree, so the
       // answer takes seconds. Saying so beats a button that looks broken.
       unsupervised.textContent = 'Preparing the run…';
@@ -552,7 +584,7 @@
         nav(runPath(key, data.runId));
       } catch (e) {
         err.textContent = e.message;
-        unsupervised.disabled = takeover.disabled = wideOpen.disabled = false;
+        unsupervised.disabled = takeover.disabled = skip.disabled = false;
         unsupervised.textContent = 'Run unsupervised';
       }
     }

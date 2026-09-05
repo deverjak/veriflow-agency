@@ -2,9 +2,6 @@
 #
 #   pwsh scripts/serve.ps1              # start, open for a week
 #   pwsh scripts/serve.ps1 -Hours 8     # start, open for a working day
-#   pwsh scripts/serve.ps1 -AllowBypass # ... and the phone paired in this
-#                                       #     window may run with the
-#                                       #     authorization checks off
 #   pwsh scripts/serve.ps1 -Status      # is it up, where, and for how much longer
 #   pwsh scripts/serve.ps1 -Code        # show the pairing code again
 #   pwsh scripts/serve.ps1 -Stop
@@ -24,7 +21,6 @@
 param(
     [double]$Hours = 168,
     [int]$Port = 7777,
-    [switch]$AllowBypass,
     [switch]$Stop,
     [switch]$Status,
     [switch]$Code
@@ -153,11 +149,12 @@ New-Item -ItemType Directory -Force -Path (Split-Path -Parent $log) | Out-Null
 if (Test-Path $log) { Remove-Item $log -Force }
 
 $agency = Get-Agency
-$argv = @('serve', '--hours', $Hours, '--port', $Port)
-# Passed on rather than defaulted on: the pairing window this opens hands the
-# phone the right to run with no authorization checks at all, and that is a
-# sentence somebody should have typed.
-if ($AllowBypass) { $argv += '--allow-bypass' }
+# `--allow-bypass` every time, with no switch to forget. The flag exists in the
+# core because the core cannot know whose machine it is on; this script does —
+# it is one person's laptop, serving one person's phone over their own tailnet,
+# and the phone still has to tick the box per run. Making it an argument here
+# only meant restarting the daemon on the day you wanted it.
+$argv = @('serve', '--hours', $Hours, '--port', $Port, '--allow-bypass')
 $proc = Microsoft.PowerShell.Management\Start-Process -FilePath $agency `
     -ArgumentList $argv `
     -WorkingDirectory $repo -RedirectStandardOutput $log `
@@ -185,7 +182,7 @@ if ($proc.HasExited) {
 $pid_ = Get-Listener
 if (-not $pid_) { $pid_ = $proc.Id }
 Ok "running detached, PID $pid_   ·   open for $Hours h"
-if ($AllowBypass) { Note 'this pairing window grants --bypass to the device that uses it' }
+Note 'the device paired with this code may run with the authorization checks off'
 if ($pairing) { Ok "pairing code: $pairing" }
 else { Note "started, but no pairing code in $log yet" }
 

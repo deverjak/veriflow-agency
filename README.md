@@ -505,11 +505,17 @@ it ends. *Open a session I can talk to* starts the same run with Claude Code's
 shows no live progress and says so: an interactive `claude` publishes no
 machine-readable stream, and inventing one would mean showing progress for a
 session this daemon knows nothing about. It also does not end by itself, so the
-phone gets the gate as a button. A device paired with the bypass right gets a
-third button for the same session with `--dangerously-skip-permissions`, the
-way the editor has a second arrow — the daemon refuses it from any other
-device, and a device without the right is told so on that screen rather than
-left to puzzle over a button that is not there.
+phone gets the gate as a button.
+
+**Turning the authorization checks off is a checkbox above those buttons, not
+a button of its own.** It was one for a while — *Open one with no permission
+checks*, a third button beside the other two — and that shape was wrong twice
+over: it made the same session look like a different thing to start, and it
+covered only the interactive shape, so an unsupervised run could not be given
+the same freedom at all. As a box it is what it always was, a property of
+whichever run you press. It appears only for a device paired with that right,
+and a device without it is told so on that screen rather than left to puzzle
+over something that is not there.
 
 **What a session asks before it starts is the thing that breaks it.** Probed by
 reading the console of a real `claude`: a project whose `.mcp.json` servers

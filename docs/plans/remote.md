@@ -171,7 +171,9 @@ Vyšlo najevo hned prvním skutečným použitím Kroku 2: **session předaná C
 
 - [x] `agency serve --allow-bypass` (a `scripts/serve.ps1 -AllowBypass`). Uděluje ho stroj, v tom párovacím okně, které sám otevřel — `pair()` už jen hlásí odpověď. `bypass` v těle požadavku se ignoruje.
 - [x] Konzole to říká při každém startu, i když se neuděluje. Okno, které rozdává právo běžet bez jakýchkoli kontrol, se nemá poznávat zpětně z logu.
-- [x] Chybějící tlačítko na obrazovce spuštění říká, proč chybí, a co s tím u stroje. Nepřítomná věc je hádanka, dokud neřekne, na co čeká.
+- [x] Chybějící volba na obrazovce spuštění říká, proč chybí, a co s tím u stroje. Nepřítomná věc je hádanka, dokud neřekne, na co čeká.
+- [x] **A není to tlačítko, je to zaškrtávátko nad tlačítky.** Třetí tlačítko vedle dvou dělalo z téže session jinou věc, kterou spouštíš, a platilo jen pro interaktivní tvar — unsupervised běh se stejnou volnost pustit nedal vůbec. Vypnuté kontroly jsou vlastnost běhu, který spouštíš, ne třetí běh.
+- [x] `scripts/serve.ps1` posílá `--allow-bypass` vždycky, bez přepínače, na který se zapomíná. Flag v jádru zůstává: jádro neví, čí je to stroj. Skript to ví — je to jeden notebook a jeden telefon na vlastním tailnetu, a stejně se to musí u každého běhu zaškrtnout.
 
 **Hotovo, když:** okno, které si z telefonu otevřu, z telefonu i zavřu a projekt je hned volný pro další běh. — ✅ testy (`test_serve.py`: zabití, pořadí vůči worktree, odmítnutí cizího běhu, `canStop`, audit, obě větve `kill_tree`). Klik z telefonu je na tobě.
 
