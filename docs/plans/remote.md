@@ -148,6 +148,29 @@ Dvě věci, které vyšly najevo až prvním skutečným použitím z telefonu:
 
 **Hotovo, když:** z telefonu pustím `po`, přečtu odpověď, zeptám se na druhou věc a odpověď přijde do téhož feedu — a gesto zpět mě přitom nevyhodí z aplikace. — ✅ testy (`test_follow.py`, doplněné `test_serve.py`); ověření prstem je na tobě.
 
+---
+
+### Krok 6 — běh jde z telefonu i ukončit — **hotovo 5. 9. 2026**
+
+Vyšlo najevo hned prvním skutečným použitím Kroku 2: **session předaná Claude appce sama neskončí.** Okno na počítači čeká, až ho někdo zavře, a do té doby je projekt obsazený, worktree zabraný a běh `running`. Z vlaku s tím nešlo dělat nic — telefon uměl session otevřít, ale ne zavřít.
+
+- [x] `POST /api/run/<id>/stop` a na obrazovce běhu tlačítko **Close the session and its window**. Potvrzuje se druhým klepnutím, ne dialogem: druhý popisek je zároveň to varování (*agent se zabíjí tam, kde stojí*), takže není co číst dvakrát — a palec vedle se netrefí do běhu, který pracuje dvacet minut.
+- [x] **Zabíjí se celý strom, ne proces.** `proc.kill_tree()` — na Windows `taskkill /T /F`. Dítě démona je `agency run`, agent je dítě jeho; konzole navíc nepatří žádnému z nich, ale skupině, a zavře se, až z ní odejde poslední proces. Zabít jen rodiče znamená `claude`, který dál pracuje v okně, které už nikomu nepatří.
+- [x] **Nejdřív zabít, teprve pak `abandon`.** `runs.abandon()` maže worktree; agent, který v něm ještě žije, by se mazal uprostřed zápisu. To pořadí je celá bezpečnost té věci a je proto v testu (`test_the_agent_is_killed_before_its_worktree_is_taken`).
+- [x] **Ukončit jde jen to, co démon drží.** Ne to, co říká záznam: `running` může být session, kterou někdo právě teď píše u počítače, a uvolnit jí worktree pod rukama je horší než tlačítko nemít. Popen v ruce je odpověď na jinou otázku než status v `run.json` — a mimochodem i pojistka proti recyklovanému PID, protože nezavřený handle ve Windows to číslo drží. Zbytek se odmítá s `agency cleanup --run <id>` jako návodem, u toho stroje, kde je i to okno.
+- [x] `canStop` chodí v odpovědi `/api/run/<id>`, ne v `_run_state()` — to je čtení záznamu a ničeho jiného. Tlačítko, které by vždycky vrátilo 409, není tlačítko; je to táž hranice jako u `canFollow` a `canOpenSession`.
+- [x] Na POSIXu jde běh do vlastní process group (`start_new_session`), aby bylo co zabít. **Bez kontroly, že je dítě vedoucím té skupiny, by `getpgid` vrátilo skupinu démona a `stop` by zastřelil sám démon** — pojištěno testem, protože na Windows tahle větev nikdy neběží a rozbila by se potichu.
+
+**Co se u toho ukázalo**
+
+- **Je to zabití, ne rozloučení.** Ctrl-C do cizí konzole poslat nejde (`GenerateConsoleCtrlEvent` míří jen na skupiny na vlastní konzoli), takže co měl agent rozdělané, končí tam. Popisek tlačítka to říká dřív, než se klepne podruhé.
+- **Stav je `abandoned`, ne `failed`,** a přesně v tom významu, který mu `run.v1` dal odjakživa: příprava proběhla, agent běžel a terminál zmizel dřív, než skončil. Nový stav pro tohle nebyl potřeba.
+- **Brána zůstává tlačítkem.** Ukončená session mohla `findings.json` napsat; `Run the gate` na té obrazovce je pořád, takže se z přerušeného běhu dá vytěžit, co stihl.
+
+**Hotovo, když:** okno, které si z telefonu otevřu, z telefonu i zavřu a projekt je hned volný pro další běh. — ✅ testy (`test_serve.py`: zabití, pořadí vůči worktree, odmítnutí cizího běhu, `canStop`, audit, obě větve `kill_tree`). Klik z telefonu je na tobě.
+
+---
+
 ### Krok 3 — stránka (~4 h, souběžně s Krokem 1) — **hotovo 4. 9. 2026**
 
 Jeden `index.html` v `packages/core/src/agency/_web/`, servírovaný démonem. Tři obrazovky: projekty → specialisté (řádek = titul, dvě tlačítka) → běh (průběh, pak výsledek brány). Prompt je `<textarea>`, PR je seznam z `agency prs`. Žádný framework; když stránka poroste přes jeden soubor, je to signál, že měla být PWA.

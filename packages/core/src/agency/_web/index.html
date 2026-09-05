@@ -73,12 +73,17 @@
     width: 100%; padding: 14px; border-radius: 12px; border: 0; cursor: pointer;
     background: var(--accent); color: #fff; font: inherit; font-weight: 600;
   }
-  button.secondary {
+  button.secondary, button.danger {
     width: 100%; padding: 14px; border-radius: 12px; cursor: pointer;
     background: none; color: var(--fg); font: inherit; font-weight: 600;
     border: 1px solid var(--line); margin-top: 10px;
   }
-  button.primary:disabled, button.secondary:disabled { opacity: .5; cursor: default; }
+  /* Ending a run kills an agent mid-thought and takes its worktree. It is the
+     only button on this page that destroys something, so it does not look like
+     the ones that start things. */
+  button.danger { border-color: var(--err); color: var(--err); }
+  button.primary:disabled, button.secondary:disabled,
+  button.danger:disabled { opacity: .5; cursor: default; }
   button.link { background: none; border: 0; color: var(--dim); font: inherit;
                 cursor: pointer; padding: 8px 0; text-decoration: underline; }
   input, textarea, select {
@@ -639,6 +644,7 @@
     // session reachable — and the record is the only thing that knows.
     function paintAfter(s) {
       after.innerHTML = '';
+      if (s.status === 'running' && s.canStop) after.appendChild(stopper(s));
       if (s.status === 'running' && !s.remoteControl) return;   // it is still talking
 
       if (s.canFollow) {
@@ -700,6 +706,44 @@
             } catch (e) { err.textContent = e.message; }
           }));
       }
+    }
+
+    // Ending a run from here. `canStop` came from the daemon rather than from
+    // the record, so this appears only where the press will do something: the
+    // daemon still holds that process. A session started at the machine, or one
+    // from before a restart, is closed at the machine — which is where its
+    // window is.
+    function stopper(s) {
+      const label = s.remoteControl
+        ? 'Close the session and its window'
+        : 'Stop this run';
+      // Two taps rather than a dialog. The second label is the warning, so
+      // there is nothing to read twice — and a misplaced thumb on a phone
+      // cannot kill a run that has been working for twenty minutes.
+      let armed = false;
+      const b = button(label, 'danger', async () => {
+        if (!armed) {
+          armed = true;
+          b.textContent = 'Tap again — the agent is killed where it stands';
+          setTimeout(() => { if (armed) { armed = false; b.textContent = label; } }, 5000);
+          return;
+        }
+        armed = false;
+        b.disabled = true;
+        b.textContent = 'Stopping…';
+        err.textContent = '';
+        try {
+          await api('/api/run/' + encodeURIComponent(runId) + '/stop',
+            { method: 'POST', body: JSON.stringify({ project: key }) });
+          closeStream();          // the record is closed; there is nothing more to come
+          paint(await api('/api/run/' + encodeURIComponent(runId) + q));
+        } catch (e) {
+          err.textContent = e.message;
+          b.disabled = false;
+          b.textContent = label;
+        }
+      });
+      return b;
     }
 
     function stream(id, query, from) {

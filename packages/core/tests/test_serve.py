@@ -27,7 +27,7 @@ from pathlib import Path
 
 import pytest
 
-from agency import cli, config, runs, serve
+from agency import cli, config, proc, runs, serve
 from agency.util import write_json
 from conftest import git, install_pack
 
@@ -995,6 +995,236 @@ def test_the_questions_already_asked_are_part_of_the_run(daemon, project, make_r
                       f"/api/run/{run.id}?project={project.root.name}", token)
 
     assert [f["prompt"] for f in data["followUps"]] == ["and the migration?"]
+
+
+# ---------------------------------------------------------------- stopping one
+
+def kills(monkeypatch) -> list:
+    """Substitute the tree kill: record what was asked to die, and let it die.
+
+    What the daemon owes here is the ask. That `taskkill /T` really closes a
+    console window is a claim about Windows, not about this code, and a suite
+    that spawned a process tree to check it would be testing the operating
+    system on whatever machine happened to run it.
+    """
+    killed = []
+
+    def fake_kill(process, timeout=5.0):
+        killed.append(process)
+        was_alive = process.poll() is None
+        process.running = False
+        return was_alive
+
+    monkeypatch.setattr(serve.proc, "kill_tree", fake_kill)
+    return killed
+
+
+def started(daemon, project, monkeypatch, mode: str = "interactive") -> tuple[str, str]:
+    """A run the daemon is holding, as a phone would have started it."""
+    if mode != "unattended":
+        monkeypatch.setattr(serve, "console_flags", lambda: {"creationflags": 16})
+    token = pair(daemon)
+    code, data = call(daemon, "POST", "/api/run", token,
+                      {"project": project.root.name, "pack": "review-graph",
+                       "mode": mode})
+    assert code == 200, data
+    return token, data["runId"]
+
+
+def test_a_session_opened_from_the_phone_can_be_closed_from_it(daemon, project,
+                                                               monkeypatch):
+    """The gap this fills: `--remote-control` hands the conversation to the
+    Claude app and leaves a window waiting on the machine. From a train there
+    was no way to end it — the project stayed busy, the worktree stayed
+    claimed, and the run stayed `running` until somebody walked over."""
+    spawns(daemon, monkeypatch)
+    killed = kills(monkeypatch)
+    token, run_id = started(daemon, project, monkeypatch)
+
+    code, data = call(daemon, "POST", f"/api/run/{run_id}/stop", token,
+                      {"project": project.root.name})
+
+    assert code == 200, data
+    assert data["stopped"] is True
+    assert len(killed) == 1
+    rec = runs.find_run(project, run_id).record()
+    assert rec["status"] == "abandoned"
+    assert "phone" in rec["exitReason"]        # which device ended it
+    assert rec["finishedAt"]
+
+
+def test_the_agent_is_killed_before_its_worktree_is_taken(daemon, project, monkeypatch):
+    """The order is the whole safety of this. `abandon` deletes the worktree,
+    and an agent still alive in it would be deleted out from under mid-write —
+    files half gone, and a git worktree the repository still believes in."""
+    spawns(daemon, monkeypatch)
+    order: list[str] = []
+
+    def fake_kill(process, timeout=5.0):
+        order.append("kill")
+        process.running = False
+        return True
+
+    real_abandon = serve.runs.abandon
+
+    def watched_abandon(*a, **kw):
+        order.append("abandon")
+        return real_abandon(*a, **kw)
+
+    monkeypatch.setattr(serve.proc, "kill_tree", fake_kill)
+    monkeypatch.setattr(serve.runs, "abandon", watched_abandon)
+    token, run_id = started(daemon, project, monkeypatch)
+
+    call(daemon, "POST", f"/api/run/{run_id}/stop", token,
+         {"project": project.root.name})
+
+    assert order == ["kill", "abandon"]
+
+
+def test_stopping_gives_the_project_back(daemon, project, monkeypatch):
+    """Why anybody presses it: one run at a time over one project, so a session
+    nobody closes is a project nobody can use."""
+    spawns(daemon, monkeypatch)
+    kills(monkeypatch)
+    token, run_id = started(daemon, project, monkeypatch)
+    busy, _ = call(daemon, "POST", "/api/run", token,
+                   {"project": project.root.name, "pack": "review-graph"})
+    assert busy == 409
+
+    call(daemon, "POST", f"/api/run/{run_id}/stop", token,
+         {"project": project.root.name})
+
+    assert daemon.busy(project.root.name) is None
+    again, data = call(daemon, "POST", "/api/run", token,
+                       {"project": project.root.name, "pack": "review-graph"})
+    assert again == 200, data
+
+
+def test_a_run_this_daemon_is_not_holding_is_refused(daemon, project, make_run):
+    """A record that says `running` is not a process this daemon can end. It
+    may be a session somebody started at the machine and is working in right
+    now — closing it from here would free a worktree out from under them."""
+    run = make_run(status="running")
+    token = pair(daemon)
+
+    code, data = call(daemon, "POST", f"/api/run/{run.id}/stop", token,
+                      {"project": project.root.name})
+
+    assert code == 409
+    assert data["reason"] == "not-held"
+    assert "cleanup" in data["message"]        # what to do instead, and where
+    assert run.record()["status"] == "running"
+
+
+def test_a_run_that_has_already_ended_is_not_stopped_twice(daemon, project, make_run):
+    run = make_run(status="ok")
+    token = pair(daemon)
+
+    code, data = call(daemon, "POST", f"/api/run/{run.id}/stop", token,
+                      {"project": project.root.name})
+
+    assert code == 409 and data["reason"] == "not-running"
+
+
+def test_the_run_says_whether_it_can_still_be_stopped(daemon, project, monkeypatch):
+    """A button that would always be refused is not a button. Whether the
+    process is this daemon's to end is not in the record, so the state the
+    phone reads has to carry the daemon's own answer."""
+    spawns(daemon, monkeypatch)
+    kills(monkeypatch)
+    token, run_id = started(daemon, project, monkeypatch)
+    q = "?project=" + project.root.name
+
+    code, live = call(daemon, "GET", f"/api/run/{run_id}{q}", token)
+    assert code == 200 and live["canStop"] is True
+
+    call(daemon, "POST", f"/api/run/{run_id}/stop", token,
+         {"project": project.root.name})
+
+    _, after = call(daemon, "GET", f"/api/run/{run_id}{q}", token)
+    assert after["canStop"] is False
+
+
+def test_a_run_nobody_is_holding_never_offers_the_button(daemon, project, make_run):
+    run = make_run(status="running")
+    token = pair(daemon)
+
+    _, state = call(daemon, "GET", f"/api/run/{run.id}?project={project.root.name}",
+                    token)
+
+    assert state["status"] == "running" and state["canStop"] is False
+
+
+def test_who_stopped_it_is_written_down(daemon, project, monkeypatch):
+    spawns(daemon, monkeypatch)
+    kills(monkeypatch)
+    token, run_id = started(daemon, project, monkeypatch)
+
+    call(daemon, "POST", f"/api/run/{run_id}/stop", token,
+         {"project": project.root.name})
+
+    lines = [json.loads(x) for x in
+             daemon.audit_path.read_text(encoding="utf-8").splitlines()]
+    stop = [x for x in lines if x["action"] == "stop"]
+    assert len(stop) == 1
+    assert stop[0]["runId"] == run_id
+    assert stop[0]["deviceName"] == "phone"
+
+
+# `proc.kill_tree` has no file of its own and this is the only thing that calls
+# it, so its one dangerous branch is pinned here — the POSIX one, which is not
+# exercised on the machine this tool runs on and would therefore break silently.
+
+def stoppable() -> FakeProcess:
+    p = FakeProcess()
+    p.pid = 4242
+    p.killed = []
+    p.kill = lambda: p.killed.append(True)
+    p.wait = lambda timeout=None: 0
+    return p
+
+
+def test_stopping_a_run_never_shoots_the_daemon(monkeypatch):
+    """Killing a process GROUP is right only when the child leads one of its
+    own, which is what `start_new_session` buys at spawn time. Without that
+    check `getpgid` answers with the caller's group, and stopping one run would
+    kill the daemon, every other run it is holding, and the phone's way in."""
+    monkeypatch.setattr(proc.os, "name", "posix")
+    monkeypatch.setattr(proc.os, "getpgid", lambda pid: 1, raising=False)
+
+    def never(*a):
+        raise AssertionError("killpg over a group this process is a member of")
+
+    monkeypatch.setattr(proc.os, "killpg", never, raising=False)
+    child = stoppable()
+
+    assert proc.kill_tree(child) is True
+    assert child.killed == [True]               # the child alone, not the group
+
+
+def test_a_child_that_leads_its_own_group_takes_the_group_with_it(monkeypatch):
+    """The other half: when the group IS the run, the agent under it has to go
+    too, or `stop` leaves the thing it was called to end still working."""
+    monkeypatch.setattr(proc.os, "name", "posix")
+    monkeypatch.setattr(proc.signal, "SIGKILL", 9, raising=False)
+    monkeypatch.setattr(proc.os, "getpgid", lambda pid: pid, raising=False)
+    signalled: list = []
+    monkeypatch.setattr(proc.os, "killpg",
+                        lambda pgid, sig: signalled.append((pgid, sig)), raising=False)
+    child = stoppable()
+
+    assert proc.kill_tree(child) is True
+    assert signalled == [(4242, 9)]
+    assert child.killed == []
+
+
+def test_a_process_that_already_ended_is_not_killed_again(monkeypatch):
+    monkeypatch.setattr(proc.os, "name", "posix")
+    child = stoppable()
+    child.running = False
+
+    assert proc.kill_tree(child) is False
+    assert child.killed == []
 
 
 # ---------------------------------------------------------------- routing

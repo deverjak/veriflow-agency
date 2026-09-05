@@ -528,6 +528,28 @@ stopped reading, so nothing is replayed), and *Carry on in the Claude app*
 reopens that same session with Remote Control instead. Both are `agency follow`
 on the machine — the daemon adds who asked and nothing else.
 
+**And a run can be ended from the phone.** A session handed to the Claude app
+does not finish by itself: the window waits on the machine for somebody to
+close it, and until they do, the project is busy, the worktree is claimed and
+the run says `running`. From a train there was nothing to do about that. The
+run screen now carries *Close the session and its window* — a second tap
+confirms, because it kills the agent where it stands — and the daemon ends the
+whole process tree it started. On Windows that closes the window too: the
+console belongs to the group, not to one process, so killing only the parent
+would leave `claude` working in a window that answers to nobody. Then, and only
+then, the run is closed as `abandoned` and the worktree is freed — that order
+is the safety of it, since freeing a worktree first would delete a directory an
+agent is still writing in.
+
+The button appears only where the press will do something. A daemon can stop
+what it is holding a process handle for; a run started at the machine, or one
+from before a restart, may be genuinely working right now, and the record alone
+cannot tell the difference — so that one is refused with `agency cleanup --run
+<id>` as the answer, at the machine where its window is. It is a kill, not a
+goodbye: there is no way to send Ctrl-C into another console's process group, so
+whatever the agent was in the middle of stops there. Like every other remote
+action, the stop is a line in `remote.jsonl` with the device that asked.
+
 ### Three rules the whole thing stands on
 
 **Truth lives in the project, not in the tool.** Runs, findings and

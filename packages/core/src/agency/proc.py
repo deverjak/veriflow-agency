@@ -10,6 +10,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -134,6 +135,53 @@ def stream(args: Sequence[str], cwd: str | Path | None = None,
     finally:
         if p.stdout:
             p.stdout.close()
+
+
+def kill_tree(process: subprocess.Popen, timeout: float = 5.0) -> bool:
+    """Stop a child and everything it started. True if it was still alive.
+
+    Killing the child alone is not enough for the runs this exists for. What
+    gets started is `agency run`, and the agent is ITS child; on Windows the
+    console window belongs to neither of them but to the group — it closes when
+    the last process attached to it exits. Kill only the parent and `claude`
+    keeps working in a window that now answers to nobody, which is the exact
+    state this is meant to end.
+
+    It is a kill, not a goodbye. There is no way to send Ctrl-C into another
+    console's process group from here (`GenerateConsoleCtrlEvent` reaches only
+    groups on the caller's own console), so whatever the agent was in the
+    middle of stops there. The caller owes the user that sentence.
+
+    The pid is safe to name because the caller still holds the Popen: an
+    unwaited handle keeps Windows from handing that number to somebody else,
+    so there is no window in which this kills a stranger.
+    """
+    if process.poll() is not None:
+        return False
+    if os.name == "nt":
+        # taskkill walks the parent/child table — `/T` is the tree, `/F` is
+        # because a console app that is waiting on input will not leave on
+        # being asked.
+        run(["taskkill", "/PID", str(process.pid), "/T", "/F"], timeout=30)
+    else:
+        # Only when the child leads its own group, which is what
+        # `start_new_session=True` at spawn time buys. Without that check
+        # `getpgid` answers with OUR group and the kill takes the caller with
+        # it — the daemon shooting itself to stop one run.
+        try:
+            if os.getpgid(process.pid) == process.pid:
+                os.killpg(process.pid, signal.SIGKILL)
+            else:
+                process.kill()
+        except (OSError, AttributeError):
+            process.kill()
+    try:
+        process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        # Reaped or not, it is not coming back; a caller that waits forever
+        # here is a daemon that stops answering the phone.
+        pass
+    return True
 
 
 # ---------------------------------------------------------------- git

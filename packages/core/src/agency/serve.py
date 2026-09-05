@@ -28,7 +28,9 @@ Three properties it does not get to be talked out of:
   to it in the Claude app — this daemon has no channel for a conversation and
   does not invent one. Between the two sits `follow`: a question asked of a
   session that already ended, answered into the same stream the phone was
-  already watching.
+  already watching. Either shape can also be ended from the phone: `stop` kills
+  the process this daemon started, and on Windows the window goes with it —
+  the one thing a session handed to the Claude app could not do from a train.
 """
 
 from __future__ import annotations
@@ -49,7 +51,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-from . import config, events, packs, providers, runs
+from . import config, events, packs, proc, providers, runs
 from .util import out, posix, read_json, write_json
 
 #: How long after startup a phone can still pair. The plan said 60 s; a minute
@@ -356,6 +358,15 @@ class Job:
     def alive(self) -> bool:
         return self.process.poll() is None
 
+    def stop(self) -> bool:
+        """End this run's process and everything under it. True if it was alive.
+
+        The whole tree, because the daemon's child is `agency run` and the
+        agent is its child — and on Windows the window this opened closes only
+        when the last process in it is gone. See `proc.kill_tree`.
+        """
+        return proc.kill_tree(self.process)
+
     def tail(self, lines: int = 25) -> str:
         try:
             text = self.log.read_text(encoding="utf-8", errors="replace")
@@ -487,6 +498,21 @@ class Daemon:
     def busy(self, key: str) -> Job | None:
         for job in self.jobs.values():
             if job.project == key and job.alive():
+                return job
+        return None
+
+    def holds(self, run_id: str) -> Job | None:
+        """The live process behind a run, if this daemon is the one holding it.
+
+        The question is narrower than "is this run still going", and on
+        purpose. A record says `running`; only a Popen says the process is
+        this daemon's to end. A run started at the machine, or one from a
+        daemon that has since been restarted, is still running and still not
+        stoppable from here — and a phone that is told otherwise would press a
+        button that frees a worktree out from under a working agent.
+        """
+        for job in self.jobs.values():
+            if job.runId == run_id and job.alive():
                 return job
         return None
 
@@ -660,6 +686,58 @@ class Daemon:
                      "project": key,
                      "mode": "interactive" if interactive else "unattended"}
 
+    def stop_run(self, project: config.Project, key: str, device: Device,
+                 run) -> tuple[int, dict]:
+        """Stop a run this daemon started — window, agent, worktree and record.
+
+        The one thing the phone could not do about a session it opened was end
+        it. `--remote-control` hands the conversation to the Claude app and the
+        window waits on the machine for somebody to close it, which is fine
+        while you are sitting there and useless from a train: the project stays
+        busy, the worktree stays claimed, and the run stays `running` for as
+        long as the window is up.
+
+        So: kill the tree first and only then close the record, because
+        `abandon` removes the worktree and an agent still alive in it would be
+        deleted mid-write. What comes out is `abandoned` — which is what that
+        status has always meant here: preparation worked, the agent ran, and
+        the terminal went away before it finished.
+
+        A run this daemon does not hold is refused rather than closed. It may
+        still be genuinely working at the machine, and the difference between
+        "the process is gone" and "the record says running" is not one this
+        daemon can see from here.
+        """
+        # All of it under the one lock, which is the same lock a run start
+        # takes. Two phones pressing at once would otherwise both find the job
+        # and both kill it, and a run started in the gap between forgetting the
+        # job and closing the record would begin while the old one still claims
+        # the worktree.
+        with self.lock:
+            job = self.holds(run.id)
+            if not job:
+                if run.record().get("status") != "running":
+                    return 409, {"ok": False, "reason": "not-running", "runId": run.id,
+                                 "message": "This run has already ended."}
+                return 409, {"ok": False, "reason": "not-held", "runId": run.id,
+                             "message": "This run is not one this daemon is holding — it "
+                                        "was started at the machine, or the daemon has "
+                                        "been restarted since. Close its window there; "
+                                        f"`agency cleanup --run {run.id[:8]}` then frees "
+                                        "the worktree."}
+            stopped = job.stop()
+            self.jobs.pop(job.id, None)
+            info = runs.abandon(project, run, f"stopped from {device.name}")
+        append_audit(self.audit_path, {
+            "action": "stop", "device": device.id, "deviceName": device.name,
+            "project": key, "pack": job.pack, "runId": run.id, "job": job.id,
+        })
+        return 200, {"ok": True, "runId": run.id, "pack": job.pack, "project": key,
+                     "stopped": stopped,
+                     "worktreeRemoved": bool(info.get("worktreeRemoved")),
+                     "message": "Stopped. The agent was killed where it stood, so "
+                                "whatever it was in the middle of is not finished."}
+
     def _spawn(self, key: str, pack_name: str, device: Device, argv: list[str],
                console: dict | None = None) -> Job:
         jobs_dir = self.state / "jobs"
@@ -687,6 +765,12 @@ class Daemon:
             # No console window for a run nobody is watching. It also stops the
             # child from taking Ctrl-C aimed at the daemon.
             flags["creationflags"] = subprocess.CREATE_NO_WINDOW
+        else:
+            # The same two things one line further from Windows: the run stops
+            # sharing this daemon's terminal, and it leads a process group of
+            # its own — which is what lets `stop` take the agent with the
+            # parent instead of orphaning it.
+            flags["start_new_session"] = True
         # The child gets its own copy of the descriptor, so this one is closed
         # right away — otherwise every run leaves a handle behind, and on
         # Windows an open handle is also a file nothing else can rotate.
@@ -942,7 +1026,13 @@ class Handler(BaseHTTPRequestHandler):
                                         "text": text[:OUTPUT_MAX],
                                         "clipped": len(text) > OUTPUT_MAX})
             if not tail:
-                return self._send(200, {"ok": True, **_run_state(run)})
+                # Whether this daemon can still end it is the daemon's to
+                # answer, not the record's — so it is added here rather than in
+                # `_run_state`, which is a reading of the record and nothing
+                # else. A `done` event therefore carries no `canStop`, which is
+                # correct: a run that has ended is not one to stop.
+                return self._send(200, {"ok": True, **_run_state(run),
+                                        "canStop": bool(self.daemon.holds(run.id))})
 
         return self._fail(404, "no-route", "No such path.")
 
@@ -988,7 +1078,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(code, data)
 
         run_id, tail = _run_path(path)
-        if run_id and tail in ("ingest", "follow"):
+        if run_id and tail in ("ingest", "follow", "stop"):
             if not project:
                 return self._fail(404, "no-project", f"“{key}” is not an activated project.")
             run = runs.find_run(project, run_id)
@@ -996,6 +1086,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._fail(404, "no-run", f"No run {run_id} in {key}.")
             if tail == "follow":
                 code, data = self.daemon.follow_run(project, key, device, run, body)
+                return self._send(code, data)
+            if tail == "stop":
+                code, data = self.daemon.stop_run(project, key, device, run)
                 return self._send(code, data)
             append_audit(self.daemon.audit_path,
                          {"action": "ingest", "device": device.id, "project": key,
