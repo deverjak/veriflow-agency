@@ -165,6 +165,7 @@
   const $ = (id) => document.getElementById(id);
   const state = {
     token: null, device: null, canOpenSession: false,
+    models: { options: [], default: null },   // what the machine offers a run
     packs: {},            // project key → what `agency packs` said, for a deep link
     stream: null, offset: 0, run: null,
     depth: 0,             // how many pushes of ours are on the history stack
@@ -333,6 +334,7 @@
     const d = await api('/api/projects');
     state.device = d.device || null;
     state.canOpenSession = !!d.canOpenSession;
+    if (d.models) state.models = d.models;
     remaining(d.activatedFor);
   }
 
@@ -513,6 +515,25 @@
       v.appendChild(prompt);
     }
 
+    // Which model does the work. The machine names both the list and the one
+    // it would have chosen anyway, so the page never has to know that sonnet
+    // is the ordinary run — and the choice is a property of the task, not of
+    // the phone: a heavier model for something worth more, the cheap one for
+    // a review, and the record says afterwards which one found what.
+    let model = null;
+    if ((state.models.options || []).length) {
+      v.appendChild(text('label', null, 'Model'));
+      model = document.createElement('select');
+      for (const name of state.models.options) {
+        const o = document.createElement('option');
+        o.value = name;
+        o.textContent = name + (name === state.models.default ? ' · default' : '');
+        o.selected = name === state.models.default;
+        model.appendChild(o);
+      }
+      v.appendChild(model);
+    }
+
     const err = text('p', 'err');
     const unsupervised = button('Run unsupervised', 'primary',
       () => start('unattended'));
@@ -570,12 +591,16 @@
         return;
       }
       if (q) body.prompt = q;
+      // Always sent, even when it is the default: a run whose record says
+      // `model: null` is a run that cannot be compared with another one.
+      if (model && model.value) body.model = model.value;
       if (prSelect) {
         if (!prSelect.value) { err.textContent = 'Pick a pull request.'; return; }
         body.pr = Number(prSelect.value);
       }
       err.textContent = '';
       unsupervised.disabled = takeover.disabled = skip.disabled = true;
+      if (model) model.disabled = true;
       // Preparation resolves the pull request and can build a worktree, so the
       // answer takes seconds. Saying so beats a button that looks broken.
       unsupervised.textContent = 'Preparing the run…';
@@ -585,6 +610,7 @@
       } catch (e) {
         err.textContent = e.message;
         unsupervised.disabled = takeover.disabled = skip.disabled = false;
+        if (model) model.disabled = false;
         unsupervised.textContent = 'Run unsupervised';
       }
     }

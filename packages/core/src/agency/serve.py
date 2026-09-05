@@ -86,6 +86,21 @@ OUTPUT_MAX = 200_000
 #: page used to get a 501 for it; both names mean the same session now.
 INTERACTIVE_MODES = ("interactive", "remote-control")
 
+#: Nothing here passes `--provider`, so every run started from a phone goes to
+#: this one. The models on offer are therefore its models, read from the same
+#: table `runs.launch_argv` builds the flag from — a list typed again in the
+#: page would be a second source of truth for something the machine already
+#: knows, and would go stale the day a provider gains a model.
+REMOTE_PROVIDER = "claude"
+
+
+def model_choices() -> dict:
+    """Which models a run started from here may be given, and which one it
+    gets when nobody chooses — the answer to a dropdown, not to a run."""
+    s = providers.spec(REMOTE_PROVIDER)
+    return {"options": [str(m) for m in (s.get("models") or [])],
+            "default": s.get("defaultModel")}
+
 
 def console_flags() -> dict | None:
     """How to give a child process a terminal of its own — None where there is
@@ -989,6 +1004,8 @@ class Handler(BaseHTTPRequestHandler):
                 # button that always 501s is not a button, and the client would
                 # otherwise have to press one to find out.
                 "canOpenSession": console_flags() is not None,
+                # What the model dropdown on the start screen is filled from.
+                "models": model_choices(),
                 "projects": [
                     {"key": key, "name": p.name, "slug": p.slug,
                      "root": posix(p.root), "defaultBranch": p.default_branch}
@@ -1001,6 +1018,7 @@ class Handler(BaseHTTPRequestHandler):
                 "activatedFor": self.daemon.remaining(),
                 "device": {"id": device.id, "name": device.name, "bypass": device.bypass},
                 "canOpenSession": console_flags() is not None,
+                "models": model_choices(),
                 "projects": self.daemon.overview(),
             })
 

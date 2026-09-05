@@ -27,7 +27,7 @@ from pathlib import Path
 
 import pytest
 
-from agency import cli, config, proc, runs, serve
+from agency import cli, config, proc, providers, runs, serve
 from agency.util import write_json
 from conftest import git, install_pack
 
@@ -450,6 +450,51 @@ def test_the_run_is_the_one_the_terminal_would_have_started(daemon, project, mon
     assert argv[argv.index("--pr") + 1] == "12"
     assert argv[argv.index("--prompt") + 1] == "the payments branch"
     assert "--bypass" not in argv
+
+
+def test_the_model_the_phone_picked_is_the_model_the_run_gets(daemon, project,
+                                                              monkeypatch):
+    """A choice on the phone has to survive as a flag on the machine, or the
+    dropdown is decoration: the record would keep saying whatever the provider
+    defaults to, and "which model produces better findings" stays a bucket of
+    unknowns."""
+    seen = spawns(daemon, monkeypatch)
+    token = pair(daemon)
+
+    code, _ = call(daemon, "POST", "/api/run", token,
+                   {"project": project.root.name, "pack": "review-graph",
+                    "model": "opus"})
+
+    assert code == 200
+    argv = seen["argv"]
+    assert argv[argv.index("--model") + 1] == "opus"
+
+
+def test_a_run_nobody_chose_a_model_for_leaves_the_choice_to_the_core(
+        daemon, project, monkeypatch):
+    """The daemon names no default of its own. `launch_argv` already has one,
+    and a second copy here would be the one that goes stale."""
+    seen = spawns(daemon, monkeypatch)
+    token = pair(daemon)
+
+    code, _ = call(daemon, "POST", "/api/run", token,
+                   {"project": project.root.name, "pack": "review-graph"})
+
+    assert code == 200
+    assert "--model" not in seen["argv"]
+
+
+def test_the_machine_says_which_models_may_be_asked_for(daemon):
+    """The page fills its dropdown from this, so the list lives in
+    `providers.py` — where the flag is built — and nowhere else."""
+    token = pair(daemon)
+
+    code, data = call(daemon, "GET", "/api/projects", token)
+
+    assert code == 200
+    assert data["models"]["default"] == "sonnet"
+    assert "sonnet" in data["models"]["options"]
+    assert data["models"]["options"] == providers.spec("claude")["models"]
 
 
 def test_a_specialist_this_project_does_not_have(daemon, project, monkeypatch):

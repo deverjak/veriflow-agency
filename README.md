@@ -507,6 +507,14 @@ machine-readable stream, and inventing one would mean showing progress for a
 session this daemon knows nothing about. It also does not end by itself, so the
 phone gets the gate as a button.
 
+**Which model does the work is a choice on that screen, not a default nobody
+sees.** The dropdown under the prompt is filled from the same table the launch
+flag is built from — the machine says which models it offers and which one it
+would have picked anyway, so the page keeps no list of its own — and it opens
+on `sonnet`, the ordinary run. A heavier model for work worth more, and the
+record keeps the answer either way, which is what makes “which model produces
+better findings” a question with numbers behind it.
+
 **Turning the authorization checks off is a checkbox above those buttons, not
 a button of its own.** It was one for a while — *Open one with no permission
 checks*, a third button beside the other two — and that shape was wrong twice

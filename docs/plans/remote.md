@@ -189,6 +189,7 @@ Jeden `index.html` v `packages/core/src/agency/_web/`, servírovaný démonem. T
 - **Tlačítko je jedno, ne dvě.** Druhé patří Kroku 2 a tlačítko, které vrací 501, není tlačítko. Přibude s ním.
 - **`EventSource` se po `done` zavírá z klienta.** Prohlížeč se po ukončeném streamu sám připojí znovu, takže bez toho by konec běhu přehrával dokola.
 - **Resume jede přes `Last-Event-ID`.** Tu hlavičku posílá prohlížeč při reconnectu sám; `?offset=` zůstává pro ruční otevření. Resume, který závisí na tom, že si klient vzpomene přidat parametr, je resume, který jednou přehraje hodinu volání nástrojů.
+- **Model se vybírá na obrazovce spuštění** (5. 9. 2026). Rozbalovátko pod promptem; seznam i výchozí hodnota chodí z `/api/projects`, z téže tabulky v `providers.py`, ze které se staví `--model`, takže stránka žádný seznam modelů nedrží a nezastará den, kdy provider dostane další. Výchozí je `sonnet`. Bez toho jel běh z telefonu vždycky na výchozím modelu providera a „který model nachází lepší nálezy" se z mobilu nedalo ani zkusit.
 - **Stránka se nikdy necachuje** (`Cache-Control: no-store`) a čte se z disku při každém požadavku — úprava na počítači je živá po přetažení prstem, ne po vyčištění cache telefonu.
 - **Konzole démona nesmí shodit request.** Nalezeno při smoke testu: `✓` po úspěšném párování narazilo na cp1250 konzoli, vyhodilo `UnicodeEncodeError` a telefon dostal 500 za něco, co už proběhlo. Řádek na konzoli je zdvořilost, odpověď telefonu je práce.
 
