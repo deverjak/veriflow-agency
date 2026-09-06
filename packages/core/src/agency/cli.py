@@ -617,6 +617,15 @@ def cmd_run(args, chain: dict | None = None) -> int:
 
     if args.wait:
         dialect = providers.streaming(agent_info["provider"])[1] if unattended else None
+        if not dialect:
+            # One line, not a warning and not a question: waiting attended is a
+            # legitimate choice and the default. What it costs is that this run
+            # records an exit code and a duration and nothing else — no turns,
+            # no price, no session to follow up on — so it will be missing from
+            # every number about what the agent did.
+            out.say(f"  {out.dim('This run records only its exit code and duration. '
+                                 'Turns, cost and a resumable session need '
+                                 '--unattended.')}\n")
         return _wait_for_agent(project, run, launch, wt, wt_owned,
                                dialect=dialect, chain=chain)
 
@@ -1442,6 +1451,23 @@ def cmd_metrics(args) -> int:
         if r["cost"]["secondsPerKeptFinding"]:
             print(f"  {out.dim('Cost')}            "
                   f"{r['cost']['secondsPerKeptFinding']} s per candidate")
+        # Cost, turns and denials exist only for a streamed run, so each says
+        # how many runs it came from. Without that they read as averages over
+        # every run — over a population half of which never recorded them.
+        c, p = r["cost"], (r["cost"].get("population") or {})
+        total = p.get("runs") or 0
+        for label, key, fmt in (("usd", "usd", lambda v: f"${v:.2f}"),
+                                ("turns", "turns", str),
+                                ("denied", "denied", str)):
+            if c.get(key) is None:
+                continue
+            print(f"  {out.dim(label.ljust(15))} {fmt(c[key])}  "
+                  f"{out.dim(f'from {p.get(key, 0)} of {total} runs (streamed only)')}")
+        blind = p.get("attended") or 0
+        if blind and total:
+            print(f"  {out.dim('Blind')}           "
+                  f"{out.dim(f'{blind} of {total} runs were attended and recorded '
+                             f'no cost or turns')}")
         print()
         table("by dimension", r["byDimension"])
         table("by severity", r["bySeverity"])
@@ -1640,11 +1666,21 @@ def cmd_status(args) -> int:
             "findings": len(fs), "undecided": sum(1 for f in fs if f.get("id") not in dec),
         })
 
+    # Over every run, not only the ones printed: "how much of my history can
+    # answer a question about cost" is a fact about the project, not about the
+    # last twenty rows.
+    attended_runs = sum(1 for r in all_runs
+                        if (r.record().get("trigger") or {}).get("attended") is not False)
+
     installed = [p.name for p in packs.available(project)]
     payload = {"project": {"name": project.name, "slug": project.slug,
                            "root": posix(project.root), "packs": installed,
                            "providers": providers.catalog()},
-              "runs": rows}
+              "runs": rows,
+              # Not a reproach — attended is the default and a good one. It is
+              # what a person needs in order to know which questions their own
+              # history can answer at all.
+              "blind": {"attended": attended_runs, "runs": len(all_runs)}}
 
     def human():
         print(f"\n  {out.bold(project.name)}  {out.dim(posix(project.root))}")
@@ -1668,6 +1704,10 @@ def cmd_status(args) -> int:
             # second one is asking for something to be fixed.
             if d["status"] == "blocked":
                 print(f"      {out.warn('blocked')} {out.dim(d.get('exitReason') or 'see blocked.md')}")
+        if attended_runs:
+            print(f"\n  {out.dim(f'{attended_runs} of {len(all_runs)} runs were attended '
+                                 f'and recorded no cost or turns.')}")
+            print(out.dim("  Those numbers come from --unattended runs only."))
         open_runs = [d for d in rows if d["status"] == "running"]
         if open_runs:
             print(f"\n  {out.warn('still open:')} "

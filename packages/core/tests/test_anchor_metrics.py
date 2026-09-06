@@ -163,3 +163,72 @@ def test_duplicity_se_do_metrik_nepocitaji(project, make_run):
     r = metrics.collect(project)
 
     assert r["triage"]["undecided"] == 1
+
+
+# ------------------------------------------- attended and unattended runs
+
+def _run_costing(make_run, project, *, attended: bool, usd, turns, run_id=None):
+    """One run of each population — the attended one deliberately carries no
+    turns and no price, because that is exactly what an attended run records."""
+    return make_run(
+        run_id=run_id,
+        findings=[make_finding(project, run_id or "x")],
+        trigger={"kind": "manual", "attended": attended},
+        agent={"provider": "claude", "model": "sonnet",
+               **({"turns": turns} if turns is not None else {})},
+        cost={"wallClockSeconds": 60, **({"usd": usd} if usd is not None else {})},
+    )
+
+
+def test_cost_comes_from_the_runs_that_could_measure_it(project, make_run):
+    """`turns`, `usd` and `denied` exist only for a streamed run. Averaged over
+    every run they were an average across a population half of which never
+    recorded them — a number that reads as if it were about all of them."""
+    _run_costing(make_run, project, attended=True, usd=None, turns=None,
+                 run_id="01A0000000000000000000000A")
+    _run_costing(make_run, project, attended=True, usd=None, turns=None,
+                 run_id="01A0000000000000000000000B")
+    _run_costing(make_run, project, attended=False, usd=0.42, turns=7,
+                 run_id="01A0000000000000000000000C")
+
+    c = metrics.collect(project)["cost"]
+
+    assert c["usd"] == 0.42
+    assert c["turns"] == 7
+    # And it says which runs it could have come from.
+    assert c["population"]["usd"] == 1
+    assert c["population"]["turns"] == 1
+    assert c["population"]["runs"] == 3
+    assert c["population"]["attended"] == 2
+    assert c["population"]["unattended"] == 1
+    # Wall clock is its own population: `--wait` measures it attended too.
+    assert c["population"]["wallClockSeconds"] == 3
+
+
+def test_precision_still_counts_every_run(project, make_run):
+    """The split is about cost, not about findings. An attended run's findings
+    and decisions are as real as anyone's, and dropping them would trade one
+    dishonest number for another."""
+    a = _run_costing(make_run, project, attended=True, usd=None, turns=None,
+                     run_id="01B0000000000000000000000A")
+    b = _run_costing(make_run, project, attended=False, usd=0.1, turns=3,
+                     run_id="01B0000000000000000000000B")
+    by = "hire:review-graph@claude"
+    runs.append_decision(a, a.findings()[0]["id"], "sent", by=by)
+    runs.append_decision(b, b.findings()[0]["id"], "rejected", reason="by-design", by=by)
+
+    t = metrics.collect(project)["triage"]
+
+    assert t["accepted"] == 1 and t["rejected"] == 1
+    assert t["precision"] == 0.5
+
+
+def test_a_price_nobody_measured_is_none_not_zero(project, make_run):
+    """Only attended runs: there is no cost number to report, and reporting
+    $0.00 would say the runs were free rather than unmeasured."""
+    _run_costing(make_run, project, attended=True, usd=None, turns=None)
+
+    c = metrics.collect(project)["cost"]
+
+    assert c["usd"] is None and c["turns"] is None
+    assert c["population"]["usd"] == 0

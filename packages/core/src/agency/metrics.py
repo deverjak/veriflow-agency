@@ -124,9 +124,24 @@ def collect(project: Project, runs: list[Run] | None = None) -> dict:
     gated_by: dict[str, int] = defaultdict(int)
 
     raw = kept = duplicates = 0
-    wall = 0.0
     ages: list[float] = []
     run_rows = []
+
+    # Two populations, and until this split existed they were averaged
+    # together. `turns`, `usd` and `denied` exist ONLY for a streamed
+    # (unattended) run — an attended session inherits the terminal and nothing
+    # counts for it — so a mean over "all runs" was a mean over a set half of
+    # which had no data. Each total therefore carries how many runs it came
+    # from, and a number nothing fed stays `None` rather than becoming zero.
+    #
+    # Wall clock is the exception and gets its own counter: `--wait` measures
+    # it for attended runs too, so its population is "runs that were waited
+    # for", which is neither of the other two.
+    pop = {"runs": 0, "attended": 0, "unattended": 0,
+           "usd": 0, "turns": 0, "denied": 0, "wallClockSeconds": 0}
+    wall = 0.0
+    usd_total = 0.0
+    turns_total = denied_total = 0
 
     # A duplicate has to be able to ask its original how it was decided.
     #
@@ -191,7 +206,30 @@ def collect(project: Project, runs: list[Run] | None = None) -> dict:
         duplicates += counts.get("duplicates") or 0
         for k, v in (rec.get("gatedBy") or {}).items():
             gated_by[k] += v
-        wall += ((rec.get("cost") or {}).get("wallClockSeconds") or 0)
+
+        cost, agent = rec.get("cost") or {}, rec.get("agent") or {}
+        pop["runs"] += 1
+        # Explicitly false, not "not true": a record with no `trigger.attended`
+        # is one nobody can vouch for, and guessing it was unattended would put
+        # its missing numbers into the population that is supposed to have them.
+        streamed = (rec.get("trigger") or {}).get("attended") is False
+        pop["unattended" if streamed else "attended"] += 1
+
+        seconds = cost.get("wallClockSeconds")
+        if seconds is not None:
+            wall += seconds
+            pop["wallClockSeconds"] += 1
+        if streamed:
+            if cost.get("usd") is not None:
+                usd_total += cost["usd"]
+                pop["usd"] += 1
+            if agent.get("turns") is not None:
+                turns_total += agent["turns"]
+                pop["turns"] += 1
+            denied = (agent.get("denied") or {}).get("count")
+            if denied is not None:
+                denied_total += denied
+                pop["denied"] += 1
 
         model, provider, hire = _who(rec)
         method = _method(rec)
@@ -283,6 +321,13 @@ def collect(project: Project, runs: list[Run] | None = None) -> dict:
         "cost": {
             "wallClockSeconds": round(wall) or None,
             "secondsPerKeptFinding": round(wall / kept) if kept and wall else None,
+            "usd": round(usd_total, 4) if pop["usd"] else None,
+            "turns": turns_total if pop["turns"] else None,
+            "denied": denied_total if pop["denied"] else None,
+            # Every number above, and how many runs it could have come from.
+            # A number without the population it came from is worse than no
+            # number: it reads as if it were about all of them.
+            "population": dict(pop),
         },
         "runRows": run_rows,
     }
