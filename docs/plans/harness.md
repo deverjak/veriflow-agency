@@ -7,6 +7,31 @@
 
 ---
 
+## Stav k 6. 9. 2026
+
+Krok 0 a Fáze A–C jsou hotové a commitnuté, jeden krok = jeden commit, testy zelené mezi tím (386). Fáze D má hotový kód, ale **ne přejímku** — ta chce reálnou historii rozhodnutých nálezů, kterou tenhle repozitář nemá.
+
+| | stav |
+|---|---|
+| **0** sonda hooků | hotovo — výsledky níž u Kroku 0, klíče v `providers.py` |
+| **A** 1, 13, 14, 2, 3 | hotovo |
+| **B** 8, 9, 15 | hotovo |
+| **C** 4, 5, 6, 7 | hotovo |
+| **D** 10, 11, 12 | kód hotový; §7 body 8–10 čekají na data |
+
+**Co zbývá dodělat, a je to zapsané schválně, ne zamlčené:**
+
+1. **Krok 9 — řádka na telefon.** Telefon čte `agent.jsonl`, což je surový transkript providera; psát do něj vlastní řádky by ho poškodilo. Vlastní kanál pro to neexistuje a je to rozhodnutí pro zakladatele, ne detail.
+2. **Krok 12 — samotné spuštění packu nad připnutým commitem.** Skórování, `--pin` i porovnání fungují a jsou otestované; launch patří do `cmd_run` a chce mu přidat připnutý target, aby se běh nemusel tvářit jako člen řetězu.
+3. **Krok 2 — limit délky argumentu na Windows** u `--append-system-prompt`. Doprobovat, až bude reálný `do-not-report.md` u stropu 40 řádků.
+4. **Extension** ukazuje `blocked.md` v seznamu výstupů a ikonou stavu; tlačítko jako u `summary.md` neexistuje, protože takové tlačítko nemá ani `summary.md`.
+
+**Čtyři věci, které plán tvrdil a kód říkal něco jiného** (opraveno v příslušných krocích, ne potichu): `--append-system-prompt-file` neexistuje jako funkční flag; příklad řádku v `tool-calls.jsonl` měl vymyšlený `exitCode`; `proc.stream` uplatňoval `timeout` až po dočtení proudu, takže runaway pojistka by nikdy nevystřelila; a řetěz předával společný prompt i členovi s `prompt: "none"`, čímž by `verify` shodil celý řetěz na svém kroku.
+
+**A jedna živá chyba nalezená cestou:** `knownSpecs` se vracelo z `for_run` a chybělo v `MEMORY_STATS`, takže grafový běh v projektu se specy psal záznam neplatný proti vlastnímu schématu. Past §0.3/#1 počtvrté — [`tasks.md`](tasks.md) Fáze 0 ji přitom už jednou hlásila jako opravenou. Teď ji hlídá test proti tomu, co `for_run` doopravdy vrací.
+
+---
+
 ## 0. Než začneš — orientace pro agenta, který tenhle plán vykonává
 
 ### 0.1 Kde co je
