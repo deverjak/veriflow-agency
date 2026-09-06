@@ -86,15 +86,64 @@
         "required": ["kind", "detail"],
         "properties": {
           "kind": {
-            "enum": ["graph", "rule", "test-gap", "diff", "runtime", "doc"],
-            "description": "graph = a fact from the code-graph driver (`agency graph`), rule = a rule from the project's own documentation, test-gap = missing coverage, diff = content of the change, runtime = observed behaviour, doc = contradicts the documentation"
+            "enum": ["graph", "rule", "test-gap", "diff", "runtime", "doc",
+                     "code", "document", "command", "web_snapshot", "board_item"],
+            "description": "Two generations. WITHOUT a locator (older, still valid): graph = a fact from the code-graph driver (`agency graph`), rule = a rule from the project's own documentation, test-gap = missing coverage, diff = content of the change, runtime = observed behaviour, doc = contradicts the documentation. WITH a locator (since 2026-09-06, machine-verifiable): code = a place in the source at a commit, document = a file in the repository at a commit, command = something that ran in this run, web_snapshot = a page fetched in this run and kept, board_item = an item in a board snapshot taken by this run."
           },
           "detail": { "type": "string", "minLength": 3 },
           "source": {
             "type": ["string", "null"],
-            "description": "Where this came from — e.g. 'agency graph impact --depth 2' or 'CLAUDE.md#rules-that-will-bite-you'"
+            "description": "Where this came from — e.g. 'agency graph impact --depth 2' or 'CLAUDE.md#rules-that-will-bite-you'. Free text, and that is the point of `locator`: a source can be written without ever having been opened. Kept because committed run history is full of it, and because a pointer to a document that needs no verification is honest."
+          },
+          "locator": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Where the proof is, in a shape a machine can open — the half `source` never had. Verified against what THIS RUN recorded and never against the live world: the gate is offline, or `agency replay` stops meaning anything and the same run stops giving the same answer.",
+            "properties": {
+              "file": {
+                "type": "string",
+                "pattern": "^[^/].*",
+                "description": "POSIX path relative to the project root, as in `anchor.file`."
+              },
+              "line": { "type": "integer", "minimum": 1 },
+              "endLine": { "type": "integer", "minimum": 1 },
+              "commit": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+              "command": {
+                "type": "string",
+                "minLength": 2,
+                "description": "The command line, as it was run. Flags are not compared — only the command and its subcommands."
+              },
+              "url": { "type": "string", "pattern": "^https?://" },
+              "artifact": {
+                "type": "string",
+                "pattern": "^evidence/[A-Za-z0-9._/-]+$",
+                "description": "What the run kept, as a path inside its own RUN_DIR. Always under `evidence/`, never absolute and never out of the run: an artifact somewhere else is one the run cannot vouch for."
+              },
+              "ref": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Identity of the thing inside the artifact — an issue number, a board item id."
+              }
+            }
           }
-        }
+        },
+        "allOf": [
+          { "if": { "properties": { "kind": { "const": "code" } }, "required": ["kind"] },
+            "then": { "required": ["locator"],
+                      "properties": { "locator": { "required": ["file", "line", "commit"] } } } },
+          { "if": { "properties": { "kind": { "const": "document" } }, "required": ["kind"] },
+            "then": { "required": ["locator"],
+                      "properties": { "locator": { "required": ["file", "commit"] } } } },
+          { "if": { "properties": { "kind": { "const": "command" } }, "required": ["kind"] },
+            "then": { "required": ["locator"],
+                      "properties": { "locator": { "required": ["command"] } } } },
+          { "if": { "properties": { "kind": { "const": "web_snapshot" } }, "required": ["kind"] },
+            "then": { "required": ["locator"],
+                      "properties": { "locator": { "required": ["url", "artifact"] } } } },
+          { "if": { "properties": { "kind": { "const": "board_item" } }, "required": ["kind"] },
+            "then": { "required": ["locator"],
+                      "properties": { "locator": { "required": ["ref", "artifact"] } } } }
+        ]
       }
     },
 

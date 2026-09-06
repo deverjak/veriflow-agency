@@ -3,7 +3,7 @@
 **Datum:** 2026-09-06
 **Navazuje na:** [`agency-v1.md`](agency-v1.md) (pack je skill v projektu, žádná konfigurace), [`harness.md`](harness.md) (provenience tool callů, brána, metriky, revize packu), [`findings-ownership.md`](findings-ownership.md) (board je stav, lokál je brána a stopa), [`teams.md`](teams.md) (řetěz), [`shared-memory.md`](shared-memory.md) (paměť patří projektu)
 **Řeší:** jádro dnes umí evidovat jediný druh výstupu — nález s kotvou na soubor a řádek. PO a CEO produkují rozhodnutí, odpovědi, sázky a drafty, a **oba už jádro kvůli tomu obcházejí**. Plán zobecňuje mechanismy, které v jádru fungují (brána, dedup, sinky, paměť, metriky), tak aby přestaly předpokládat code-review nález — a nedělá z Agency univerzální platformu.
-**Stav k 6. 9. 2026:** Krok 1 hotový a commitnutý (testy 397 zelených). Rozpracovaný: Krok 2.
+**Stav k 6. 9. 2026:** Kroky 1 a 2 hotové a commitnuté (testy 412 zelených). Další na řadě: Krok 3.
 
 **Nedělá:** nový generický agent framework. Žádný plugin systém metrik, žádný registr typů, žádná doménová znalost v jádru. Přibývají přesně dvě abstrakce — `TypePolicy` a `Run.scope`.
 
@@ -235,11 +235,11 @@ Pořadí je záměrné: **žádný krok neuvolní kontrolu dřív, než existuje
 
 ---
 
-### Krok 2 — evidence dostane locatory a ověření (~1,5 dne)
+### Krok 2 — evidence dostane locatory a ověření (~1,5 dne) — **hotovo**
 
 **Proč:** dokud evidence nemá locator, dělá veškerou deterministickou práci kotva (§0.2). Tohle je **náhrada, kterou musí mít CEO dřív, než se kotva uvolní.**
 
-**Co se mění:** položka evidence dostane `locator`, jehož tvar určuje `kind`:
+**Co se změnilo:** položka evidence dostala `locator`, jehož tvar určuje `kind`:
 
 ```json
 { "kind": "code",         "locator": { "file": "src/foo.ts", "line": 42, "commit": "…" } }
@@ -251,18 +251,28 @@ Pořadí je záměrné: **žádný krok neuvolní kontrolu dřív, než existuje
 
 Ověření v bráně, všechno offline (§3.1):
 
-| kind | ověří se |
-|---|---|
-| `code`, `document` | soubor existuje na daném commitu, řádek je v rozsahu (`_exists_at_commit`) |
-| `command` | hlavička příkazu je v `tool-calls.jsonl` (`unproven`, beze změny) |
-| `web_snapshot` | artefakt v `RUN_DIR` existuje **a** URL je v `tool-calls.jsonl` tohoto běhu (Krok 1) |
-| `board_item` | artefakt existuje a `ref` je v něm |
+| kind | ověří se | kde |
+|---|---|---|
+| `code`, `document` | soubor existuje na daném commitu, řádek je v rozsahu | `_exists_at_commit` |
+| `command` | hlavička příkazu je v `tool-calls.jsonl` | `unproven`, rozšířený o `locator.command` |
+| `web_snapshot` | artefakt v `RUN_DIR` existuje **a** URL je v `tool-calls.jsonl` tohoto běhu | `unverified` + Krok 1 |
+| `board_item` | artefakt existuje a `ref` je v něm | `unverified` |
 
-**Migrace:** `finding.v1` se nezahazuje. Evidence přijímá **obě podoby** — starou `{kind, detail, source}` i novou `{kind, locator, detail}` — dokud nejsou přepsané všechny packy. Bez toho nesedí ani jeden z šesti hned první den: PO má vlastní přepis požadovaného tvaru na [`SKILL.md:239`](../../packs/po/SKILL.md), CEO na [`215`](../../packs/ceo/SKILL.md). Committed historie v `.agency/knowledge/` se nepřepisuje nikdy.
+Nový důvod v `GATE_REASONS`: `unverified-evidence`. Citovaný příkaz zůstává `unproven-source` **v obou tvarech** — `locator.command` i rozpoznaný `source` řeší jedna funkce, aby pack nedostal jiný verdikt za to, že použil novější zápis, a aby se dvě populace v `gatedBy` nemíchaly.
 
-**Testy:** `test_gate.py` — pro každý kind jeden případ, který projde, a jeden, který neprojde; `web_snapshot` s URL, které v tomhle běhu nepadlo, se zahodí.
+**Tři pojistky, které to nesmí zahodit poctivé nálezy:**
 
-**Hotovo, když:** nález doložený jen webem projde branou, a tentýž nález s vymyšleným URL ne.
+1. **URL se porovnává normalizovaná** (`_norm_url`) — hook píše, co se stahovalo, agent píše, co cituje. Lomítko na konci, velikost písmen v hostiteli a fragment nesmí být verdikt; query string ano, ten stránku změnit může.
+2. **`urls_fetched` vrací `None`, když nikdo nezapisoval** — stejná pojistka jako u `commands_run`. U `web_snapshot` se pak přeskočí jen polovina „bylo to otevřeno v tomhle běhu"; polovina „artefakt je v běhu" platí vždy, protože ta na hooku nestojí.
+3. **Cesta k artefaktu se ověřuje dvakrát.** Pattern v schématu zastaví `/etc/passwd`, ale `evidence/../../x` mu vyhoví — chytá to až `_in_run()` přes `resolve()`. Cesta ven z `RUN_DIR` není překlep, je to běh, který se zaručuje za něco, co nevlastní.
+
+**Migrace:** `finding.v1` se nezahodil. Evidence přijímá **obě podoby** — starou `{kind, detail, source}` i novou `{kind, locator, detail}`. Staré kindy (`graph`, `rule`, `test-gap`, `diff`, `runtime`, `doc`) locator nemají a procházejí přesně jako dřív; nové (`code`, `document`, `command`, `web_snapshot`, `board_item`) ho mají povinný přes `if/then` v schématu. Bez toho nesedí ani jeden z šesti packů hned první den: PO má vlastní přepis požadovaného tvaru na [`SKILL.md:239`](../../packs/po/SKILL.md), CEO na [`215`](../../packs/ceo/SKILL.md). Committed historie v `.agency/knowledge/` se nepřepisuje nikdy.
+
+**Testy:** `test_gate.py`, 15 nových — pro každý kind případ, který projde, i který ne; obojí `web_snapshot` selhání (nestažené URL, neuložený artefakt); normalizace URL; běh bez hooku si podrží polovinu, kterou zkontrolovat umí; obě vrstvy ochrany cesty; a starý tvar, který dál prochází.
+
+**Hotovo, když:** ~~nález doložený jen webem projde branou, a tentýž nález s vymyšleným URL ne.~~ Splněno.
+
+**Co zůstalo vědomě otevřené:** `stop_errors()` — druhá šance před koncem běhu — kontroluje schéma a kotvu, ale ne locatory. Chybějící `locator` tedy agent dostane zpět (je to schéma), zatímco neuložený artefakt se dozví až brána po jeho konci. Dá se doplnit, ale patří to k tomu až po Kroku 4, kdy bude vidět, jak často to reálně nastává.
 
 ---
 

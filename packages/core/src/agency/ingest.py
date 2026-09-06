@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from urllib.parse import urlparse
 
 from . import dedup, knowledge, proc
 from . import runs as _runs
@@ -36,6 +37,7 @@ GATE_REASONS = {
     "below-score": "score below the project threshold",
     "unproven-source": "evidence cites a command that never ran in this run",
     "weak-evidence": "not the kind of proof this dimension stands or falls on",
+    "unverified-evidence": "the evidence locator points at something this run did not produce",
 }
 
 #: What makes a `source` a claim about something that RAN, rather than a
@@ -83,18 +85,18 @@ def _command_of(row: dict) -> str | None:
     return None
 
 
-def commands_run(run: Run) -> list[str] | None:
-    """What this run actually executed — `None` when nobody was recording.
+def _tool_rows(run: Run) -> list[dict] | None:
+    """Everything the recorder wrote for this run — `None` when nobody was.
 
     `None` and `[]` mean opposite things and the difference is the whole
-    safety of this check: no file means the hook never ran (an attended run, a
-    codex run), and a gate stage that treated that as "ran nothing" would drop
-    every honest finding in those runs.
+    safety of every check built on this: no file means the hook never ran (an
+    attended run, a codex run), and a gate stage that treated that as "did
+    nothing" would drop every honest finding in those runs.
     """
     path = run.dir / _runs.TOOL_CALLS
     if not path.is_file():
         return None
-    found: list[str] = []
+    rows: list[dict] = []
     try:
         with open(path, encoding="utf-8") as f:
             for line in f:
@@ -105,25 +107,139 @@ def commands_run(run: Run) -> list[str] | None:
                     row = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                command = _command_of(row)
-                if command:
-                    found.append(command)
+                if isinstance(row, dict):
+                    rows.append(row)
     except OSError:
         return None
-    return found
+    return rows
+
+
+def commands_run(run: Run) -> list[str] | None:
+    """What this run actually executed — `None` when nobody was recording."""
+    rows = _tool_rows(run)
+    if rows is None:
+        return None
+    return [c for c in (_command_of(row) for row in rows) if c]
 
 
 def unproven(finding: dict, ran: list[str]) -> str | None:
-    """The first cited command that never ran, or `None` when all of them did."""
+    """The first cited command that never ran, or `None` when all of them did.
+
+    Two places say "a command": the free-text `source`, which has to be
+    recognised as one (`_is_command`), and `locator.command`, which says so by
+    being there. Same lie, same reason — one check, so that a pack does not
+    get a different verdict for citing the same command in the newer shape.
+    """
     heads = [_head(c) for c in ran]
     for item in finding.get("evidence") or []:
         source = (item or {}).get("source")
-        if not _is_command(source):
-            continue
-        want = _head(source)
+        cited = ((item or {}).get("locator") or {}).get("command")
+        if not cited:
+            if not _is_command(source):
+                continue
+            cited = source
+        want = _head(cited)
         if not any(head[:len(want)] == want or want[:len(head)] == head
                    for head in heads):
             return " ".join(want)
+    return None
+
+
+def _norm_url(url: str) -> str:
+    """A URL as the comparison sees it.
+
+    The recorded call and the cited page are written by two different hands —
+    the runner's hook and the agent — so `https://KICKK.cz/vyzvy/` and
+    `https://kickk.cz/vyzvy#program` must be the same page. Only the parts
+    that cannot change the page are normalised away; a query string can, and
+    stays.
+    """
+    text = str(url or "").strip()
+    parsed = urlparse(text)
+    host = (parsed.netloc or "").lower()
+    path = (parsed.path or "").rstrip("/")
+    query = f"?{parsed.query}" if parsed.query else ""
+    return f"{(parsed.scheme or '').lower()}://{host}{path}{query}"
+
+
+def urls_fetched(run: Run) -> set[str] | None:
+    """Every page this run is recorded as having opened.
+
+    `None` when nobody was recording, and it means the same as it means in
+    `commands_run`: the check is skipped whole rather than failed. A run whose
+    hook never fired must not lose its findings for it.
+    """
+    rows = _tool_rows(run)
+    if rows is None:
+        return None
+    out: set[str] = set()
+    for row in rows:
+        url = (row.get("input") or {}).get("url") if isinstance(row.get("input"), dict) else None
+        if url:
+            out.add(_norm_url(url))
+    return out
+
+
+def _in_run(run_dir: Path, artifact: str) -> Path | None:
+    """The artifact's real path, or `None` when it points out of the run.
+
+    The schema already forbids the shapes that escape; this is the second
+    layer, because a path that leaves RUN_DIR is not a mistake in a locator —
+    it is a run vouching for something it does not own.
+    """
+    try:
+        root = run_dir.resolve()
+        path = (run_dir / artifact).resolve()
+        path.relative_to(root)
+    except (OSError, ValueError):
+        return None
+    return path if path.is_file() else None
+
+
+def unverified(project: Project, run: Run, finding: dict,
+               urls: set[str] | None) -> str | None:
+    """The first evidence locator that does not check out, or `None`.
+
+    Offline, always. Everything here is answered from the repository at a
+    commit or from what the run itself kept in `RUN_DIR/evidence/` — never by
+    asking the network. A gate that phoned out would give the same run two
+    different answers on two different days, and `replay` would stop being a
+    regression test.
+
+    Locators are checked, `source` is not: an item with no locator is the
+    older shape and keeps passing exactly as it did.
+    """
+    for item in finding.get("evidence") or []:
+        kind = (item or {}).get("kind")
+        loc = (item or {}).get("locator") or {}
+        if not loc:
+            continue
+
+        if kind in ("code", "document"):
+            ok, lines = _exists_at_commit(project.root, loc.get("commit") or "",
+                                          loc.get("file") or "")
+            if not ok:
+                return (f"{kind}: {loc.get('file')} is not at "
+                        f"{(loc.get('commit') or '')[:8]}")
+            line = loc.get("line")
+            if lines is not None and isinstance(line, int) and line > lines:
+                return f"{kind}: line {line} > {lines} lines in {loc.get('file')}"
+
+        elif kind in ("web_snapshot", "board_item"):
+            if not _in_run(run.dir, loc.get("artifact") or ""):
+                return f"{kind}: {loc.get('artifact')} is not in this run"
+            if kind == "web_snapshot" and urls is not None:
+                if _norm_url(loc.get("url") or "") not in urls:
+                    return f"web_snapshot: {loc.get('url')} was not opened in this run"
+            if kind == "board_item":
+                path = _in_run(run.dir, loc["artifact"])
+                ref = str(loc.get("ref") or "")
+                try:
+                    if ref not in path.read_text(encoding="utf-8", errors="replace"):
+                        return f"board_item: {ref} is not in {loc['artifact']}"
+                except OSError:
+                    return f"board_item: {loc['artifact']} cannot be read"
+
     return None
 
 
@@ -231,6 +347,7 @@ def gate(project: Project, run: Run, findings: list[dict], min_score: int | None
     # Loaded once. `None` means nothing was recording this run, and then the
     # whole check is skipped — never drop a finding because a hook did not run.
     ran = commands_run(run)
+    urls = urls_fetched(run)
 
     for i, f in enumerate(findings):
         def drop(reason: str, detail: str = "") -> None:
@@ -267,6 +384,15 @@ def gate(project: Project, run: Run, findings: list[dict], min_score: int | None
             if cited:
                 drop("unproven-source", f"“{cited}” did not run in this run")
                 continue
+
+        # After the command check on purpose: a fabricated command is the
+        # older and better-understood lie, and reading it as the newer one
+        # would make the two populations in `gatedBy` impossible to tell
+        # apart.
+        broken = unverified(project, run, f, urls)
+        if broken:
+            drop("unverified-evidence", broken)
+            continue
 
         score = f.get("score")
         if min_score is not None and isinstance(score, int) and score < min_score:
