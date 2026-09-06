@@ -733,6 +733,84 @@ def _sum(*values) -> int | float | None:
     return round(total, 6) if any(isinstance(v, float) for v in present) else total
 
 
+#: Five, not three. Taken from ECC's `LOOP_THRESHOLD` together with the reason
+#: they give for it: at three it fires on legitimate retries and polling, and a
+#: warning that cries wolf is a warning nobody reads by its second week.
+LOOP_THRESHOLD = 5
+
+#: Refusals of the same tool before it is worth saying out loud. Three is
+#: already a pattern — a pack asking for something its `needs` does not grant
+#: will keep asking, and it will not get it.
+DENIAL_THRESHOLD = 3
+
+#: How many tool calls may pass without anything appearing in RUN_DIR before
+#: that is worth a line. Generous: reading a large pull request legitimately
+#: takes dozens of calls before the first thing is written.
+QUIET_TOOLS = 40
+
+
+class Watch:
+    """Three things worth saying WHILE they happen, derived from the stream
+    `attend` already parses.
+
+    None of them kills anything and none of them asks anything (§0.5 of the
+    harness plan). The point is only that a twenty-minute run should not be
+    the first place a person learns it spent twenty minutes in a circle.
+
+    The counting is deliberately dumb — same tool, same arguments, in a row —
+    because the alternative is a heuristic about what the agent MEANT, and a
+    wrong guess here costs a false alarm on every legitimate retry loop.
+    """
+
+    def __init__(self, run_dir: Path, say=None) -> None:
+        self.run_dir = run_dir
+        self.say = say or (lambda text: None)
+        self.loops = 0
+        self._last: tuple | None = None
+        self._same = 0
+        self._said = False
+        self._denied: dict[str, int] = {}
+        self._tools = 0
+        self._prints: set | None = None
+
+    def _files(self) -> set:
+        # `agent.jsonl` is this very stream and grows with every event, so
+        # counting it as progress would mean the check can never fire.
+        try:
+            return {(p.name, p.stat().st_size) for p in self.run_dir.rglob("*")
+                    if p.is_file() and p.name != "agent.jsonl"}
+        except OSError:
+            return set()
+
+    def see(self, event) -> None:
+        if event.kind == "tool":
+            key = (event.tool, event.detail)
+            if key == self._last:
+                self._same += 1
+            else:
+                self._last, self._same, self._said = key, 1, False
+            if self._same >= LOOP_THRESHOLD and not self._said:
+                self.loops += 1
+                self._said = True
+                self.say(f"{event.tool} has been called {self._same}x in a row with "
+                         f"the same arguments — it may be stuck in a loop")
+
+            self._tools += 1
+            if self._tools % QUIET_TOOLS == 0:
+                now_ = self._files()
+                if self._prints is not None and now_ == self._prints:
+                    self.say(f"{self._tools} tool calls and nothing written into "
+                             f"RUN_DIR yet")
+                self._prints = now_
+
+        elif event.kind == "denied":
+            name = event.tool or "?"
+            self._denied[name] = self._denied.get(name, 0) + 1
+            if self._denied[name] == DENIAL_THRESHOLD:
+                self.say(f"{name} has been refused {DENIAL_THRESHOLD}x — the pack "
+                         f"needs it and `needs` in pack.json does not grant it")
+
+
 def attend(project: Project, run: Run, launch: list[str], cwd: Path,
            dialect: str | None = None, on_event=None,
            chain: dict | None = None, timeout: float | None = None,
@@ -748,6 +826,7 @@ def attend(project: Project, run: Run, launch: list[str], cwd: Path,
     env = agent_env(run, chain)
     started = time.monotonic()
     collected: list = []
+    watch = Watch(run.dir, say=out.note)
 
     if dialect:
         raw = (run.dir / "agent.jsonl").open("a" if append else "w", encoding="utf-8")
@@ -756,6 +835,7 @@ def attend(project: Project, run: Run, launch: list[str], cwd: Path,
             raw.write(text + "\n")
             for e in events.parse(dialect, text):
                 collected.append(e)
+                watch.see(e)
                 if on_event:
                     on_event(e)
         try:
@@ -788,6 +868,10 @@ def attend(project: Project, run: Run, launch: list[str], cwd: Path,
             if t not in tools:
                 tools.append(t)
         agent["denied"] = {"count": denied, "tools": tools}
+        # Kept even when it is zero: "this run did not loop" and "nobody was
+        # watching for loops" are different facts, and only a written number
+        # can tell a pack that loops every time from one that had a bad day.
+        agent["loops"] = _sum(prior.get("loops"), watch.loops) if append else watch.loops
     rec["agent"] = agent
     tokens = summary.get("tokens") or {}
     # The agent writes `run.json` too, and everything in `cost` is measured

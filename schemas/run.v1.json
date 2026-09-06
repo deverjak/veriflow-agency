@@ -471,6 +471,13 @@
           ],
           "description": "How many turns the agent took, summed over the first session and every follow-up. Only a streamed run has one; an attended session inherits the terminal and nothing counts for it."
         },
+        "loops": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "How many times the agent repeated the same tool call with the same arguments five times over. Five rather than three because at three it fires on legitimate retries and polling. Nothing is killed over it — the run is warned while it happens and the count is kept, because a pack that loops on every run has a method problem, not a bad day."
+        },
         "denied": {
           "type": [
             "object",

@@ -561,3 +561,71 @@ def test_nothing_rejected_yet_adds_no_flag():
 
     assert "--append-system-prompt" not in argv
     assert info["systemPrompt"] is False
+
+
+# ------------------------------------------------------------ watching a run
+
+def _tool_line(name: str, command: str) -> str:
+    return json.dumps({"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "name": name, "input": {"command": command}}]}})
+
+
+def _watch(project, run, lines: list[str], monkeypatch) -> dict:
+    said: list[str] = []
+
+    def stream(argv, cwd=None, env=None, on_line=None, timeout=None):
+        for text in lines:
+            on_line(text)
+        on_line(json.dumps({"type": "result", "subtype": "success",
+                            "is_error": False, "num_turns": 9,
+                            "session_id": "s", "result": "done",
+                            "permission_denials": []}))
+        return 0
+
+    monkeypatch.setattr(proc, "stream", stream)
+    monkeypatch.setattr(runs.out, "note", lambda text: said.append(text))
+    runs.attend(project, run, ["claude", "-p"], project.root,
+                dialect="claude-stream-json")
+    return {"said": said, "record": run.record()}
+
+
+def test_five_identical_calls_in_a_row_are_a_loop(project, make_run, monkeypatch):
+    """Five, not three: at three it fires on legitimate retries and polling,
+    which is ECC's own finding and worth taking with the number."""
+    run = make_run()
+    out = _watch(project, run, [_tool_line("Read", "src/auth.ts")] * 5, monkeypatch)
+
+    assert out["record"]["agent"]["loops"] == 1
+    assert any("in a row" in s for s in out["said"]), "and the person saw it happen"
+
+
+def test_four_is_not_a_loop(project, make_run, monkeypatch):
+    run = make_run()
+    out = _watch(project, run, [_tool_line("Read", "src/auth.ts")] * 4, monkeypatch)
+
+    assert out["record"]["agent"]["loops"] == 0
+    assert not [s for s in out["said"] if "in a row" in s]
+
+
+def test_the_same_tool_on_different_arguments_is_work(project, make_run, monkeypatch):
+    """Reading six files is a specialist doing its job."""
+    run = make_run()
+    lines = [_tool_line("Read", f"src/file{i}.ts") for i in range(6)]
+    out = _watch(project, run, lines, monkeypatch)
+
+    assert out["record"]["agent"]["loops"] == 0
+
+
+def test_a_run_refused_the_same_tool_three_times_says_so_while_it_happens(
+        project, make_run, monkeypatch):
+    """The closing `result` carries the same refusals — twenty minutes later.
+    The live line is what lets a person widen `needs` and start again instead
+    of paying for the whole run first."""
+    run = make_run()
+    denied = json.dumps({"type": "system", "subtype": "permission_denied",
+                         "tool_name": "Bash", "message": "npm run verify"})
+    out = _watch(project, run, [denied] * 3, monkeypatch)
+
+    assert any("needs" in s and "Bash" in s for s in out["said"])
+    # And it is counted once, not twice, when the result also lists them.
+    assert out["record"]["agent"]["denied"]["count"] == 3

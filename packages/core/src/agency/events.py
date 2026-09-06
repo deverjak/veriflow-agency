@@ -95,6 +95,17 @@ def claude(line: str) -> list[Event]:
     if kind == "system" and o.get("subtype") == "init":
         return [Event("start", session=o.get("session_id"))]
 
+    # A refusal AS IT HAPPENS. The closing `result` carries the same refusals in
+    # `permission_denials[]`, but only at the end — so until this line was read,
+    # "the pack is being refused every write" was knowable twenty minutes after
+    # it stopped mattering. Probed on 2026-09-06 (claude 2.1.263) by denying a
+    # Write in a real `-p` run:
+    #   {"type":"system","subtype":"permission_denied","tool_name":"Write",
+    #    "tool_use_id":"…","message":"…"}
+    if kind == "system" and o.get("subtype") == "permission_denied":
+        return [Event("denied", tool=o.get("tool_name"),
+                      detail=_clip(o.get("message")))]
+
     if kind == "assistant":
         out_: list[Event] = []
         for b in ((o.get("message") or {}).get("content") or []):
@@ -213,10 +224,15 @@ def summarize(events: list[Event]) -> dict:
 def denial_count(events: list[Event]) -> int:
     """How many calls were refused. Counted from `permission_denials`, not from
     the number of distinct tools: five refused Writes are five missing
-    permissions, not one."""
-    n = 0
-    for e in events:
-        n += len(e.denials)
-        if e.kind == "denied":
-            n += 1
-    return n
+    permissions, not one.
+
+    The closing `result` is authoritative when it arrived, because the same
+    refusals also stream past live and adding both would count each of them
+    twice. Live events are the fallback for a run that never got to a result —
+    killed, crashed, out of quota — which is precisely the run where knowing
+    it was refused everything matters most.
+    """
+    final = sum(len(e.denials) for e in events)
+    if final:
+        return final
+    return sum(1 for e in events if e.kind == "denied")
