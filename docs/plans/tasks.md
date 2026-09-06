@@ -278,7 +278,7 @@ Kroky 1, 2 a 4 jsou na sobě nezávislé a jsou to dohromady čtyři hodiny. Kro
 - [x] **Fáze A** (Kroky 1, 13, 14, 2, 3) — `run.json.context` s otiskem `CLAUDE.md`/`SKILL.md`; `blocked` jako plnohodnotný výsledek vedle `no-findings`; attended a unattended jako dvě populace v metrikách; `do-not-report.md` a jeho doručení; `known-here.json`
 - [x] **Fáze B** (Kroky 8, 9, 15) — generický pack `verify` jako člen řetězu (vyrábí `machine-confirmed` a rozhodnutá data); živý dohled nad proudem (smyčky, odmítnutí); `budget` v `pack.json` a cena na přijatý nález
 - [x] **Fáze C** (Kroky 4, 5, 6, 7) — provenience důkazu (`tool-calls.jsonl` → `unproven-source`); důkaz podle dimenze (`weak-evidence`); `score` povinné; Stop hook jako druhá šance uvnitř běhu
-- [~] **Fáze D** (Kroky 10, 11, 12) — kód hotový, přejímka čeká na reálná data — `metrics --for-author`; `author --revise <pack>` píšící diff do `SKILL.md`; `agency replay` nad připnutými SHA s pravidlem *regrese = 0*
+- [~] **Fáze D** (Kroky 10, 11, 12) — kód hotový a otestovaný, přejímka (§7 body 8–10) čeká na ~10 rozhodnutých nálezů na pack — `metrics --for-author`; `author --revise <pack>` píšící diff do `SKILL.md`; `agency replay` nad připnutými SHA s pravidlem *regrese = 0*
 
 **Hotovo, když:** projde přejímka ([`harness.md`](harness.md) §7) — deset podmínek nad `main-panelem`, z nichž nejtvrdší je bod 8: zakladatel podle briefu sám řekne, co v `SKILL.md` opravit, dřív než to navrhne autor.
 

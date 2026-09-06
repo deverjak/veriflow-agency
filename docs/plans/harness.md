@@ -9,7 +9,7 @@
 
 ## Stav k 6. 9. 2026
 
-Krok 0 a Fáze A–C jsou hotové a commitnuté, jeden krok = jeden commit, testy zelené mezi tím (386). Fáze D má hotový kód, ale **ne přejímku** — ta chce reálnou historii rozhodnutých nálezů, kterou tenhle repozitář nemá.
+Všech patnáct kroků má hotový kód, commitnuto po krocích, testy zelené mezi tím (393). Fáze D má hotový kód, ale **ne přejímku** — ta chce reálnou historii rozhodnutých nálezů, kterou tenhle repozitář nemá.
 
 | | stav |
 |---|---|
@@ -17,14 +17,16 @@ Krok 0 a Fáze A–C jsou hotové a commitnuté, jeden krok = jeden commit, test
 | **A** 1, 13, 14, 2, 3 | hotovo |
 | **B** 8, 9, 15 | hotovo |
 | **C** 4, 5, 6, 7 | hotovo |
-| **D** 10, 11, 12 | kód hotový; §7 body 8–10 čekají na data |
+| **D** 10, 11, 12 | kód hotový; §7 body 8–10 čekají na reálná rozhodnutá data |
 
-**Co zbývá dodělat, a je to zapsané schválně, ne zamlčené:**
+**Co zbývá — jediná věc, a nejde udělat tady:** přejímka Fáze D (§7 body 8–10). Chce reálnou historii rozhodnutých nálezů nad `main-panelem`, kterou tenhle repozitář nemá. Kód všech patnácti kroků je hotový a otestovaný.
 
-1. **Krok 9 — řádka na telefon.** Telefon čte `agent.jsonl`, což je surový transkript providera; psát do něj vlastní řádky by ho poškodilo. Vlastní kanál pro to neexistuje a je to rozhodnutí pro zakladatele, ne detail.
-2. **Krok 12 — samotné spuštění packu nad připnutým commitem.** Skórování, `--pin` i porovnání fungují a jsou otestované; launch patří do `cmd_run` a chce mu přidat připnutý target, aby se běh nemusel tvářit jako člen řetězu.
-3. **Krok 2 — limit délky argumentu na Windows** u `--append-system-prompt`. Doprobovat, až bude reálný `do-not-report.md` u stropu 40 řádků.
-4. **Extension** ukazuje `blocked.md` v seznamu výstupů a ikonou stavu; tlačítko jako u `summary.md` neexistuje, protože takové tlačítko nemá ani `summary.md`.
+**Dodělané po prvním průchodu:**
+
+1. **Krok 9 — řádka na telefon.** `RUN_DIR/notes.jsonl` jako druhý soubor; SSE endpoint čte oba a prokládá je. Do `agent.jsonl` se nesahá — je to surový transkript providera. Id události má proto tvar `<stream>.<notes>`, jinak by se po výpadku signálu obnovovalo na špatném místě.
+2. **Krok 12 — spuštění nad připnutým commitem.** `cmd_run` dostal `pinned`, oddělený od `chain`: replay není člen řetězu. Fixtura si přitom musela začít pamatovat i seznam souborů — bez něj se PR pack odmítl spustit, a ptát se `gh` znovu by znamenalo, že eval přestane fungovat, jakmile se větev smerguje a smaže.
+3. **Krok 2 — limit délky argumentu na Windows.** Doprobováno: 40 řádků = 4,4 kB projde, 250 řádků (27 kB) taky, 300 řádků (32,7 kB) ne. Zeď je `CreateProcess` a hlásí se jako `WinError 206`, tedy „soubor nenalezen". Pojistka: co se nevejde, se nepošle a záznam to přizná.
+4. **Extension** ukazuje `blocked.md` v seznamu výstupů a vlastní ikonou stavu; tlačítko jako u `summary.md` neexistuje, protože takové tlačítko nemá ani `summary.md`.
 
 **Čtyři věci, které plán tvrdil a kód říkal něco jiného** (opraveno v příslušných krocích, ne potichu): `--append-system-prompt-file` neexistuje jako funkční flag; příklad řádku v `tool-calls.jsonl` měl vymyšlený `exitCode`; `proc.stream` uplatňoval `timeout` až po dočtení proudu, takže runaway pojistka by nikdy nevystřelila; a řetěz předával společný prompt i členovi s `prompt: "none"`, čímž by `verify` shodil celý řetěz na svém kroku.
 
