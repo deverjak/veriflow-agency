@@ -361,3 +361,45 @@ def test_no_findings_still_means_no_findings(project, make_run):
 
     assert run.record()["status"] == "no-findings"
     assert run.record()["outputs"]["blocked"] is False
+
+
+# ------------------------------------------------------- evidence per dimension
+
+def test_a_dimension_that_stands_on_the_graph_refuses_a_quotation(project, make_run):
+    """The schema weighs shape, not strength: `finding.v1` wants one piece of
+    evidence out of six equal kinds. So `reuse` — which stands entirely on the
+    call graph — used to pass on a sentence from the README."""
+    install_pack(project, "review-graph", {"minScore": 80, "dimensions": [
+        {"id": "reuse", "title": "Code nothing points at", "evidence": ["graph"]}]})
+    f = make_finding(project, "x", dimension="reuse")
+    f["evidence"] = [{"kind": "doc", "detail": "the README says it is unused",
+                      "source": "README.md"}]
+    run = make_run(findings=[f])
+
+    result = ingest.ingest(project, run)
+
+    assert result["counts"]["kept"] == 0
+    assert result["dropped"][0]["reason"] == "weak-evidence"
+    assert "graph" in result["dropped"][0]["detail"]
+
+
+def test_the_same_dimension_passes_on_the_proof_it_asked_for(project, make_run):
+    install_pack(project, "review-graph", {"minScore": 80, "dimensions": [
+        {"id": "reuse", "title": "Code nothing points at", "evidence": ["graph"]}]})
+    f = make_finding(project, "x", dimension="reuse")
+    f["evidence"] = [{"kind": "graph", "detail": "no caller in the graph",
+                      "source": "code-review-graph impact"}]
+    run = make_run(findings=[f])
+
+    assert ingest.ingest(project, run)["counts"]["kept"] == 1
+
+
+def test_a_dimension_that_says_nothing_takes_anything(project, make_run):
+    """Backwards compatibility for free — and the pack decides, not the core:
+    only the pack knows which of its questions have one honest kind of answer."""
+    f = make_finding(project, "x")
+    f["evidence"] = [{"kind": "doc", "detail": "the README says so",
+                      "source": "README.md"}]
+    run = make_run(findings=[f])
+
+    assert ingest.ingest(project, run)["counts"]["kept"] == 1

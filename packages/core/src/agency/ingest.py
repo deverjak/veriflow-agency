@@ -35,6 +35,7 @@ GATE_REASONS = {
     "phantom-line": "the line is past the end of the file as of the analysis",
     "below-score": "score below the project threshold",
     "unproven-source": "evidence cites a command that never ran in this run",
+    "weak-evidence": "not the kind of proof this dimension stands or falls on",
 }
 
 #: What makes a `source` a claim about something that RAN, rather than a
@@ -181,7 +182,31 @@ def _exists_at_commit(root: Path, commit: str, path: str) -> tuple[bool, int | N
     return True, content.count("\n") + 1
 
 
-def gate(project: Project, run: Run, findings: list[dict], min_score: int | None) -> tuple[list[dict], list[dict]]:
+def required_evidence(pack) -> dict[str, list[str]]:
+    """Which kinds of proof each dimension stands or falls on.
+
+    A dimension may say so in `pack.json`:
+
+        { "id": "reuse", "title": "Code nothing points at", "evidence": ["graph"] }
+
+    …because the schema weighs SHAPE, not strength: `finding.v1` asks for one
+    piece of evidence out of six equal kinds, so `reuse` — which stands
+    entirely on the call graph — passes on a quotation from the README.
+
+    A dimension without the key behaves exactly as before. Backwards
+    compatibility for free, and the pack decides rather than the core: only
+    the pack knows which of its questions have one honest kind of answer.
+    """
+    out_: dict[str, list[str]] = {}
+    for d in (pack.dimensions if pack else []):
+        kinds = [str(k).strip() for k in (d.get("evidence") or []) if str(k).strip()]
+        if kinds and d.get("id"):
+            out_[str(d["id"])] = kinds
+    return out_
+
+
+def gate(project: Project, run: Run, findings: list[dict], min_score: int | None,
+         evidence: dict[str, list[str]] | None = None) -> tuple[list[dict], list[dict]]:
     """Splits findings into those that pass and those dropped, with a reason."""
     kept: list[dict] = []
     dropped: list[dict] = []
@@ -210,6 +235,15 @@ def gate(project: Project, run: Run, findings: list[dict], min_score: int | None
         if lines is not None and a.get("line", 1) > lines:
             drop("phantom-line", f"line {a['line']} > {lines} lines in the file")
             continue
+
+        wanted = (evidence or {}).get(f.get("dimension") or "")
+        if wanted:
+            kinds = {(e or {}).get("kind") for e in (f.get("evidence") or [])}
+            if not kinds & set(wanted):
+                drop("weak-evidence",
+                     f"{f.get('dimension')} needs {' or '.join(wanted)}, got "
+                     f"{', '.join(sorted(k for k in kinds if k)) or 'nothing'}")
+                continue
 
         if ran is not None:
             cited = unproven(f, ran)
@@ -325,17 +359,19 @@ def ingest(project: Project, run: Run, min_score: int | None = None) -> dict:
             write_json(raw_path, findings)
 
     raw_count = len(findings)
-    if min_score is None:
-        from . import packs
-        pack_name = run.record().get("pack") or "review-graph"
-        try:
-            min_score = packs.load(pack_name, project).min_score
-        except SystemExit:
-            # The pack no longer exists (renamed, removed) — the gate still
-            # has to run, just without a threshold to check.
-            min_score = None
+    from . import packs
+    pack_name = run.record().get("pack") or "review-graph"
+    try:
+        pack = packs.load(pack_name, project)
+    except SystemExit:
+        # The pack no longer exists (renamed, removed) — the gate still has to
+        # run, just without a threshold or per-dimension evidence to check.
+        pack = None
+    if min_score is None and pack:
+        min_score = pack.min_score
 
-    kept, dropped = gate(project, run, findings, min_score)
+    kept, dropped = gate(project, run, findings, min_score,
+                         evidence=required_evidence(pack))
     for f in kept:
         f["fingerprint"] = dedup.fingerprint(f)
 
