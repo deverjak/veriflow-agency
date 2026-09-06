@@ -1166,7 +1166,8 @@ def write_context(run: Run, pack, target: dict, wt: Path,
                   files: list[str], skipped: int,
                   prompt: str | None = None, worktree_owned: bool = True,
                   provider: str | None = None, chain: dict | None = None,
-                  in_worktree: bool | None = None) -> None:
+                  in_worktree: bool | None = None,
+                  revise: str | None = None) -> None:
     from . import knowledge  # circular import: `knowledge` stands on `runs`
 
     if in_worktree is None:
@@ -1207,6 +1208,15 @@ def write_context(run: Run, pack, target: dict, wt: Path,
         # carry standing text (`claude`) gets this in front of the session and
         # never has to be told to open it; a runner that cannot (`codex`) gets
         # the path, and its SKILL.md is what makes it read it.
+        # Which pack's method is being rewritten, when that is what this run
+        # is. `null` for an ordinary run — the author writing a new pack does
+        # not have one, and the difference decides which half of its own
+        # SKILL.md the agent follows.
+        "revise": ({"pack": revise,
+                    "brief": "evidence/for-author.md",
+                    "briefData": "evidence/for-author.json",
+                    "skill": posix((run.project.skills_dir / f"agency-{revise}"))}
+                   if revise else None),
         "doNotReport": (posix(Path("evidence") / knowledge.DO_NOT_REPORT)
                         if (run.dir / "evidence" / knowledge.DO_NOT_REPORT).is_file()
                         else None),

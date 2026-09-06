@@ -376,7 +376,31 @@ def cmd_run(args, chain: dict | None = None) -> int:
                  "front and nothing will stop to ask")
 
     prompt_text = (getattr(args, "prompt", None) or "").strip() or None
-    if prompt_text and policy["prompt"] == "none":
+
+    # Revising an existing method rather than writing a new one. The brief IS
+    # the assignment here, so it stands in for `--prompt`, and the threshold is
+    # a condition rather than a warning — see `metrics.REVISE_MINIMUM`.
+    revise = (getattr(args, "revise", None) or "").strip() or None
+    brief = None
+    if revise:
+        if pack.name != packs.AUTHOR:
+            raise SystemExit(
+                f"--revise belongs to `{packs.AUTHOR}` — it is the pack that writes packs. "
+                f"`agency run {packs.AUTHOR} --revise {revise}`")
+        packs.load(revise, project)                  # a typo, said before anything runs
+        brief = metrics.for_author(project, revise)
+        decided = brief["triage"]["accepted"] + brief["triage"]["rejected"]
+        if decided < metrics.REVISE_MINIMUM:
+            raise SystemExit(
+                f"{revise} has {decided} decided findings; revising a method needs at "
+                f"least {metrics.REVISE_MINIMUM}.\nA method rewritten against fewer is "
+                f"differently random, not better — and it would replace the one whose "
+                f"numbers you already know.\nRun the pack, decide what it finds "
+                f"(`agency findings`), come back.")
+        prompt_text = prompt_text or (
+            f"Revise the {revise} pack against its own record. The brief is in "
+            f"RUN_DIR/evidence/for-author.md.")
+    elif prompt_text and policy["prompt"] == "none":
         raise SystemExit(
             f"Pack “{pack.name}” does not take a prompt — --prompt has nothing to do here.")
     if policy["prompt"] == "required" and not prompt_text:
@@ -505,9 +529,22 @@ def cmd_run(args, chain: dict | None = None) -> int:
                          f"from {len(chain['upstream'])} run(s), "
                          f"{upstream_payload['counts']['undecided']} undecided")
 
+        if brief:
+            # Both shapes, deliberately: the markdown is what makes the step
+            # checkable by a person (if a founder cannot say what to change
+            # after reading it, an agent will not manage it either), and the
+            # JSON is there so a revision does not have to re-derive a number
+            # by reading prose.
+            ev = run.dir / "evidence"
+            ev.mkdir(parents=True, exist_ok=True)
+            (ev / "for-author.md").write_text(metrics.author_brief(brief),
+                                              encoding="utf-8")
+            write_json(ev / "for-author.json", brief)
+
         runs.write_context(run, pack, target, wt, files, skipped,
                            prompt=prompt_text, worktree_owned=wt_owned,
-                           provider=provider, chain=chain, in_worktree=in_worktree)
+                           provider=provider, chain=chain, in_worktree=in_worktree,
+                           revise=revise)
 
         rec = run.record()
         # Memory is not a graph signal. `graph` has a closed key list in
@@ -2008,6 +2045,11 @@ def build_parser() -> argparse.ArgumentParser:
                    help="run unsupervised: the pack's consequential commands (`needsUnattended`) "
                         "are granted up front and nothing stops to ask. The agent runs in print "
                         "mode, so pair it with --wait to watch it and gate the output in one go.")
+    s.add_argument("--revise", metavar="PACK",
+                   help="for `author` only: revise an existing pack's method instead of "
+                        "writing a new one. The run is handed that pack's brief "
+                        "(`agency metrics --for-author`) and writes a diff into its "
+                        "SKILL.md. Refuses to start with too little decided history.")
     s.add_argument("--force", action="store_true", help="a draft or an already reviewed commit too")
     # Hidden, because they are not something a person types: they are how a
     # client says who it is, and the run record is the only reader.

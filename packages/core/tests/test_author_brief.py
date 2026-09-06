@@ -110,3 +110,70 @@ def test_the_brief_comes_out_as_data_too(project, make_run, capsys):
     assert code == 0
     assert data["pack"] == "review-graph"
     assert data["triage"]["accepted"] == 1
+
+
+# ------------------------------------------------------------- author --revise
+
+def _revise_args(project, pack: str):
+    from types import SimpleNamespace
+    return SimpleNamespace(
+        repo=str(project.root), pack="author", revise=pack, json=False,
+        pr=None, latest_merged=False, prompt=None, since=None, model=None,
+        provider=None, bypass=False, force=False, unattended=False,
+        wait=False, launch=False, remote_control=None, origin="cli", device=None)
+
+
+def test_revising_below_the_threshold_refuses_to_start(project, make_run):
+    """A condition, not a warning. A pack with five findings nobody decided on
+    has nothing to learn from, and a revision against them replaces the one
+    method whose numbers were known with a differently random one."""
+    import pytest
+    from agency import packs
+
+    packs.seed(project, "author")
+    _decided(project, make_run, 2, 1)
+
+    with pytest.raises(SystemExit, match="at least 10"):
+        cli.cmd_run(_revise_args(project, "review-graph"))
+
+
+def test_revising_above_the_threshold_hands_over_the_brief(project, make_run):
+    """The brief IS the assignment — which is why `--revise` needs no
+    `--prompt` even though `author` normally requires one."""
+    from agency import packs
+
+    packs.seed(project, "author")
+    for i in range(4):
+        _decided(project, make_run, 2, 1, run_id=f"01R{i}0000000000000000000000")
+
+    code = cli.cmd_run(_revise_args(project, "review-graph"))
+
+    assert code == 0
+    run = next(r for r in runs.load_runs(project) if r.record()["pack"] == "author")
+    brief = (run.dir / "evidence" / "for-author.md").read_text(encoding="utf-8")
+    assert "What review-graph has been doing" in brief
+    assert (run.dir / "evidence" / "for-author.json").is_file()
+
+    ctx = json.loads((run.dir / "context.json").read_text(encoding="utf-8"))
+    assert ctx["revise"]["pack"] == "review-graph"
+    assert ctx["revise"]["brief"] == "evidence/for-author.md"
+    assert ctx["revise"]["skill"].endswith("agency-review-graph")
+
+
+def test_only_the_author_may_revise(project, make_run):
+    """Any other pack would be rewriting a method it does not own."""
+    import pytest
+    args = _revise_args(project, "review-graph")
+    args.pack = "review-graph"
+
+    with pytest.raises(SystemExit, match="belongs to"):
+        cli.cmd_run(args)
+
+
+def test_revising_a_pack_that_does_not_exist_says_so_first(project):
+    import pytest
+    from agency import packs
+
+    packs.seed(project, "author")
+    with pytest.raises(SystemExit, match="Unknown pack"):
+        cli.cmd_run(_revise_args(project, "not-a-pack"))

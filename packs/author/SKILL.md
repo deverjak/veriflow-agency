@@ -186,6 +186,56 @@ which checks `requires` and, when you wrote one, that the `sink`'s first token e
 
 Fix what either one says before you finish. A pack that does not appear in `agency packs` is not a draft, it is a broken file.
 
+## Revising a pack that already exists
+
+`context.json` → `revise` is `null` for everything above. When it is not, this run is **not** writing a new specialist: it is rewriting the method of one that has been running, against its own record. Everything in sections 1–6 gives way to this section.
+
+You get:
+
+| Where | What |
+|---|---|
+| `revise.pack` | which pack's method you are rewriting |
+| `revise.brief` | `evidence/for-author.md` — **read this first, whole** |
+| `revise.briefData` | the same as JSON, when you need a number rather than a sentence |
+| `revise.skill` | the pack's directory: `SKILL.md`, `pack.json`, `references/` |
+
+The brief is what this run is for. It carries precision per dimension **with counts**, which dimensions have found nothing for twenty runs, why the gate dropped things, canonical examples of findings that held up and findings that did not, runs that ended `blocked`, tools the pack was refused, and what happened after each previous change to the method.
+
+**The run refuses to start below ten decided findings**, so if you are reading this, there is enough to work from. That does not make every number in the brief a signal: a dimension with one decided finding is one finding, the brief says so on every row, and treating it as a precision is the single most likely way to make this pack worse.
+
+### What you may change, and what you may not
+
+| May | May not |
+|---|---|
+| dimensions — rephrase, split, merge, delete | `sink`, `needs`, `name` |
+| `evidence` on a dimension (which kinds of proof it stands on) | anything outside `.claude/skills/agency-<pack>/` |
+| `minScore`, `budget` | facts this run did not read in the repository or hear from the founder |
+| *Project facts* — only facts you verified this run | any other pack |
+| the method's steps, its filters, its examples | the pack's subject: a reviewer does not become a QA engineer |
+
+`needs` and `sink` are out of bounds because they are authorization and delivery — they decide what the pack is allowed to do and where its findings go, and neither is something a record of past findings can argue about. If the brief shows a tool being refused every run, that goes in `summary.md` as a recommendation for the founder, not into `pack.json` by your hand.
+
+### How to decide what to change
+
+Work from the brief, one claim at a time, and be able to name the rows behind each change:
+
+- **A dimension with low precision and enough decided findings** is either asking a question this project does not care about, or asking it too loosely. Read the rejected examples: if they were rejected as `by-design`, the dimension is judging a deliberate choice and should be narrowed or dropped. If they were `wrong-diagnosis`, the dimension is right and the method for it is weak — that is a step to rewrite, not a dimension to delete.
+- **A dimension that has found nothing for twenty runs** is a candidate for deletion. Not automatically: it may be rare and right. Say which you think it is and why.
+- **`weak-evidence` or `unproven-source` in the gate reasons** means the method lets the pack cite the wrong kind of proof. Fix the step that produces it, and consider declaring `evidence` on that dimension.
+- **`stopBlocks` above zero on most runs** means the method's output section is not clear enough — the pack is writing `findings.json` wrong and being sent back.
+- **Repeated `blocked` runs** are a wall the method walks into. That is usually one sentence in *Project facts* ("staging is behind the VPN; check it answers before you plan around it") rather than a new dimension.
+
+### What you write
+
+The same shape as writing a new pack, with one addition: **every change has a reason from the brief.**
+
+- The edited `SKILL.md` / `pack.json`, **uncommitted, in the working tree.** Git is the review — the founder reads the diff in Source Control like any other change. Do not commit, do not stage, do not branch.
+- `<RUN_DIR>/summary.md`, and here it matters more than anywhere else. One line per change: what you changed, and the number or the example that made you change it. A change you cannot attribute to a row in the brief is a change you invented — either find the row or drop the change.
+- Say what you **deliberately left alone**, too. A pack whose numbers are fine does not need rewriting, and "nothing here should change yet" is an honest and complete result for this run.
+- `<RUN_DIR>/findings.json` → `[]`.
+
+**One thing that is not yours to decide:** whether the revision was an improvement. That is what `agency replay` answers, over the fixtures pinned from real runs, and its rule is absolute — a change that brings back a previously rejected finding is a regression and does not ship. Say in `summary.md` that the founder should replay before committing.
+
 ## When you cannot go on
 
 Some runs end at a wall rather than at an answer: staging does not respond, `gh` is not logged in, the board has no field this method assumes exists. Say so — write `<RUN_DIR>/blocked.md`:

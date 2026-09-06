@@ -134,6 +134,13 @@ def _who(rec: dict) -> tuple[str, str, str]:
 #: costing a share of every run's context for nothing.
 SILENT_AFTER = 20
 
+#: How much decided history a pack needs before its method is worth rewriting.
+#: A condition, not a warning: a pack with five findings nobody decided on has
+#: nothing to learn from, and a revision against them produces a differently
+#: random pack rather than a better one — which is worse than leaving it alone,
+#: because it also destroys the one method whose numbers were known.
+REVISE_MINIMUM = 10
+
 #: How many findings of each outcome go into the brief as examples. Three, and
 #: chosen for variety rather than for being interesting: Anthropic's own note
 #: on few-shot prompting is "diverse, canonical examples", not edge cases
@@ -269,7 +276,7 @@ def author_brief(data: dict) -> str:
               + (f" — precision {t['precision']}" if t["precision"] is not None
                  else " — nothing decided yet, so there is no precision"),
               ""]
-    if decided < 10:
+    if decided < REVISE_MINIMUM:
         lines += [f"**{decided} decided findings is not enough to revise on.** "
                   f"A method rewritten against this many is differently random, "
                   f"not better. Run the pack more, decide what it finds, come back.",
