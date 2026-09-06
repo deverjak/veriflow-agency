@@ -1,0 +1,673 @@
+<!doctype html>
+<html lang="cs" data-lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VeriFlow Agency</title>
+<style>
+  :root {
+    --bg: #fbfaf7; --fg: #1b1a17; --dim: #6d6a62; --line: #e6e3dc;
+    --card: #ffffff; --accent: #1f6f4a; --accent-soft: #eef4f0;
+    --warn: #8a5d00; --err: #a3392f;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14140f; --fg: #eceae3; --dim: #97948a; --line: #2b2a24;
+      --card: #1b1b15; --accent: #6cba8e; --accent-soft: #1c2a22;
+      --warn: #d9a441; --err: #e08b7f;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 24px; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg); font-family: var(--sans);
+    font-size: 16.5px; line-height: 1.65; -webkit-font-smoothing: antialiased;
+  }
+  [data-lang="cs"] [lang="en"], [data-lang="en"] [lang="cs"] { display: none; }
+
+  /* ------------------------------------------------------------ layout */
+  .wrap { display: grid; grid-template-columns: 246px minmax(0, 1fr); gap: 56px;
+          max-width: 1180px; margin: 0 auto; padding: 0 28px; }
+  nav { position: sticky; top: 0; align-self: start; height: 100vh;
+        padding: 34px 0 40px; overflow-y: auto; }
+  /* `min-width: 0` on both, because a grid item defaults to min-content and
+     the comparison tables are 540px wide — without this they push the whole
+     page sideways instead of scrolling inside their own container. */
+  nav, main { min-width: 0; }
+  main { padding: 34px 0 120px; max-width: 74ch; }
+  @media (max-width: 900px) {
+    .wrap { grid-template-columns: minmax(0, 1fr); gap: 0; }
+    nav { position: static; height: auto; padding-bottom: 8px;
+          border-bottom: 1px solid var(--line); }
+    .navlinks { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+    .navlinks .grouplabel { width: 100%; margin-top: 12px; }
+    /* The hero's line breaks are set for a wide column; on a phone they only
+       make the lines too long to fit. */
+    h1 br { display: none; }
+  }
+
+  /* ------------------------------------------------------------ nav */
+  .brand { font-weight: 640; letter-spacing: -.015em; font-size: 15px; }
+  .brand span { color: var(--accent); }
+  .brandsub { color: var(--dim); font-size: 12.5px; margin-top: 2px; line-height: 1.4; }
+  .langs { display: inline-flex; margin: 18px 0 22px; border: 1px solid var(--line);
+           border-radius: 7px; overflow: hidden; background: var(--card); }
+  .langs button { appearance: none; border: 0; background: transparent; cursor: pointer;
+                  font: inherit; font-size: 12.5px; font-weight: 560; padding: 5px 13px;
+                  color: var(--dim); letter-spacing: .03em; }
+  .langs button[aria-pressed="true"] { background: var(--accent); color: #fff; }
+  @media (prefers-color-scheme: dark) { .langs button[aria-pressed="true"] { color: #10150f; } }
+  .navlinks a { display: block; color: var(--dim); text-decoration: none;
+                font-size: 14px; padding: 3.5px 0; border-left: 2px solid transparent;
+                padding-left: 11px; margin-left: -11px; }
+  .navlinks a:hover { color: var(--fg); }
+  .navlinks a.on { color: var(--accent); border-left-color: var(--accent); font-weight: 560; }
+  .grouplabel { font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase;
+                color: var(--dim); margin: 20px 0 7px; font-weight: 620; }
+
+  /* ------------------------------------------------------------ type */
+  h1 { font-size: clamp(28px, 5.2vw, 50px); line-height: 1.08; letter-spacing: -.028em;
+       margin: 6px 0 0; font-weight: 660; overflow-wrap: break-word; }
+  h2 { font-size: 25px; letter-spacing: -.018em; margin: 68px 0 14px; font-weight: 640;
+       scroll-margin-top: 22px; }
+  h3 { font-size: 17.5px; margin: 30px 0 8px; font-weight: 620; letter-spacing: -.01em; }
+  p { margin: 0 0 15px; }
+  section > p:last-child { margin-bottom: 0; }
+  a { color: var(--accent); }
+  strong { font-weight: 620; }
+  em { font-style: italic; color: var(--fg); }
+  code { font-family: var(--mono); font-size: .87em; background: var(--accent-soft);
+         padding: 1.5px 5px; border-radius: 4px; }
+  .lede { font-size: 19.5px; line-height: 1.5; color: var(--dim); margin: 20px 0 0;
+          max-width: 62ch; }
+  .eyebrow { font-size: 11px; letter-spacing: .14em; text-transform: uppercase;
+             color: var(--accent); font-weight: 660; }
+  ul { margin: 0 0 15px; padding-left: 20px; }
+  li { margin-bottom: 6px; }
+  li::marker { color: var(--dim); }
+
+  /* ------------------------------------------------------------ blocks */
+  pre { background: var(--card); border: 1px solid var(--line); border-radius: 9px;
+        padding: 14px 16px; overflow-x: auto; font-family: var(--mono); font-size: 13.5px;
+        line-height: 1.6; margin: 0 0 15px; }
+  pre .c { color: var(--dim); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 11px;
+          padding: 20px 22px; margin: 0 0 15px; }
+  .callout { border-left: 3px solid var(--accent); background: var(--accent-soft);
+             border-radius: 0 9px 9px 0; padding: 15px 19px; margin: 22px 0; }
+  .callout p:last-child { margin-bottom: 0; }
+  .callout .eyebrow { display: block; margin-bottom: 6px; }
+  .grid { display: grid; gap: 13px; grid-template-columns: repeat(auto-fit, minmax(238px, 1fr));
+          margin-bottom: 15px; }
+  .grid .card { margin: 0; }
+  .grid h3 { margin: 0 0 5px; font-size: 15.5px; }
+  .grid p { font-size: 14.5px; color: var(--dim); margin: 0; }
+  .tablewrap { overflow-x: auto; margin: 0 0 15px; }
+  table { border-collapse: collapse; width: 100%; font-size: 14.5px; min-width: 540px; }
+  th, td { text-align: left; padding: 10px 13px; border-bottom: 1px solid var(--line);
+           vertical-align: top; }
+  th { font-size: 11px; letter-spacing: .09em; text-transform: uppercase; color: var(--dim);
+       font-weight: 640; }
+  td:first-child { color: var(--dim); }
+  .yes { color: var(--accent); font-weight: 620; }
+  .no { color: var(--err); }
+  .steps { counter-reset: s; list-style: none; padding: 0; margin: 0 0 15px; }
+  .steps li { counter-increment: s; position: relative; padding-left: 42px;
+              margin-bottom: 17px; }
+  .steps li::before {
+    content: counter(s); position: absolute; left: 0; top: 1px;
+    width: 26px; height: 26px; border-radius: 50%; background: var(--accent-soft);
+    color: var(--accent); font-size: 13px; font-weight: 660;
+    display: grid; place-items: center; font-family: var(--mono);
+  }
+  .steps b { display: block; }
+  footer { border-top: 1px solid var(--line); margin-top: 76px; padding-top: 20px;
+           color: var(--dim); font-size: 13.5px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<nav>
+  <div class="brand">VeriFlow <span>Agency</span></div>
+  <div class="brandsub">
+    <span lang="cs">Specialisté, kteří bydlí ve tvém repozitáři</span>
+    <span lang="en">Specialists that live in your repository</span>
+  </div>
+  <div class="langs" role="group" aria-label="Language">
+    <button type="button" data-set="cs" aria-pressed="true">Česky</button>
+    <button type="button" data-set="en" aria-pressed="false">English</button>
+  </div>
+  <div class="navlinks">
+    <div class="grouplabel"><span lang="cs">Proč</span><span lang="en">Why</span></div>
+    <a href="#problem"><span lang="cs">Problém</span><span lang="en">The problem</span></a>
+    <a href="#what"><span lang="cs">Co to je</span><span lang="en">What it is</span></a>
+    <a href="#compare"><span lang="cs">Proč ne jen skill</span><span lang="en">Why not just a skill</span></a>
+
+    <div class="grouplabel"><span lang="cs">Jak</span><span lang="en">How</span></div>
+    <a href="#run"><span lang="cs">Jak běh probíhá</span><span lang="en">How a run works</span></a>
+    <a href="#gate"><span lang="cs">Brána a paměť</span><span lang="en">The gate and memory</span></a>
+    <a href="#packs"><span lang="cs">Kdo pro tebe pracuje</span><span lang="en">Who works for you</span></a>
+    <a href="#build"><span lang="cs">Postav si vlastního</span><span lang="en">Build your own</span></a>
+
+    <div class="grouplabel"><span lang="cs">Zlepšování</span><span lang="en">Getting better</span></div>
+    <a href="#harness"><span lang="cs">Harness</span><span lang="en">The harness</span></a>
+    <a href="#loop"><span lang="cs">Uzavřená smyčka</span><span lang="en">The closed loop</span></a>
+
+    <div class="grouplabel"><span lang="cs">Praxe</span><span lang="en">In practice</span></div>
+    <a href="#refuses"><span lang="cs">Co dělat odmítá</span><span lang="en">What it refuses</span></a>
+    <a href="#start"><span lang="cs">Začni za pět minut</span><span lang="en">Start in five minutes</span></a>
+    <a href="#faq"><span lang="cs">Otázky</span><span lang="en">Questions</span></a>
+  </div>
+</nav>
+
+<main>
+
+<!-- ═══════════════════════════════════════════════════════════ hero -->
+<header>
+  <div class="eyebrow">VeriFlow Agency</div>
+  <h1 lang="cs">Claude Code, který si pamatuje, <br>co jsi mu minulý týden zamítl.</h1>
+  <h1 lang="en">Claude Code that remembers <br>what you rejected last week.</h1>
+  <p class="lede" lang="cs">
+    Agency z obecného asistenta dělá <strong>specialisty vázané na jeden repozitář</strong>
+    — s pamětí, kterou commituješ, s bránou, která odmítá nepodložené nálezy,
+    a s čísly, která řeknou, jestli se to zlepšuje. Žádná konfigurace, žádný účet,
+    žádná další služba.
+  </p>
+  <p class="lede" lang="en">
+    Agency turns a general assistant into <strong>specialists tied to one repository</strong>
+    — with memory you commit, a gate that refuses unsupported findings, and numbers
+    that say whether it is getting better. No configuration, no account, no extra service.
+  </p>
+</header>
+
+<!-- ═══════════════════════════════════════════════════════════ problem -->
+<section id="problem">
+  <h2><span lang="cs">Problém není chytrost. Je to amnézie.</span><span lang="en">The problem is not intelligence. It is amnesia.</span></h2>
+
+  <div lang="cs">
+    <p>Claude Code je výborný. Otevřeš ho, popíšeš úkol, on ho udělá. Zavřeš okno — a je pryč všechno.</p>
+    <p>Zítra ti navrhne přesně tu věc, kterou jsi včera zamítl s tím, že je to záměr. Za měsíc nedokážeš odpovědět na otázku, jestli ti to vůbec k něčemu je: kolik z toho, co našel, byla pravda? Které jeho otázky mají smysl a které jen šumí? Zlepšil se, když jsi mu upravil instrukce, nebo se jen jinak zamotal?</p>
+    <p>Nemáš jak to zjistit, protože <strong>po běhu nezbyde nic než tvoje paměť.</strong> A ta si vzpomene na to poslední, ne na to důležité.</p>
+  </div>
+  <div lang="en">
+    <p>Claude Code is excellent. You open it, describe the task, it does the task. You close the window — and everything is gone.</p>
+    <p>Tomorrow it proposes exactly the thing you rejected yesterday as deliberate. In a month you cannot answer whether it is worth anything: how much of what it found was true? Which of its questions matter and which are noise? Did it get better when you edited its instructions, or just differently confused?</p>
+    <p>You have no way to know, because <strong>a run leaves nothing behind but your memory.</strong> And memory keeps the most recent thing, not the important one.</p>
+  </div>
+
+  <div class="callout">
+    <span class="eyebrow"><span lang="cs">Jádro věci</span><span lang="en">The point</span></span>
+    <p lang="cs">Chybějící schopnost není inteligence, ale <strong>kontinuita</strong>: paměť, kontrola a měřitelnost. Přesně to Agency doplňuje — a nic z toho nedělá model, dělá to nástroj kolem něj.</p>
+    <p lang="en">The missing capability is not intelligence, it is <strong>continuity</strong>: memory, checking, measurement. That is exactly what Agency adds — and none of it is done by the model, it is done by the tooling around it.</p>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════ what -->
+<section id="what">
+  <h2><span lang="cs">Co to je</span><span lang="en">What it is</span></h2>
+
+  <div lang="cs">
+    <p><strong>Specialista je adresář ve tvém repozitáři.</strong> Ne účet, ne plugin, ne řádek v konfiguraci. Leží tam, kde Claude Code už skilly hledá:</p>
+  </div>
+  <div lang="en">
+    <p><strong>A specialist is a directory in your repository.</strong> Not an account, not a plugin, not a line of configuration. It sits where Claude Code already looks for skills:</p>
+  </div>
+
+<pre>.claude/skills/agency-review-graph/
+  pack.json     <span class="c" lang="cs">← co potřebuje vědět nástroj</span><span class="c" lang="en">← what the tool needs to know</span>
+  SKILL.md      <span class="c" lang="cs">← metoda a fakta o tomhle projektu</span><span class="c" lang="en">← the method and this project's facts</span>
+  references/   <span class="c" lang="cs">← delší podklady</span><span class="c" lang="en">← longer material</span></pre>
+
+  <div lang="cs">
+    <p>Tomu adresáři se říká <strong>pack</strong>. Commituješ ho jako každý jiný zdroják, reviduješ ho v pull requestu a je celý o <em>tomhle</em> projektu — jeho staging, jeho board, jeho pravidla. Druhý projekt dostane kopii a přepíše si fakta; nesdílí se parametr, kopíruje se specialista.</p>
+    <p>A pak je tu <code>agency</code> — příkaz, který ho spustí, ohlídá a zaznamená. Nenahrazuje Claude Code, <strong>řídí ho</strong>. Rozdíl není v modelu, ale v tom, co je kolem běhu.</p>
+  </div>
+  <div lang="en">
+    <p>That directory is called a <strong>pack</strong>. You commit it like any other source, review it in a pull request, and it is entirely about <em>this</em> project — its staging, its board, its rules. A second project gets a copy and rewrites the facts; nothing is a shared parameter, the specialist is copied.</p>
+    <p>Then there is <code>agency</code> — the command that runs it, watches it and records it. It does not replace Claude Code, it <strong>drives</strong> it. The difference is not the model, it is what surrounds the run.</p>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h3><span lang="cs">Paměť, kterou commituješ</span><span lang="en">Memory you commit</span></h3>
+      <p lang="cs">Nálezy, rozhodnutí a stránky specialistů leží v <code>.agency/knowledge/</code> jako markdown. Přečte to kolega, přečte to obyčejná session, přečteš to ty za rok.</p>
+      <p lang="en">Findings, decisions and the specialists' own pages live in <code>.agency/knowledge/</code> as markdown. A colleague reads it, a plain session reads it, you read it a year later.</p>
+    </div>
+    <div class="card">
+      <h3><span lang="cs">Brána, která odmítá</span><span lang="en">A gate that refuses</span></h3>
+      <p lang="cs">Nález ukazující na soubor, který na tom commitu neexistuje, se zahodí. Deterministicky, bez druhého modelu.</p>
+      <p lang="en">A finding pointing at a file that does not exist at that commit is dropped. Deterministically, with no second model involved.</p>
+    </div>
+    <div class="card">
+      <h3><span lang="cs">Čísla místo dojmu</span><span lang="en">Numbers, not impressions</span></h3>
+      <p lang="cs">Kolik nálezů se ukázalo jako pravda — po dimenzích, po modelech, po verzích metody.</p>
+      <p lang="en">How many findings turned out to be true — by dimension, by model, by version of the method.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════ compare -->
+<section id="compare">
+  <h2><span lang="cs">„Vždyť si napíšu skill.“</span><span lang="en">“I can just write a skill.”</span></h2>
+
+  <div lang="cs">
+    <p>Můžeš, a je to správný začátek — pack <em>je</em> skill. Rozdíl je v tom, co se stane, když běh skončí.</p>
+  </div>
+  <div lang="en">
+    <p>You can, and it is the right start — a pack <em>is</em> a skill. The difference is what happens when the run ends.</p>
+  </div>
+
+  <div class="tablewrap">
+  <table lang="cs">
+    <thead><tr><th></th><th>Samotný skill</th><th>Pack v Agency</th></tr></thead>
+    <tbody>
+      <tr><td>Kde bydlí</td><td><code>.claude/skills/</code></td><td>tamtéž — pack <em>je</em> skill</td></tr>
+      <tr><td>Pamatuje si, co jsi zamítl</td><td class="no">ne</td><td class="yes">ano, a dostane to do system promptu</td></tr>
+      <tr><td>Kontroluje někdo výstup</td><td class="no">ne</td><td class="yes">deterministická brána</td></tr>
+      <tr><td>Druhý názor</td><td class="no">ne</td><td class="yes">pack <code>verify</code> jako druhý pár očí</td></tr>
+      <tr><td>Umí říct „nemůžu dál“</td><td class="no">mlčí</td><td class="yes">stav <code>blocked</code> a proč</td></tr>
+      <tr><td>Změříš, jestli je k něčemu</td><td class="no">ne</td><td class="yes">precision po dimenzích a modelech</td></tr>
+      <tr><td>Dokážeš, že úprava pomohla</td><td class="no">ne</td><td class="yes"><code>agency replay</code>, regrese = 0</td></tr>
+      <tr><td>Kolik stál nález na boardu</td><td class="no">ne</td><td class="yes">cena na přijatý nález</td></tr>
+    </tbody>
+  </table>
+  <table lang="en">
+    <thead><tr><th></th><th>A skill on its own</th><th>A pack in Agency</th></tr></thead>
+    <tbody>
+      <tr><td>Where it lives</td><td><code>.claude/skills/</code></td><td>the same place — a pack <em>is</em> a skill</td></tr>
+      <tr><td>Remembers what you rejected</td><td class="no">no</td><td class="yes">yes, and puts it in the system prompt</td></tr>
+      <tr><td>Anything checks the output</td><td class="no">no</td><td class="yes">a deterministic gate</td></tr>
+      <tr><td>Second opinion</td><td class="no">no</td><td class="yes">the <code>verify</code> pack, a second pair of eyes</td></tr>
+      <tr><td>Can say “I am stuck”</td><td class="no">it goes quiet</td><td class="yes">a <code>blocked</code> result, with the reason</td></tr>
+      <tr><td>You can measure whether it helps</td><td class="no">no</td><td class="yes">precision by dimension and model</td></tr>
+      <tr><td>You can prove an edit helped</td><td class="no">no</td><td class="yes"><code>agency replay</code>, regressions = 0</td></tr>
+      <tr><td>What a shipped finding cost</td><td class="no">no</td><td class="yes">price per accepted finding</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout">
+    <span class="eyebrow"><span lang="cs">Poctivě</span><span lang="en">Honestly</span></span>
+    <p lang="cs">Na jednorázovou práci je skill lepší — je jednodušší a stačí. Agency dává smysl, až když má <strong>někdo dělat tutéž práci znovu a znovu nad tímtéž repozitářem</strong> a ty chceš vědět, jestli se to zlepšuje.</p>
+    <p lang="en">For one-off work a skill is better — it is simpler and it is enough. Agency starts to pay off when <strong>someone has to do the same work again and again over the same repository</strong> and you want to know whether it is improving.</p>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════ run -->
+<section id="run">
+  <h2><span lang="cs">Jak běh probíhá</span><span lang="en">How a run works</span></h2>
+
+  <div lang="cs"><p>Jeden příkaz, pět fází. Model dělá jen tu prostřední.</p></div>
+  <div lang="en"><p>One command, five phases. The model only does the middle one.</p></div>
+
+<pre>agency run review-graph --pr 479 --unattended --wait</pre>
+
+  <ol class="steps" lang="cs">
+    <li><b>Příprava</b> Nástroj postaví jednorázový worktree na commitu toho PR, dotáhne z code grafu, čeho se změna dotýká, a přiloží paměť projektu — co už se kdy našlo, čeho se to týkalo a co bylo zamítnuto. Nic z toho nedělá model.</li>
+    <li><b>Běh</b> Spustí se agent. Nedostane jen prompt, ale i seznam příkazů, které smí pustit, a jednu větu navíc v system promptu: <em>tohle projekt už jednou zamítl, nehlas to znovu.</em></li>
+    <li><b>Brána</b> Co agent napsal, projde deterministickou kontrolou. Neexistující soubor, řádek za koncem souboru, chybějící důkaz, citovaný příkaz, který ve skutečnosti neproběhl — všechno se zahodí i s důvodem. Nic se nemaže, jen se to neposílá dál.</li>
+    <li><b>Rozhodnutí</b> Co branou projde, jde na tvůj board — nebo, když žádný nemáš, zůstane v commitované paměti. Ty (nebo druhý specialista) řekneš ano/ne, a u „ne“ jeden z pěti důvodů.</li>
+    <li><b>Paměť</b> Tvoje rozhodnutí se zapíše do stopy, která se commituje. Příští běh ho dostane na vstupu. Tady se z nástroje stává něco, co se učí.</li>
+  </ol>
+  <ol class="steps" lang="en">
+    <li><b>Preparation</b> The tool builds a throwaway worktree on that PR's commit, pulls the blast radius out of the code graph, and attaches the project's memory — what has been found before, where, and what was rejected. None of this is done by a model.</li>
+    <li><b>The run</b> The agent starts. It gets more than a prompt: the list of commands it is allowed to run, and one extra sentence in its system prompt — <em>this project already rejected these, do not report them again.</em></li>
+    <li><b>The gate</b> What the agent wrote goes through a deterministic check. A file that does not exist, a line past the end of it, missing evidence, a cited command that never actually ran — all dropped, each with a reason. Nothing is deleted, it just does not go further.</li>
+    <li><b>The decision</b> What passes goes to your board — or, if you have none, rests in the committed memory. You (or a second specialist) say yes or no, and for “no”, one of five reasons.</li>
+    <li><b>Memory</b> Your decision is written into a committed trail. The next run gets it as input. This is where a tool turns into something that learns.</li>
+  </ol>
+
+  <div class="callout">
+    <span class="eyebrow"><span lang="cs">Dohled, ne autopilot</span><span lang="en">Supervision, not autopilot</span></span>
+    <p lang="cs">Výchozí běh je <strong>pod dohledem</strong>: vidíš ho v terminálu a můžeš zasáhnout. Bez dozoru běží, jen když si o to řekneš — a i pak platí, že pack smí spustit jen příkazy, které má vypsané ve svém <code>pack.json</code>.</p>
+    <p lang="en">The default run is <strong>attended</strong>: you see it in the terminal and can step in. It runs unsupervised only when you ask for it — and even then a pack may only run the commands listed in its own <code>pack.json</code>.</p>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════ gate -->
+<section id="gate">
+  <h2><span lang="cs">Dvě věci, na kterých to celé stojí</span><span lang="en">The two things it all stands on</span></h2>
+
+  <h3><span lang="cs">Brána, která je schválně hloupá</span><span lang="en">A gate that is deliberately dumb</span></h3>
+  <div lang="cs">
+    <p>Brána nehodnotí, jestli je nález chytrý. Ptá se jen, jestli <em>vůbec může být pravdivý</em>. Halucinovaná cesta k souboru je poznat bez modelu — a model hlídající model stojí dvakrát tolik a je půlkou tak spolehlivý.</p>
+    <p>Proto je deterministická a proto se dá opakovat: dva lidé nad týmž během dostanou týž výsledek. A nic nemizí — zahozený nález si i s důvodem leží vedle, aby se dalo přezkoumat, jestli brána nezahazuje zbytečně.</p>
+  </div>
+  <div lang="en">
+    <p>The gate does not judge whether a finding is clever. It only asks whether it <em>can be true at all</em>. A hallucinated file path is recognisable without a model — and a model watching a model costs twice as much and is half as reliable.</p>
+    <p>That is why it is deterministic and repeatable: two people over the same run get the same result. And nothing disappears — a dropped finding rests beside the run with its reason, so you can check whether the gate is dropping too much.</p>
+  </div>
+
+  <h3><span lang="cs">Paměť, která patří projektu</span><span lang="en">Memory that belongs to the project</span></h3>
+  <div lang="cs">
+    <p>Všechno, co si specialista „pamatuje“, je commitovaný markdown ve tvém repozitáři. Ne databáze, ne cloud, ne soubor v tvém domovském adresáři.</p>
+    <p>Má to tři důsledky, které stojí za to říct nahlas: přečte to <strong>kdokoli</strong> i bez tohohle nástroje; jde to <strong>revidovat v pull requestu</strong> jako každou jinou změnu; a když nástroj zítra zahodíš, <strong>paměť ti zůstane</strong>.</p>
+  </div>
+  <div lang="en">
+    <p>Everything a specialist “remembers” is committed markdown in your repository. Not a database, not a cloud, not a file in your home directory.</p>
+    <p>Three consequences worth saying out loud: <strong>anyone</strong> can read it without this tool; it can be <strong>reviewed in a pull request</strong> like any other change; and if you drop the tool tomorrow, <strong>the memory stays yours</strong>.</p>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════ packs -->
+<section id="packs">
+  <h2><span lang="cs">Kdo pro tebe může pracovat</span><span lang="en">Who can work for you</span></h2>
+
+  <div lang="cs"><p>Tohle jsou specialisté, kteří už existují jako referenční kopie. Nejsou to hotové produkty pro tvůj projekt — jsou to <strong>vzory</strong>, protože každý z nich nese fakta o jednom konkrétním repozitáři.</p></div>
+  <div lang="en"><p>These are the specialists that already exist as reference copies. They are not finished products for your project — they are <strong>patterns</strong>, because each one carries the facts of one specific repository.</p></div>
+
+  <div class="grid">
+    <div class="card">
+      <h3>review-graph</h3>
+      <p lang="cs">Recenzent pull requestu. Neptá se jen diffu — ptá se code grafu, co ta změna ještě zasáhne, co nemá test a co už nikdo nevolá.</p>
+      <p lang="en">A pull-request reviewer. It does not only ask the diff — it asks the code graph what else the change reaches, what has no test, and what nothing calls any more.</p>
+    </div>
+    <div class="card">
+      <h3>qa</h3>
+      <p lang="cs">Prochází běžící staging jako vypsaná persona v čistém prohlížeči. Každý nález nejdřív zreprodukuje, teprve pak napíše.</p>
+      <p lang="en">Walks the running staging app as a written-out persona in a clean browser. Every finding is reproduced before it is written down.</p>
+    </div>
+    <div class="card">
+      <h3>po</h3>
+      <p lang="cs">Product owner. Projde board proti plánu, rozhodne každou položku a rozhodnutí <em>zapíše na board</em>, ne do reportu.</p>
+      <p lang="en">A product owner. Walks the board against the plan, decides each item, and writes the decision <em>onto the board</em>, not into a report.</p>
+    </div>
+    <div class="card">
+      <h3>legal</h3>
+      <p lang="cs">Právní přehled proti tomu, co zákon skutečně říká, s citací z primárního zdroje. Hlásí i povinnosti, které si produkt vymyslel sám.</p>
+      <p lang="en">A legal pass against what the law actually says, citing the primary source. It also reports duties the product invented for itself.</p>
+    </div>
+    <div class="card">
+      <h3>ceo</h3>
+      <p lang="cs">Strategický partner zakladatele. Přečte roadmapu, pak web, navrhne nejvýš tři sázky a připraví, co se má odeslat.</p>
+      <p lang="en">A founder's strategy partner. Reads the roadmap, then the web, proposes at most three bets and drafts what needs sending.</p>
+    </div>
+    <div class="card">
+      <h3>verify</h3>
+      <p lang="cs">Druhý pár očí. Otevře kód pod nálezem někoho jiného a odvodí tvrzení znovu — z kódu, ne z textu nálezu. Sám nic nehlásí.</p>
+      <p lang="en">A second pair of eyes. Opens the code under someone else's finding and derives the claim again — from the code, not from the finding's words. It reports nothing of its own.</p>
+    </div>
+  </div>
+
+  <div lang="cs">
+    <p>A pak je tu <strong><code>author</code></strong>, jediný, který je opravdu obecný: pack, který píše packy. Ten dostaneš rovnou.</p>
+    <p>Specialisti se dají i <strong>zřetězit</strong> — první najde, druhý soudí:</p>
+  </div>
+  <div lang="en">
+    <p>And then there is <strong><code>author</code></strong>, the one that is genuinely generic: the pack that writes packs. You get that one out of the box.</p>
+    <p>Specialists can also be <strong>chained</strong> — the first finds, the second judges:</p>
+  </div>
+
+<pre lang="cs">agency chain review-graph verify --pr 479
+agency chain review-graph po --pr 479 --prompt "dává to produktově smysl?"</pre>
+<pre lang="en">agency chain review-graph verify --pr 479
+agency chain review-graph po --pr 479 --prompt "does this make product sense?"</pre>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════ build -->
+<section id="build">
+  <h2><span lang="cs">Postav si vlastního specialistu</span><span lang="en">Build your own specialist</span></h2>
+
+  <div lang="cs">
+    <p>Nepíšeš JSON. Popíšeš, koho potřebuješ, a zbytek je rozhovor.</p>
+  </div>
+  <div lang="en">
+    <p>You do not write JSON. You describe who you need, and the rest is a conversation.</p>
+  </div>
+
+<pre lang="cs">agency run author --prompt "hlídač databázových migrací —
+  zajímá mě všechno, co se nedá vrátit zpátky"</pre>
+<pre lang="en">agency run author --prompt "a watcher for database migrations —
+  anything that cannot be rolled back"</pre>
+
+  <ol class="steps" lang="cs">
+    <li><b>Přečte si projekt</b> Jazyk, stack, CI, dokumentaci, jestli máš board, a hlavně co už tvoji stávající specialisté pokrývají — aby ti nový nehlásil totéž podruhé.</li>
+    <li><b>Zeptá se jen na to, co v repu není</b> Žádný dotazník. Ptá se na fakta, která se nedají vyčíst: kde běží staging, co je u vás „nevratné“, koho to má zajímat.</li>
+    <li><b>Dohodne dimenze nahlas</b> Tohle je ta důležitá část. Dimenze je <em>jedna otázka, jejíž odpověď může vyjít nepravdivě</em>. „Kvalita kódu“ není dimenze. „Migrace, která maže sloupec bez zálohy“ je.</li>
+    <li><b>Napíše adresář</b> A nechá ho <strong>necommitnutý ve tvém pracovním stromě</strong>. Review je git — přečteš si diff jako u každé jiné změny a commitneš, až se ti bude líbit.</li>
+  </ol>
+  <ol class="steps" lang="en">
+    <li><b>It reads the project</b> Language, stack, CI, docs, whether you have a board, and above all what your existing specialists already cover — so the new one does not report the same thing twice.</li>
+    <li><b>It asks only what the repo cannot answer</b> No questionnaire. It asks for the facts that cannot be read: where staging runs, what “irreversible” means here, who should care.</li>
+    <li><b>It agrees the dimensions out loud</b> This is the part that matters. A dimension is <em>one question whose answer can come back false</em>. “Code quality” is not one. “A migration that drops a column without a backup” is.</li>
+    <li><b>It writes the directory</b> And leaves it <strong>uncommitted in your working tree</strong>. Git is the review — you read the diff like any other change and commit it when you are happy.</li>
+  </ol>
+
+  <div class="callout">
+    <span class="eyebrow"><span lang="cs">Proč to píše agent</span><span lang="en">Why an agent writes it</span></span>
+    <p lang="cs">Protože pack je zdrojový kód, a psaní zdrojového kódu je práce pro agenta. Hodnota není v tom JSONu — ten by vygeneroval kdejaký template. Hodnota je v sekci <em>Project facts</em> a v dimenzích, a ty vzniknou jedině tím, že se někdo zeptá a ty odpovíš.</p>
+    <p lang="en">Because a pack is source code, and writing source code is an agent's job. The value is not the JSON — any template could emit that. The value is the <em>Project facts</em> section and the dimensions, and those only come out of somebody asking and you answering.</p>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════ harness -->
+<section id="harness">
+  <h2><span lang="cs">Harness: proč se ti specialisté zlepšují</span><span lang="en">The harness: why these specialists improve</span></h2>
+
+  <div lang="cs">
+    <p>Do léta 2026 uměl nástroj říct větu <em>„dimenze reuse: precision 0,2“</em>. Ta věta byla pravdivá a <strong>nikam nevedla</strong>. Mezi číslem a lepší metodou nebyla žádná cesta kromě člověka, který si na to vzpomene, otevře <code>SKILL.md</code> a něco tam přepíše — a pak nemá jak zjistit, jestli pomohl.</p>
+    <p>Harness je vrstva, která tu cestu dodělala. Nedělá agenta autonomnějším; dělá ho <strong>kalibrovaným</strong> — a kalibrace je to, co si autonomii teprve zaslouží.</p>
+  </div>
+  <div lang="en">
+    <p>Until the summer of 2026 the tool could say <em>“dimension reuse: precision 0.2”</em>. The sentence was true and it <strong>went nowhere</strong>. Between a number and a better method there was no path except a person remembering, opening <code>SKILL.md</code> and editing something — with no way to tell afterwards whether it helped.</p>
+    <p>The harness is the layer that built that path. It does not make the agent more autonomous; it makes it <strong>calibrated</strong> — and calibration is what earns autonomy in the first place.</p>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h3><span lang="cs">Ticho už není výsledek</span><span lang="en">Silence is no longer a result</span></h3>
+      <p lang="cs">Běh, který narazil na vypnutý staging, to teď řekne — stav <code>blocked</code> a věta proč. Dřív to vypadalo stejně jako „poctivě jsem nic nenašel“.</p>
+      <p lang="en">A run that hit a dead staging server now says so — a <code>blocked</code> result with the reason. It used to look identical to “I looked and found nothing”.</p>
+    </div>
+    <div class="card">
+      <h3><span lang="cs">Citace se ověřuje</span><span lang="en">Citations get checked</span></h3>
+      <p lang="cs">Když nález tvrdí, že stojí na výstupu nějakého příkazu, nástroj ověří, že ten příkaz opravdu proběhl. Do té doby to bylo jen tvrzení.</p>
+      <p lang="en">When a finding claims to rest on a command's output, the tool checks that the command actually ran. Until now that was just a claim.</p>
+    </div>
+    <div class="card">
+      <h3><span lang="cs">Druhá šance uvnitř běhu</span><span lang="en">A second chance inside the run</span></h3>
+      <p lang="cs">Když agent napíše nález špatně, dozví se to ještě <em>než</em> skončí, a může to opravit. Dřív to brána zahodila až po jeho odchodu.</p>
+      <p lang="en">If the agent writes a finding badly, it hears about it <em>before</em> it finishes and can fix it. Previously the gate dropped it after the agent was gone.</p>
+    </div>
+    <div class="card">
+      <h3><span lang="cs">Vidíš, co se děje</span><span lang="en">You see it happening</span></h3>
+      <p lang="cs">Zacyklení, odmítané příkazy, běh přes vlastní rozpočet — řekne se to, když se to děje. I na telefon, když nejsi u počítače.</p>
+      <p lang="en">A loop, refused commands, a run past its own budget — you are told while it happens. On your phone too, if you are away from the machine.</p>
+    </div>
+    <div class="card">
+      <h3><span lang="cs">Víš, co agent dostal</span><span lang="en">You know what the agent had</span></h3>
+      <p lang="cs">Každý běh si pamatuje otisk metody i pravidel domu. Takže „od úterý to soudí hůř“ je konečně zodpověditelná otázka.</p>
+      <p lang="en">Every run records a fingerprint of the method and of the house rules. So “it has judged worse since Tuesday” is finally an answerable question.</p>
+    </div>
+    <div class="card">
+      <h3><span lang="cs">Čísla, která nelžou</span><span lang="en">Numbers that do not lie</span></h3>
+      <p lang="cs">U každého čísla o ceně je napsané, z kolika běhů pochází. Průměr přes populaci, jejíž půlka data nemá, je horší než žádné číslo.</p>
+      <p lang="en">Every cost figure says how many runs it came from. An average over a population half of which has no data is worse than no number at all.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════ loop -->
+<section id="loop">
+  <h2><span lang="cs">Smyčka, kvůli které to celé je</span><span lang="en">The loop it is all for</span></h2>
+
+  <div lang="cs"><p>Tři příkazy, a mezi nimi tvoje rozhodnutí. Tohle je celý mechanismus zlepšování — žádné skryté učení, žádný model, který se trénuje kdesi.</p></div>
+  <div lang="en"><p>Three commands with your decisions in between. This is the whole improvement mechanism — no hidden learning, no model being trained somewhere.</p></div>
+
+<pre>agency metrics --for-author review-graph   <span class="c" lang="cs">1 · co ten pack dělá</span><span class="c" lang="en">1 · what the pack does</span>
+agency run author --revise review-graph    <span class="c" lang="cs">2 · diff do SKILL.md</span><span class="c" lang="en">2 · a diff into SKILL.md</span>
+agency replay --pack review-graph          <span class="c" lang="cs">3 · zhoršilo se něco?</span><span class="c" lang="en">3 · did anything get worse?</span></pre>
+
+  <ol class="steps" lang="cs">
+    <li><b>Brief, ne dashboard</b> První příkaz nevypíše grafy. Vypíše, co je v metodě špatně: která dimenze má nízkou precision <em>a dost rozhodnutých nálezů, aby to něco znamenalo</em>, která už dvacet běhů nenašla nic, na čem nálezy nejčastěji padají, a příklady toho, co obstálo a co ne.</li>
+    <li><b>Autor přepíše metodu</b> Druhý příkaz pustí <code>author</code> v režimu revize. Dostane ten brief a napíše diff do <code>SKILL.md</code>. Ke každé změně musí umět ukázat řádek v briefu, který ji odůvodňuje — změna bez toho je změna vymyšlená. A pod deseti rozhodnutými nálezy vůbec nenastartuje.</li>
+    <li><b>Přehrání to ověří</b> Třetí příkaz pustí pack znovu <strong>nad tímtéž commitem</strong> s dnešní metodou a porovná to s tím, co jsi tehdy rozhodl. Jedno pravidlo je tvrdé a bez výjimek: <strong>vrátí-li se nález, který jsi už jednou zamítl, je to regrese a neprojde.</strong></li>
+  </ol>
+  <ol class="steps" lang="en">
+    <li><b>A brief, not a dashboard</b> The first command prints no charts. It prints what is wrong with the method: which dimension has low precision <em>and enough decided findings for that to mean anything</em>, which has found nothing in twenty runs, what findings most often fail on, and examples of what held up and what did not.</li>
+    <li><b>The author rewrites the method</b> The second runs <code>author</code> in revise mode. It gets the brief and writes a diff into <code>SKILL.md</code>. Every change has to point at the line in the brief that justifies it — a change that cannot is a change it invented. And below ten decided findings it refuses to start at all.</li>
+    <li><b>Replay proves it</b> The third runs the pack again <strong>over the same commit</strong> with today's method and compares against what you decided then. One rule is hard and has no exceptions: <strong>if a finding you already rejected comes back, that is a regression and it does not ship.</strong></li>
+  </ol>
+
+  <div class="callout">
+    <span class="eyebrow"><span lang="cs">Proč zrovna takhle</span><span lang="en">Why this shape</span></span>
+    <p lang="cs">Existují systémy, které si o agentovi vedou „instinkty“ s konfidencí 0,7 kdesi mimo tvůj repozitář. Ty ale nikdo nereviduje a nikdo je nepřečte. <strong>Diff v <code>SKILL.md</code> reviduješ v Source Control jako každou jinou změnu</strong> — a to je celý rozdíl mezi učením, kterému můžeš věřit, a učením, které musíš vzít na slovo.</p>
+    <p lang="en">There are systems that keep “instincts” with a confidence of 0.7 somewhere outside your repository. Nobody reviews those and nobody reads them. <strong>A diff in <code>SKILL.md</code> you review in Source Control like any other change</strong> — and that is the whole difference between learning you can trust and learning you have to take on faith.</p>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════ refuses -->
+<section id="refuses">
+  <h2><span lang="cs">Co Agency schválně nedělá</span><span lang="en">What Agency deliberately does not do</span></h2>
+
+  <div lang="cs"><p>Tohle nejsou chybějící funkce. Jsou to rozhodnutí, a stojí za to je znát dřív, než se na ně narazí.</p></div>
+  <div lang="en"><p>These are not missing features. They are decisions, and worth knowing before you run into them.</p></div>
+
+  <div class="tablewrap">
+  <table lang="cs">
+    <thead><tr><th>Nedělá</th><th>Proč</th></tr></thead>
+    <tbody>
+      <tr><td>Konfigurační soubor</td><td>Nový klíč jde do <code>pack.json</code> (zdroj projektu) nebo do záznamu běhu (fakt o tom, co se stalo). Konfigurace je soubor, který někdo musí udržovat.</td></tr>
+      <tr><td>Nic v tvém domovském adresáři</td><td>Žádné <code>~/.agency/</code>. Co o projektu platí, patří do projektu — jinak to nejde revidovat ani předat.</td></tr>
+      <tr><td>Model v bráně</td><td>Brána musí být opakovatelná. Model hlídající model stojí dvakrát tolik a je půlkou tak spolehlivý.</td></tr>
+      <tr><td>Nezabíjí běh podle odhadu</td><td>Varuje, zapíše, nechá doběhnout. Jediná výjimka je trojnásobek rozpočtu, který si <em>pack sám</em> deklaroval — a to už není odhad.</td></tr>
+      <tr><td>Necommituje za tebe</td><td>Ani nový pack, ani revizi. Git je review a review je tvoje.</td></tr>
+      <tr><td>Netvrdí, že tichý souhlas je souhlas</td><td>Že jsi nález neopravil, neznamená, že jsi ho přijal. Do čísel jdou jen podepsaná rozhodnutí.</td></tr>
+    </tbody>
+  </table>
+  <table lang="en">
+    <thead><tr><th>Not done</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr><td>A configuration file</td><td>A new key goes into <code>pack.json</code> (project source) or into the run record (a fact about what happened). Configuration is a file somebody has to maintain.</td></tr>
+      <tr><td>Nothing in your home directory</td><td>No <code>~/.agency/</code>. What is true about a project belongs in the project — otherwise it cannot be reviewed or handed over.</td></tr>
+      <tr><td>A model in the gate</td><td>The gate has to be repeatable. A model watching a model costs twice as much and is half as reliable.</td></tr>
+      <tr><td>No killing a run on a hunch</td><td>It warns, records, and lets it finish. The one exception is three times the budget <em>the pack itself</em> declared — which is not a hunch.</td></tr>
+      <tr><td>No committing on your behalf</td><td>Not a new pack, not a revision. Git is the review and the review is yours.</td></tr>
+      <tr><td>Silence is not consent</td><td>Not fixing a finding does not mean you accepted it. Only signed decisions reach the numbers.</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════ start -->
+<section id="start">
+  <h2><span lang="cs">Začni za pět minut</span><span lang="en">Start in five minutes</span></h2>
+
+  <div lang="cs"><p>Potřebuješ <code>git</code>, <code>uv</code> a Claude Code. Recenzent navíc <code>gh</code> a code graf, QA prohlížeče pro Playwright — <code>agency doctor</code> ti řekne, co chybí, <em>před</em> během.</p></div>
+  <div lang="en"><p>You need <code>git</code>, <code>uv</code> and Claude Code. A reviewer also needs <code>gh</code> and a code graph, QA needs Playwright's browsers — <code>agency doctor</code> tells you what is missing <em>before</em> a run.</p></div>
+
+<pre lang="cs">pwsh scripts/install.ps1           <span class="c">1 · jednou na stroji</span>
+
+cd &lt;tvůj-projekt&gt;
+agency init                        <span class="c">2 · zkopíruje `author` a nic víc</span>
+agency doctor                      <span class="c">3 · co chybí, dokud to nevadí</span>
+
+agency run author --prompt "…"     <span class="c">4 · napiš si prvního specialistu</span>
+agency run &lt;jméno&gt;                 <span class="c">5 · a pusť ho</span></pre>
+<pre lang="en">pwsh scripts/install.ps1           <span class="c">1 · once per machine</span>
+
+cd &lt;your-project&gt;
+agency init                        <span class="c">2 · copies `author`, nothing else</span>
+agency doctor                      <span class="c">3 · what is missing, while it is cheap</span>
+
+agency run author --prompt "…"     <span class="c">4 · write your first specialist</span>
+agency run &lt;name&gt;                  <span class="c">5 · and run it</span></pre>
+
+  <div lang="cs">
+    <p>Po prvním běhu tě zajímají tři příkazy: <code>agency findings</code> (co se našlo a kam to šlo), <code>agency triage accept|reject</code> (tvoje rozhodnutí — <strong>tohle je palivo celé smyčky</strong>) a <code>agency metrics</code> (jestli to k něčemu je).</p>
+    <p>Všechno jde i z VS Code panelu, kde nálezy sedí přímo u řádku kódu.</p>
+  </div>
+  <div lang="en">
+    <p>After the first run, three commands matter: <code>agency findings</code> (what was found and where it went), <code>agency triage accept|reject</code> (your decisions — <strong>this is the fuel for the whole loop</strong>) and <code>agency metrics</code> (whether it is worth anything).</p>
+    <p>All of it also works from the VS Code panel, where findings sit next to the line of code.</p>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════ faq -->
+<section id="faq">
+  <h2><span lang="cs">Otázky, které dostávám</span><span lang="en">Questions that come up</span></h2>
+
+  <h3><span lang="cs">Nahrazuje to Claude Code?</span><span lang="en">Does it replace Claude Code?</span></h3>
+  <p lang="cs">Ne, řídí ho. Claude Code (nebo Codex) je běhoun; Agency je to, co běh připraví, ohlídá, prožene bránou a zapamatuje si výsledek. Bez Claude Code Agency nespustíš.</p>
+  <p lang="en">No, it drives it. Claude Code (or Codex) is the runner; Agency is what prepares the run, watches it, puts the output through a gate and remembers the result. Without Claude Code there is nothing to run.</p>
+
+  <h3><span lang="cs">Posílá to někam moje data?</span><span lang="en">Does it send my data anywhere?</span></h3>
+  <p lang="cs">Agency sama nikam. Běží lokálně, na tvém přihlášení, a všechno, co vyrobí, leží u tebe v repozitáři. Do modelu jde přesně to, co by šlo, kdybys Claude Code spustil ručně.</p>
+  <p lang="en">Agency itself, nowhere. It runs locally, on your own login, and everything it produces sits in your repository. What reaches the model is exactly what would reach it if you started Claude Code by hand.</p>
+
+  <h3><span lang="cs">Kolik to stojí?</span><span lang="en">What does it cost?</span></h3>
+  <p lang="cs">Tolik, co běhy modelu — a od Fáze 12 to nemusíš odhadovat: <code>agency metrics</code> umí cenu na nález, který došel na board. Každý pack si navíc deklaruje, co je u něj normální běh, a nástroj řekne, když ho přeteče.</p>
+  <p lang="en">Whatever the model runs cost — and since Phase 12 you do not have to guess: <code>agency metrics</code> gives the price per finding that reached the board. Each pack also declares what a normal run costs it, and the tool says when a run goes over.</p>
+
+  <h3><span lang="cs">Co když tomu specialistovi nevěřím?</span><span lang="en">What if I do not trust a specialist?</span></h3>
+  <p lang="cs">Pusť ho pod dohledem a nech ho zřetězit s <code>verify</code>. Za dva tři týdny máš čísla a nemusíš věřit ničemu — nedůvěra se dá změřit. A dokud pack nemá deset rozhodnutých nálezů, revize se ani nespustí, aby ses nezlepšoval podle náhody.</p>
+  <p lang="en">Run it attended and chain it with <code>verify</code>. In two or three weeks you have numbers and do not have to trust anything — distrust is measurable. And until a pack has ten decided findings, a revision will not even start, so you cannot “improve” it against noise.</p>
+
+  <h3><span lang="cs">Můžu ho pustit bez dozoru?</span><span lang="en">Can I run it unsupervised?</span></h3>
+  <p lang="cs">Můžeš, ale je to volba, ne výchozí stav. Agency ti k tomu dá dvě věci, které jinde chybí: pack smí jen příkazy, které má vypsané, a běh bez dozoru <em>umí říct, že narazil na zeď</em>, místo aby doběhl do ticha.</p>
+  <p lang="en">You can, but it is a choice, not the default. Agency gives you two things others do not: a pack may only run the commands it lists, and an unsupervised run <em>can say it hit a wall</em> instead of finishing into silence.</p>
+
+  <h3><span lang="cs">Co když projekt nemá board?</span><span lang="en">What if the project has no board?</span></h3>
+  <p lang="cs">Nic se neděje. Nálezy zůstanou v commitované paměti a kanálem je git. Pack bez <code>sink</code> je normální stav, ne nedodělek.</p>
+  <p lang="en">Nothing breaks. Findings rest in the committed memory and git is the channel. A pack with no <code>sink</code> is a normal state, not an unfinished one.</p>
+</section>
+
+<footer>
+  <p lang="cs">VeriFlow Agency · dokumentace pro člověka, ne pro stroj. Technické detaily jsou v <code>README.md</code>, rozhodnutí a jejich důvody v <code>docs/plans/</code>.</p>
+  <p lang="en">VeriFlow Agency · documentation for a person, not a machine. Technical detail lives in <code>README.md</code>; decisions and their reasons in <code>docs/plans/</code>.</p>
+</footer>
+
+</main>
+</div>
+
+<script>
+(function () {
+  var root = document.documentElement;
+  var buttons = Array.prototype.slice.call(document.querySelectorAll('.langs button'));
+
+  function apply(lang) {
+    root.setAttribute('data-lang', lang);
+    root.setAttribute('lang', lang);
+    buttons.forEach(function (b) {
+      b.setAttribute('aria-pressed', String(b.dataset.set === lang));
+    });
+    try { localStorage.setItem('agency-doc-lang', lang); } catch (e) {}
+  }
+
+  var saved = null;
+  try { saved = localStorage.getItem('agency-doc-lang'); } catch (e) {}
+  if (saved !== 'cs' && saved !== 'en') {
+    saved = (navigator.language || '').toLowerCase().indexOf('cs') === 0 ? 'cs' : 'en';
+  }
+  apply(saved);
+  buttons.forEach(function (b) {
+    b.addEventListener('click', function () { apply(b.dataset.set); });
+  });
+
+  // Which section is being read — the nav is the only way back out of a long page.
+  var links = Array.prototype.slice.call(document.querySelectorAll('.navlinks a'));
+  var byId = {};
+  links.forEach(function (a) { byId[a.getAttribute('href').slice(1)] = a; });
+
+  if ('IntersectionObserver' in window) {
+    var seen = {};
+    var obs = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) { seen[e.target.id] = e.isIntersecting; });
+      var current = null;
+      Object.keys(byId).forEach(function (id) { if (seen[id] && !current) current = id; });
+      links.forEach(function (a) {
+        a.classList.toggle('on', a.getAttribute('href') === '#' + current);
+      });
+    }, { rootMargin: '-10% 0px -70% 0px' });
+    Object.keys(byId).forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) obs.observe(el);
+    });
+  }
+})();
+</script>
+</body>
+</html>
