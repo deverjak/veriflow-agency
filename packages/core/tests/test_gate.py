@@ -403,3 +403,18 @@ def test_a_dimension_that_says_nothing_takes_anything(project, make_run):
     run = make_run(findings=[f])
 
     assert ingest.ingest(project, run)["counts"]["kept"] == 1
+
+def test_a_finding_without_a_score_fails_the_contract(project, make_run):
+    """`score` was optional, so the project's threshold could be walked around
+    by saying nothing. The gate drops it as `schema` rather than as a new
+    reason — the schema is the right place, and a second reason for the same
+    thing splits the counts."""
+    f = make_finding(project, "x")
+    del f["score"]
+    run = make_run(findings=[f])
+
+    result = ingest.ingest(project, run)
+
+    assert result["counts"]["kept"] == 0
+    assert result["dropped"][0]["reason"] == "schema"
+    assert "score" in result["dropped"][0]["detail"]

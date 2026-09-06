@@ -1477,6 +1477,11 @@ def cmd_metrics(args) -> int:
               f"{t['accepted']} accepted / {t['rejected']} rejected{undec}")
         if not (t["accepted"] + t["rejected"]):
             print(f"  {out.dim('Nothing to compute from yet — precision comes out of triage.')}")
+        if t.get("scoreAccepted") is not None and t.get("scoreRejected") is not None:
+            print(f"  {out.dim('Score')}           accepted {t['scoreAccepted']}  ·  "
+                  f"rejected {t['scoreRejected']}"
+                  + (out.dim("   they barely differ — the score is measuring nothing")
+                     if abs(t["scoreAccepted"] - t["scoreRejected"]) < 5 else ""))
         print()
         dedup_note = out.dim(f"({f['dedupRatio']:.0%} duplicates)") if f["dedupRatio"] else ""
         print(f"  {out.dim('Gate')}            {f['raw']} written → {f['kept']} candidates  {dedup_note}")

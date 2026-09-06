@@ -256,7 +256,7 @@ The second output: what is wrong with the queue and the plan, not with one reque
     { "kind": "diff", "detail": "4 commity za 6 dní přidávají generování PDF", "source": "evidence/recent-commits.txt" },
     { "kind": "doc", "detail": "#255 nemá závazek na export v žádném milníku", "source": "https://github.com/Chci-na-lekci/main-panel/issues/255" }
   ],
-  "score": 88, "state": "candidate"
+  "score": 88, "scoreReason": "The milestone is read from the plan; if the plan moved, so does this.", "state": "candidate"
 }
 ```
 

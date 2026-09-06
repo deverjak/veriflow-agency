@@ -232,7 +232,7 @@ Into `<RUN_DIR>/findings.json`, an array of `finding.v1` objects — what is wro
     { "kind": "doc", "detail": "slovník `info.json` obsahuje jen e-mail, žádný subjekt", "source": "src/client/src/i18n/dictionaries/cs/info.json#L36" },
     { "kind": "rule", "detail": "outreach.md: bez subjektu a veřejné URL se první e-mail nepíše", "source": ".claude/skills/agency-ceo/references/outreach.md" }
   ],
-  "score": 90, "state": "candidate"
+  "score": 90, "scoreReason": "The bet rests on the pipeline numbers being current; if they are stale this drops.", "state": "candidate"
 }
 ```
 

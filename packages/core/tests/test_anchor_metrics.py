@@ -232,3 +232,25 @@ def test_a_price_nobody_measured_is_none_not_zero(project, make_run):
 
     assert c["usd"] is None and c["turns"] is None
     assert c["population"]["usd"] == 0
+
+
+def test_the_score_is_compared_against_what_happened(project, make_run):
+    """A pack that gives everything 90 and has precision 0.4 is miscalibrated
+    in a way no other number here shows — and both halves of it were already
+    being written."""
+    run = make_run(findings=[
+        make_finding(project, "x", score=95),
+        make_finding(project, "x", score=55, dimension="reuse",
+                     title="Nothing imports the retry helper",
+                     body="No caller reaches `retryOnce` since the queue rewrite.",
+                     anchor={"symbol": {"name": "retryOnce", "range": [1, 4]}}),
+    ])
+    ids = [f["id"] for f in run.findings()]
+    by = "hire:review-graph@claude"
+    runs.append_decision(run, ids[0], "sent", by=by)
+    runs.append_decision(run, ids[1], "rejected", reason="by-design", by=by)
+
+    t = metrics.collect(project)["triage"]
+
+    assert t["scoreAccepted"] == 95.0
+    assert t["scoreRejected"] == 55.0

@@ -5,7 +5,7 @@
   "description": "One finding from a pack's run. The source of truth is findings.json in .agency/runs/<run-id>/; anything derived from it can be thrown away and rebuilt at any time.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["id", "runId", "pack", "severity", "title", "body", "anchor", "evidence", "state"],
+  "required": ["id", "runId", "pack", "severity", "title", "body", "anchor", "evidence", "score", "state"],
   "properties": {
     "id": {
       "type": "string",
@@ -99,10 +99,15 @@
     },
 
     "score": {
-      "type": ["integer", "null"],
+      "type": "integer",
       "minimum": 0,
       "maximum": 100,
-      "description": "Confidence after the false-positive filter. Below the project's threshold a finding is not published, but it stays in the run record."
+      "description": "Confidence after the false-positive filter. Below the project's threshold a finding is not published, but it stays in the run record. Required since 2026-09-06: while it was optional the threshold could be walked around by saying nothing, and the one number that shows a miscalibrated pack — the score distribution against precision — had a bucket full of unknowns. Findings written before that are left alone; they are an older population, and `agency validate --fix` does not invent a number for them."
+    },
+    "scoreReason": {
+      "type": ["string", "null"],
+      "maxLength": 200,
+      "description": "One sentence: what would have to be different for this score to be lower. Not a summary of the finding — a statement of what the confidence rests on, which is the part that can turn out to be wrong."
     },
     "fingerprint": {
       "type": "string",

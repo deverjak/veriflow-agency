@@ -254,6 +254,7 @@ The `evidence.kind` enum is fixed and shared with the other packs, so map onto i
     { "kind": "test-gap", "detail": "notify-change route neposílá lektorům žádnou notifikaci o změně podmínek", "source": "src/app/api/internal/legal/notify-change/" }
   ],
   "score": 96,
+  "scoreReason": "The provision is quoted verbatim from the current consolidated text; a later amendment would change this.",
   "state": "candidate"
 }
 ```

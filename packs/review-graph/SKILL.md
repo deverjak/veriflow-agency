@@ -128,6 +128,7 @@ The only mandatory output. Into `<RUN_DIR>/findings.json`, an array of `finding.
     { "kind": "graph", "detail": "3 callers at d=1, 0 tests", "source": "agency graph impact --depth 2" }
   ],
   "score": 92,
+  "scoreReason": "The graph shows no caller that checks the session; a caller the index missed would change this.",
   "state": "candidate"
 }
 ```

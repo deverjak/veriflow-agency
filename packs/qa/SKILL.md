@@ -211,6 +211,7 @@ The only mandatory output. Into `<RUN_DIR>/findings.json`, an array of `finding.
     { "kind": "runtime", "detail": "trace: POST /api/booking → 500, TypeError in console", "source": "evidence/playwright/…/trace.zip" }
   ],
   "score": 88,
+  "scoreReason": "Reproduced three times in a row on staging; a flaky environment would weaken it.",
   "state": "candidate"
 }
 ```

@@ -50,6 +50,19 @@ class Tally:
 
     def __init__(self) -> None:
         self.accepted = self.rejected = self.deferred = self.undecided = 0
+        # What the pack thought of the findings that turned out each way. A
+        # pack that gives everything 90 and has precision 0.4 is broken in a
+        # way no other number here can show, and both halves were already
+        # being written.
+        self.scores: dict[str, list[int]] = {"accepted": [], "rejected": []}
+
+    def score(self, state: str | None, by: str | None, value) -> None:
+        if not isinstance(value, int) or not (by or "").startswith("hire:"):
+            return
+        if state in ("accepted", "sent"):
+            self.scores["accepted"].append(value)
+        elif state == "rejected":
+            self.scores["rejected"].append(value)
 
     def add(self, state: str | None, by: str | None = None) -> None:
         is_hire = bool(by) and by.startswith("hire:")
@@ -72,10 +85,17 @@ class Tally:
         return self.accepted + self.rejected
 
     def as_dict(self) -> dict:
+        def mean(values: list[int]):
+            return round(sum(values) / len(values), 1) if values else None
+
         return {
             "accepted": self.accepted, "rejected": self.rejected,
             "deferred": self.deferred, "undecided": self.undecided,
             "precision": _ratio(self.accepted, self.decided),
+            # When these two do not differ, the score is measuring nothing —
+            # and that is finally visible instead of merely suspected.
+            "scoreAccepted": mean(self.scores["accepted"]),
+            "scoreRejected": mean(self.scores["rejected"]),
         }
 
 
@@ -258,6 +278,8 @@ def collect(project: Project, runs: list[Run] | None = None) -> dict:
             state = d["state"] if d else None
             by = normalize_by(d.get("by")) if d else None
             overall.add(state, by)
+            overall.score(state, by, f.get("score"))
+            by_pack[(rec.get("pack") or "—")].score(state, by, f.get("score"))
             by_dimension[f.get("dimension") or "—"].add(state, by)
             by_severity[f.get("severity") or "—"].add(state, by)
             by_model[model].add(state, by)
