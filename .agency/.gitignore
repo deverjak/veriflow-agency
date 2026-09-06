@@ -1,0 +1,5 @@
+# Run records: evidence, transcripts and findings.json from one machine at
+# one moment, about commits this clone may not even have. The memory beside
+# them (`knowledge/`) is committed on purpose — that is the part a colleague,
+# and the next run, are meant to read.
+runs/
