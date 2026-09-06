@@ -1648,8 +1648,10 @@ def cmd_findings(args) -> int:
                 "runId": run.id, "id": fid, "severity": f.get("severity"),
                 "title": f.get("title"), "body": f.get("body"),
                 "dimension": f.get("dimension"),
+                "type": f.get("type") or outputs.DEFAULT_TYPE,
                 "file": a.get("file"), "line": a.get("line"),
                 "state": f.get("state"),
+                "decision": d.get("state") if d else None,
                 "ref": (f.get("sinks") or {}).get("githubProjectItem"),
                 "url": d.get("url") if d else None,
                 "reason": d.get("reason") if d else None,
@@ -1674,16 +1676,29 @@ def cmd_findings(args) -> int:
     # the trail is what a clone with no `.agency/runs/` has to go on.
     if args.all:
         for fid, trow in runs.read_trail(project).items():
-            if fid in seen_ids or trow.get("state") not in ("sent", "rejected"):
+            # A row is worth showing once something HAPPENED to it. The two
+            # words were the whole vocabulary until types existed; now the
+            # verdict can be `selected` or `confirmed`, so what qualifies is
+            # that a polarity was recorded at all.
+            decided = (trow.get("polarity") is not None
+                       or trow.get("state") in ("sent", "rejected"))
+            if fid in seen_ids or not decided:
                 continue
             a = trow.get("anchor") or {}
             rows.append({
                 "runId": trow.get("runId"), "id": fid, "severity": trow.get("severity"),
                 "title": trow.get("title"), "body": None, "dimension": trow.get("dimension"),
                 "file": a.get("file"), "line": a.get("line"), "state": trow.get("state"),
+                "type": trow.get("type") or outputs.DEFAULT_TYPE,
+                "decision": trow.get("state"),
                 "ref": trow.get("ref"), "url": trow.get("url"), "reason": trow.get("reason"),
                 "note": None, "by": runs.normalize_by(trow.get("by")), "trailOnly": True,
             })
+
+    # One pack now writes more than one kind of output, and a founder looking
+    # for the three bets does not want them among forty findings.
+    if getattr(args, "type", None):
+        rows = [r for r in rows if r.get("type") == args.type]
 
     def human():
         if not rows:
@@ -1750,6 +1765,47 @@ def cmd_triage(args) -> int:
 
     _emit(args, result, human)
     return 1 if (not result.get("noSink") and not result["ok"]) else 0
+
+
+def cmd_feedback(args) -> int:
+    """What happened to an output, in that output's own vocabulary.
+
+    `agency triage` stays what it is: a finding's two verbs, and both of them
+    DO something — `accept` dispatches through the pack's sink, `reject`
+    remembers not to report the thing again. This command is for the types
+    that act on nothing, where the whole of "what happened" is the record: a
+    bet was `selected`, and a season later it was `successful`.
+
+    The allowed words come from the pack (`outputs.<type>.feedback`), so this
+    command has no vocabulary of its own and never needs one added.
+    """
+    project = _project(args)
+    run = _run_with_finding(project, args.finding)
+    finding = next((f for f in run.findings() if f.get("id") == args.finding), {})
+    policy = outputs.policy_for(_pack_of(project, run), finding.get("type"))
+
+    if policy.actions == "sink":
+        raise SystemExit(
+            f"“{policy.name}” goes out through this pack's sink, so its verdict is "
+            f"`agency triage accept` / `agency triage reject` — those dispatch and "
+            f"remember, which recording alone would not do.")
+
+    ev = runs.record_feedback(project, run, args.finding, args.kind,
+                              args.reason, args.note, args.by)
+
+    def human():
+        where = out.dim(ev["lifecycle"] or "")
+        because = f" · {ev['reason']}" if ev["reason"] else ""
+        print(f"  {args.finding} → {ev['state']}  {where}{because}")
+
+    return _emit(args, ev, human)
+
+
+def _pack_of(project: config.Project, run: runs.Run):
+    try:
+        return packs.load(run.record().get("pack") or "", project)
+    except SystemExit:
+        return None
 
 
 def cmd_note(args) -> int:
@@ -2283,7 +2339,18 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("findings", parents=[common], help="findings and their decisions")
     s.add_argument("--run")
     s.add_argument("--all", action="store_true", help="across all runs")
+    s.add_argument("--type", help="only outputs of this type (`bet`, `decision`, …)")
     s.set_defaults(fn=cmd_findings)
+
+    s = sub.add_parser("feedback", parents=[common],
+                       help="what happened to an output, in its own type's words")
+    s.add_argument("finding")
+    s.add_argument("kind", help="one of the type's own feedback kinds")
+    s.add_argument("--reason")
+    s.add_argument("--note")
+    s.add_argument("--by", default=runs.HUMAN,
+                   help="who says so — `hire:<id>` for a specialist, `human` for a person")
+    s.set_defaults(fn=cmd_feedback)
 
     s = sub.add_parser("triage", parents=[common], help="decide on a finding — an agent calls this too")
     s.add_argument("action", choices=["accept", "reject"])

@@ -15,6 +15,8 @@ written without a type.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from agency import ingest, outputs, runs
@@ -393,3 +395,243 @@ def test_a_finding_gets_no_second_name_for_precision(project, make_run):
 
     assert data["byLifecycle"] is None
     assert data["triage"]["precision"] is None and data["triage"]["undecided"] == 1
+
+
+# ------------------------------------------------- the slice, end to end
+#
+# One type, walked the whole way: written without an anchor, proved by a page
+# the run actually opened and kept, gated, answered by the founder, counted
+# under the pack's own word, and handed to the next run as memory.
+#
+# It exists because the four steps before it were built on an argument rather
+# than on a run. If the argument was wrong, it is wrong HERE — in one file,
+# after four steps, rather than after ten.
+
+REAL_BET = {
+    "cardinality": "many", "limit": 3, "anchor": "none", "dedup": True,
+    "evidence": {"required": ["web_snapshot", "document"], "min": 1},
+    "actions": "none", "memory": "proposes",
+    "feedback": {
+        "selection": {"metric": "selection_rate",
+                      "kinds": {"selected": "positive", "rejected": "negative"}},
+        "outcome": {"metric": "success_rate", "requires": "selection.selected",
+                    "kinds": {"successful": "positive", "failed": "negative",
+                              "abandoned": "neutral"}},
+    },
+}
+
+
+def _bet(project, title: str, body: str, url: str = "https://www.kickk.cz/vyzvy") -> dict:
+    """A bet as the CEO pack is now told to write one: no anchor, proved by a
+    page rather than by a line of source."""
+    f = make_finding(project, "x", pack="ceo", type="bet", dimension="distribution",
+                     title=title, body=body)
+    del f["anchor"]
+    f["evidence"] = [{
+        "kind": "web_snapshot",
+        "detail": "the call is open until 30 September",
+        "locator": {"url": url, "artifact": "evidence/web/01.md"},
+    }]
+    return f
+
+
+def _walked(project, make_run, title: str, body: str, url="https://www.kickk.cz/vyzvy"):
+    """A run that fetched the page, kept it, and wrote the bet."""
+    install_pack(project, "ceo", {"minScore": 80, "outputs": {"bet": REAL_BET}})
+    run = make_run(findings=[_bet(project, title, body, url)], pack="ceo")
+    _kept_page(run, url)
+    return run
+
+
+def _kept_page(run, url: str) -> None:
+    path = run.dir / "evidence" / "web" / "01.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("# Výzva\nUzávěrka 30. 9. 2026\n", encoding="utf-8")
+    with open(run.dir / runs.TOOL_CALLS, "a", encoding="utf-8", newline="\n") as f:
+        f.write(json.dumps({"at": runs.now(), "tool": "WebFetch",
+                            "input": {"url": url}}) + "\n")
+
+
+BET_TITLE = "Distribuce přes regionální instituce, ne přes vyhledávání"
+BET_BODY = ("Hypotéza: informační centra dovedou k produktu instruktory, ke kterým "
+            "se přes SEO nedostaneme. Do 6 týdnů: tři centra zveřejní odkaz.")
+
+
+def test_a_bet_needs_no_anchor_and_is_not_thereby_unchecked(project, make_run):
+    """The formulation the whole plan turns on. Not *a bet needs no anchor* —
+    *a bet needs a different kind of proof*, and the gate still refuses it
+    when that proof is not there."""
+    run = _walked(project, make_run, BET_TITLE, BET_BODY)
+
+    result = ingest.ingest(project, run)
+
+    assert result["counts"]["kept"] == 1, result["dropped"]
+    assert "anchor" not in run.findings()[0]
+
+
+def test_a_bet_citing_a_page_nobody_opened_is_refused(project, make_run):
+    """The check that replaces the anchor. Without it, dropping the anchor
+    would have left a type nothing could refuse."""
+    install_pack(project, "ceo", {"minScore": 80, "outputs": {"bet": REAL_BET}})
+    run = make_run(findings=[_bet(project, BET_TITLE, BET_BODY)], pack="ceo")
+    # The artifact is there; the page was never fetched.
+    path = run.dir / "evidence" / "web" / "01.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("# Výzva\n", encoding="utf-8")
+    with open(run.dir / runs.TOOL_CALLS, "a", encoding="utf-8", newline="\n") as f:
+        f.write(json.dumps({"at": runs.now(), "tool": "WebFetch",
+                            "input": {"url": "https://example.com/"}}) + "\n")
+
+    result = ingest.ingest(project, run)
+
+    assert result["counts"]["kept"] == 0
+    assert result["dropped"][0]["reason"] == "unverified-evidence"
+
+
+def test_a_finding_from_the_same_pack_still_must_point_at_source(project, make_run):
+    """The policy is per type, not per pack. A CEO *finding* is a claim about
+    the repository and keeps every check it had."""
+    install_pack(project, "ceo", {"minScore": 80, "outputs": {"bet": REAL_BET}})
+    f = make_finding(project, "x", pack="ceo")
+    del f["anchor"]
+    run = make_run(findings=[f], pack="ceo")
+
+    result = ingest.ingest(project, run)
+
+    assert result["dropped"][0]["reason"] == "missing-anchor"
+
+
+def test_the_pack_may_not_drop_the_anchor_and_prove_nothing(project, make_run):
+    """`agency doctor` refuses the policy that would make a type unfalsifiable
+    — the one way this change could have quietly become a hole."""
+    from agency import packs
+
+    install_pack(project, "ceo", {"outputs": {"bet": dict(REAL_BET, evidence={})}})
+    problems = outputs.errors(packs.load("ceo", project))
+
+    assert any("cannot be refused by anything" in p for p in problems)
+
+
+def test_the_founders_answer_becomes_the_packs_own_number(project, make_run):
+    """Three proposed, one chosen — `selection_rate 0.5` over the two that were
+    answered, and `precision` never appears, because a bet is not a finding."""
+    from agency import metrics
+
+    chosen = _walked(project, make_run, BET_TITLE, BET_BODY)
+    turned_down = _walked(project, make_run, "Newsletter jako druhý kanál",
+                          "Hypotéza: newsletter udrží návštěvníky mezi sezónami.")
+    ingest.ingest(project, chosen)
+    ingest.ingest(project, turned_down)
+
+    runs.record_feedback(project, chosen, chosen.findings()[0]["id"], "selected")
+    runs.record_feedback(project, turned_down, turned_down.findings()[0]["id"], "rejected")
+
+    data = metrics.collect(project, [chosen, turned_down])
+    cell = data["byLifecycle"]["ceo/bet/selection"]
+
+    assert cell["metric"] == "selection_rate"
+    assert cell["value"] == 0.5 and cell["positive"] == 1 and cell["negative"] == 1
+    assert data["triage"]["precision"] is None
+
+
+def test_a_rejected_bet_reaches_the_next_run_as_memory(project, make_run):
+    """The last link, and the one that makes the loop worth building: the next
+    CEO run is told not to propose it again. Selected by POLARITY — the pack's
+    negative word is `rejected` here and could be `not_selected` elsewhere, and
+    reading the literal string would have quietly kept this for review packs
+    only."""
+    from agency import knowledge
+
+    run = _walked(project, make_run, "Newsletter jako druhý kanál",
+                  "Hypotéza: newsletter udrží návštěvníky mezi sezónami.")
+    ingest.ingest(project, run)
+    runs.record_feedback(project, run, run.findings()[0]["id"], "rejected")
+
+    briefing = knowledge.do_not_report(project)
+
+    assert briefing is not None
+    assert "Newsletter" in briefing
+
+
+def test_the_founder_uses_the_types_own_words(project, make_run):
+    """`sent` means a board item and a bet has no board; `selected` means a
+    finding nothing dispatched. Each type's vocabulary is its own, and the
+    error says which words were available."""
+    run = _walked(project, make_run, BET_TITLE, BET_BODY)
+    ingest.ingest(project, run)
+    fid = run.findings()[0]["id"]
+
+    with pytest.raises(SystemExit, match="selected"):
+        runs.append_decision(run, fid, "sent")
+
+    assert runs.record_feedback(project, run, fid, "selected")["polarity"] == "positive"
+
+
+def test_three_is_the_packs_own_ceiling(project, make_run):
+    """“At most three live bets” was a sentence in `references/method.md` that
+    nothing enforced. It is now `limit: 3` in the manifest, and the fourth is
+    dropped with a reason rather than silently kept."""
+    install_pack(project, "ceo", {"minScore": 80, "outputs": {"bet": REAL_BET}})
+    claims = [
+        "Informační centra dovedou k produktu instruktory, ke kterým se přes vyhledávání nedostaneme.",
+        "Newsletter udrží návštěvníky mezi sezónami a sníží závislost na sezónním provozu.",
+        "Mobilní aplikace v obchodě otevře skupinu uživatelů, která web nepoužívá vůbec.",
+        "Partnerství s krajskou agenturou přinese data, která nikdo jiný nemá k dispozici.",
+    ]
+    bets = [_bet(project, f"Sázka číslo {n} na distribuci produktu", claim)
+            for n, claim in enumerate(claims, start=1)]
+    run = make_run(findings=bets, pack="ceo")
+    _kept_page(run, "https://www.kickk.cz/vyzvy")
+
+    result = ingest.ingest(project, run)
+
+    assert result["counts"]["kept"] == 3
+    assert result["dropped"][0]["reason"] == "over-cardinality"
+
+
+def test_the_real_ceo_manifest_says_all_of_this(project):
+    """The pack in `packs/ceo/` is a reference copy of one that lives in
+    another repository, so nothing else in this suite would notice if the two
+    halves of this step disagreed."""
+    import json as _json
+    from pathlib import Path
+
+    from agency import packs
+
+    manifest = _json.loads(
+        (Path(__file__).resolve().parents[3] / "packs" / "ceo" / "pack.json")
+        .read_text(encoding="utf-8"))
+    install_pack(project, "ceo", manifest)
+    pack = packs.load("ceo", project)
+
+    assert outputs.errors(pack) == []
+    policy = outputs.policy_for(pack, "bet")
+    assert policy.anchor == "none" and policy.max_per_run == 3
+    assert policy.required_evidence == ["web_snapshot", "document"]
+    assert policy.lifecycle_of("selected").metric == "selection_rate"
+    assert policy.lifecycle_of("failed").requires == "selection.selected"
+
+
+def test_two_anchorless_outputs_do_not_share_one_place(project, make_run):
+    """Found by the slice rather than by argument, which is what it is for.
+
+    `symbol_key` fell back to `file:?`, so every output without an anchor
+    shared one place — and the guard that says "two claims in different places
+    are two claims" became its opposite: everything was in the same place, so
+    everything was comparable, and four differently-worded bets collapsed into
+    one. With no place, only an identical claim counts, and that still does.
+    """
+    from agency import dedup
+
+    a = _bet(project, "Distribuce přes regionální instituce v kraji",
+             "Informační centra dovedou k produktu instruktory, které vyhledávání mine.")
+    b = _bet(project, "Newsletter jako druhý kanál pro návštěvníky",
+             "Newsletter udrží návštěvníky produktu mezi jednotlivými sezónami.")
+    same = dict(b, body=a["body"])
+    for f in (a, b, same):
+        f["fingerprint"] = dedup.fingerprint(f)
+
+    assert dedup.symbol_key(a) == "", "no anchor is no place, not a shared one"
+    assert dedup.is_duplicate(b, a) == (False, "")
+    assert dedup.is_duplicate(same, a) == (True, "fingerprint"), \
+        "the same claim word for word is still the same claim"

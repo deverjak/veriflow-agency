@@ -1547,7 +1547,9 @@ def dispatch(project: Project, run: Run, finding: dict, by: str) -> dict:
     append_decision(run, fid, "sent", by=by, ref=ref, url=url)
     append_trail(project, {
         "id": fid, "runId": run.id, "pack": run.record().get("pack"),
-        "state": "sent", "title": finding.get("title"), "severity": finding.get("severity"),
+        "type": finding.get("type") or outputs.DEFAULT_TYPE,
+        "state": "sent", "lifecycle": "triage", "polarity": "positive",
+        "title": finding.get("title"), "severity": finding.get("severity"),
         "dimension": finding.get("dimension"), "fingerprint": finding.get("fingerprint"),
         "anchor": finding.get("anchor"), "by": by, "ref": ref, "url": url, "reason": None,
     })
@@ -1562,9 +1564,41 @@ def reject(project: Project, run: Run, finding_id: str, reason: str,
     finding = _set_finding_state(run, finding_id, state="rejected") or {}
     append_trail(project, {
         "id": finding_id, "runId": run.id, "pack": run.record().get("pack"),
-        "state": "rejected", "title": finding.get("title"), "severity": finding.get("severity"),
+        "type": finding.get("type") or outputs.DEFAULT_TYPE,
+        "state": "rejected", "lifecycle": ev.get("lifecycle"), "polarity": ev.get("polarity"),
+        "title": finding.get("title"), "severity": finding.get("severity"),
         "dimension": finding.get("dimension"), "fingerprint": finding.get("fingerprint"),
         "anchor": finding.get("anchor"), "by": ev["by"], "reason": reason, "ref": None, "url": None,
+    })
+    return ev
+
+
+def record_feedback(project: Project, run: Run, finding_id: str, kind: str,
+                    reason: str | None = None, note: str | None = None,
+                    by: str = HUMAN) -> dict:
+    """What happened to an output, for a type that acts on nothing.
+
+    `accept` and `reject` are a finding's two verbs and both do something
+    besides recording: one dispatches through the pack's sink, the other
+    remembers not to report the thing again. A bet has no board to be sent
+    to — the founder chooses it and, months later, it worked or it did not —
+    so the whole of "what happened" is the record.
+
+    The output's `state` is deliberately NOT touched. `state` is where the
+    output stands in the pipeline (candidate, held, sent, duplicate); the
+    verdict is the event, and folding the two together is what made every
+    verdict have to be one of five words.
+    """
+    ev = append_decision(run, finding_id, kind, reason=reason, note=note, by=by)
+    finding = next((f for f in run.findings() if f.get("id") == finding_id), {})
+    append_trail(project, {
+        "id": finding_id, "runId": run.id, "pack": run.record().get("pack"),
+        "type": finding.get("type") or outputs.DEFAULT_TYPE,
+        "state": kind, "lifecycle": ev.get("lifecycle"), "polarity": ev.get("polarity"),
+        "title": finding.get("title"), "severity": finding.get("severity"),
+        "dimension": finding.get("dimension"), "fingerprint": finding.get("fingerprint"),
+        "anchor": finding.get("anchor"), "by": ev["by"], "reason": reason,
+        "ref": None, "url": None,
     })
     return ev
 

@@ -70,6 +70,7 @@ FINDING_REASONS = ("not-reproducible", "by-design", "wrong-diagnosis",
 #: overrides the dimension; one that says nothing leaves the dimension alone.
 FINDING_POLICY = {
     "cardinality": "many",
+    "anchor": "required",
     "dedup": True,
     "evidence": {},
     "actions": "sink",
@@ -86,6 +87,7 @@ FINDING_POLICY = {
 POLARITIES = ("positive", "negative", "neutral")
 CARDINALITIES = ("one", "many")
 ACTIONS = ("none", "sink")
+ANCHORS = ("required", "none")
 MEMORY = ("never", "proposes")
 
 
@@ -116,6 +118,16 @@ class TypePolicy:
     name: str
     cardinality: str = "many"
     limit: int | None = None
+    #: Whether this type must point at a place in the source.
+    #:
+    #: Required for a finding and that does not change: a review claim with no
+    #: file and line is unfalsifiable, and the anchor is what `agency replay`
+    #: and drift detection stand on. `none` is for the types whose subject is
+    #: not the code — a bet about a market, a decision about a board item.
+    #: They are not thereby unchecked: the type's own `evidence.required` is
+    #: what replaces it, which is why a policy that drops the anchor without
+    #: naming evidence is refused by `errors()`.
+    anchor: str = "required"
     dedup: bool = True
     evidence: dict = field(default_factory=dict)
     actions: str = "sink"
@@ -184,6 +196,7 @@ def _policy(name: str, raw: dict) -> TypePolicy:
     return TypePolicy(
         name=name,
         cardinality=cardinality if cardinality in CARDINALITIES else "many",
+        anchor=str(raw.get("anchor") or "required"),
         limit=int(limit) if isinstance(limit, int) and limit > 0 else None,
         dedup=bool(raw.get("dedup", True)),
         evidence=raw.get("evidence") if isinstance(raw.get("evidence"), dict) else {},
@@ -261,6 +274,17 @@ def errors(pack) -> list[str]:
             found.append(f"{where}.actions: one of {', '.join(ACTIONS)}")
         if body.get("memory", "proposes") not in MEMORY:
             found.append(f"{where}.memory: one of {', '.join(MEMORY)}")
+        anchor = body.get("anchor", "required")
+        if anchor not in ANCHORS:
+            found.append(f"{where}.anchor: one of {', '.join(ANCHORS)}")
+        elif anchor == "none" and not ((body.get("evidence") or {}).get("required")):
+            # The formulation that matters: not "this type needs no anchor",
+            # but "this type needs a different kind of proof". Dropping the
+            # one deterministic check without naming its replacement leaves a
+            # type nothing can refuse.
+            found.append(f"{where}.anchor: `none` needs `evidence.required` — "
+                         f"a type that points at nothing and proves nothing "
+                         f"cannot be refused by anything")
 
         seen: dict[str, str] = {}
         cycles = body.get("feedback") or {}

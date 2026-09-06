@@ -13,6 +13,28 @@
     "WebSearch", "WebFetch"
   ],
   "minScore": 80,
+  "outputs": {
+    "bet": {
+      "cardinality": "many",
+      "limit": 3,
+      "anchor": "none",
+      "dedup": true,
+      "evidence": { "required": ["web_snapshot", "document"], "min": 1 },
+      "actions": "none",
+      "memory": "proposes",
+      "feedback": {
+        "selection": {
+          "metric": "selection_rate",
+          "kinds": { "selected": "positive", "rejected": "negative" }
+        },
+        "outcome": {
+          "metric": "success_rate",
+          "requires": "selection.selected",
+          "kinds": { "successful": "positive", "failed": "negative", "abandoned": "neutral" }
+        }
+      }
+    }
+  },
   "budget": { "turns": 60, "minutes": 30 },
   "dimensions": [
     { "id": "positioning", "title": "Where we claim to differ and do not" },

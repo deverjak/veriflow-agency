@@ -5,7 +5,8 @@
   "description": "One finding from a pack's run. The source of truth is findings.json in .agency/runs/<run-id>/; anything derived from it can be thrown away and rebuilt at any time.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["id", "runId", "pack", "severity", "title", "body", "anchor", "evidence", "score", "state"],
+  "comment": "`anchor` left the required list on 2026-09-06. It is not optional in general — it is required by POLICY (`pack.json` → `outputs.<type>.anchor`, `required` by default and for every finding), because whether a claim must point at source depends on what kind of output it is, and the schema cannot see the pack. A finding without one is still dropped, by the gate, as `missing-anchor`.",
+  "required": ["id", "runId", "pack", "severity", "title", "body", "evidence", "score", "state"],
   "properties": {
     "id": {
       "type": "string",

@@ -85,13 +85,20 @@ def symbol_key(finding: dict) -> str:
 
     Symbol přežije přesun bloku i refaktor uvnitř souboru; soubor je slabší,
     ale pořád nezávislý na čísle řádku.
+
+    Empty string for an output with no anchor at all — a bet is about a market
+    and has no place in the source. That is NOT the same as `file:?`: a shared
+    `?` would have made every anchorless output share one place, which turns
+    the guard in `is_duplicate` — two claims in different places are two
+    claims — into the opposite of a guard.
     """
     a = finding.get("anchor") or {}
     sym = a.get("symbol") or {}
     name = sym.get("name")
     if name:
         return f"sym:{name}"
-    return f"file:{a.get('file') or '?'}"
+    file = a.get("file")
+    return f"file:{file}" if file else ""
 
 
 def fingerprint(finding: dict) -> str:
@@ -145,7 +152,15 @@ def is_duplicate(new: dict, old: dict) -> tuple[bool, str]:
         return False, ""
     # Bez shody místa se neporovnává vůbec. Dva nálezy o téže věci v různých
     # funkcích jsou dva nálezy.
-    if symbol_key(new) != symbol_key(old):
+    place = symbol_key(new)
+    if place != symbol_key(old):
+        return False, ""
+    # And with no place on either side, only an identical claim counts. The
+    # asymmetry decides it, as it does for the threshold above: a false
+    # duplicate throws work away, a missed one only lengthens the queue. Until
+    # `subject` gives an anchorless output a place of its own, similarity
+    # between two of them is a guess with nothing to constrain it.
+    if not place:
         return False, ""
     a, b = claim(new), claim(old)
     shared = a & b

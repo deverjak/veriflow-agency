@@ -39,6 +39,7 @@ GATE_REASONS = {
     "weak-evidence": "not the kind of proof this dimension stands or falls on",
     "unverified-evidence": "the evidence locator points at something this run did not produce",
     "unknown-type": "an output of a type this pack does not declare",
+    "missing-anchor": "a type whose claims must point at source, pointing at nothing",
     "over-cardinality": "more of this type in one run than the pack allows",
 }
 
@@ -285,7 +286,7 @@ def _schema_errors(findings: list[dict]) -> dict[int, list[str]]:
     try:
         import jsonschema
     except ImportError:
-        required = ("id", "runId", "pack", "severity", "title", "body", "anchor", "evidence")
+        required = ("id", "runId", "pack", "severity", "title", "body", "evidence")
         for i, f in enumerate(findings):
             missing = [k for k in required if k not in f]
             if missing:
@@ -368,20 +369,32 @@ def gate(project: Project, run: Run, findings: list[dict], min_score: int | None
             drop("schema", "; ".join(errs[i])[:400])
             continue
 
-        a = f.get("anchor") or {}
-        ok, lines = _exists_at_commit(project.root, a.get("commit") or "", a["file"])
-        if not ok:
-            drop("phantom-file", f"{a['file']} is not at {(a.get('commit') or '')[:8]}")
-            continue
-        if lines is not None and a.get("line", 1) > lines:
-            drop("phantom-line", f"line {a['line']} > {lines} lines in the file")
-            continue
-
         type_name = f.get("type") or outputs.DEFAULT_TYPE
         if pack is not None and not outputs.declares(pack, type_name):
             drop("unknown-type", f"“{type_name}” is not in this pack's `outputs`")
             continue
         policy = outputs.policy_for(pack, type_name)
+
+        # Whether a claim has to point at source is a question about the KIND
+        # of output, which the schema cannot answer because it cannot see the
+        # pack. A finding must — that has not changed and the default is
+        # `required`. A bet about a market must not pretend to: it was that
+        # requirement which had `footer.tsx` carrying a claim about a funding
+        # call. What replaces it is the type's own `evidence.required`, and a
+        # policy that drops one without naming the other is refused by
+        # `outputs.errors`.
+        a = f.get("anchor") or {}
+        if policy.anchor == "required" and not a.get("file"):
+            drop("missing-anchor", f"{type_name} must point at a file and a line")
+            continue
+        if a.get("file"):
+            ok, lines = _exists_at_commit(project.root, a.get("commit") or "", a["file"])
+            if not ok:
+                drop("phantom-file", f"{a['file']} is not at {(a.get('commit') or '')[:8]}")
+                continue
+            if lines is not None and a.get("line", 1) > lines:
+                drop("phantom-line", f"line {a['line']} > {lines} lines in the file")
+                continue
 
         # The type wins over the dimension when it says anything: the type is
         # the coarser statement ("a bet stands on documents or the web") and a

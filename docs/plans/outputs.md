@@ -3,7 +3,7 @@
 **Datum:** 2026-09-06
 **Navazuje na:** [`agency-v1.md`](agency-v1.md) (pack je skill v projektu, žádná konfigurace), [`harness.md`](harness.md) (provenience tool callů, brána, metriky, revize packu), [`findings-ownership.md`](findings-ownership.md) (board je stav, lokál je brána a stopa), [`teams.md`](teams.md) (řetěz), [`shared-memory.md`](shared-memory.md) (paměť patří projektu)
 **Řeší:** jádro dnes umí evidovat jediný druh výstupu — nález s kotvou na soubor a řádek. PO a CEO produkují rozhodnutí, odpovědi, sázky a drafty, a **oba už jádro kvůli tomu obcházejí**. Plán zobecňuje mechanismy, které v jádru fungují (brána, dedup, sinky, paměť, metriky), tak aby přestaly předpokládat code-review nález — a nedělá z Agency univerzální platformu.
-**Stav k 6. 9. 2026:** Kroky 1–3 hotové a commitnuté (testy 436 zelených). Další na řadě: Krok 4 — svislý řez `bet`, který ověří, jestli Kroky 1–3 sedí.
+**Stav k 6. 9. 2026:** Kroky 1–4 hotové a commitnuté (testy 446 zelených). Svislý řez `bet` prošel a **přeskládal zbytek plánu** — co se posunulo a proč, je u Kroku 4. Další na řadě: Krok 5 (`subject` + `run.scope`), který je teď naléhavější, než byl.
 
 **Nedělá:** nový generický agent framework. Žádný plugin systém metrik, žádný registr typů, žádná doménová znalost v jádru. Přibývají přesně dvě abstrakce — `TypePolicy` a `Run.scope`.
 
@@ -308,17 +308,32 @@ Metriky počítají **jeden poměr na lifecycle**, pojmenovaný packem — `byLi
 
 ---
 
-### Krok 4 — svislý řez: CEO `bet` od začátku do konce (~1 den) ← ověření Kroků 1–3
+### Krok 4 — svislý řez: CEO `bet` od začátku do konce (~1 den) — **hotovo**, a přeskládal plán
 
-**Proč:** Kroky 5–11 jsou postavené na tom, že Kroky 1–3 sedí. Ověřit to až migrací na konci znamená osm kroků na odhad. `bet` je jediný typ, který naráz protne **všechno nové**: evidence bez kódu, `TypePolicy`, dva lifecycly, subject bez souboru a paměť jako návrh do `strategy.md`.
+**Proč:** Kroky 5–11 byly postavené na tom, že Kroky 1–3 sedí. Ověřit to až migrací na konci by znamenalo osm kroků na odhad. `bet` je jediný typ, který naráz protne všechno nové.
 
-**Co se udělá:** CEO pack dostane `outputs.bet` a píše sázky jako outputy vedle svých nálezů. Review běží celou dobu po staré cestě — dvojí přijímání schématu z Kroku 2 to umožňuje.
+**Co se udělalo:** `packs/ceo/pack.json` deklaruje `outputs.bet` (`anchor: none`, `evidence.required: [web_snapshot, document]`, `limit: 3`, dva lifecycly) a `SKILL.md` §2 říká, jak se sázka píše: bez kotvy, se staženou a **uloženou** stránkou jako důkazem, a se stavem, který určí zakladatel, ne pack. Review běží celou dobu po staré cestě.
 
-**Hotovo, když:** `agency outputs --type bet` ukáže tři návrhy, `agency feedback <id> selected` jeden vybere, `agency metrics` vykáže `selection_rate 0.33`, a další CEO běh dostane ten výběr v briefu. Kdykoli tohle nejde, **vrací se to do Kroků 2–3**, ne se to obchází dál.
+**Tři věci se předsunuly, protože bez nich nebyl řez poctivý:**
+
+1. **Jádro Kroku 9 — povinnost kotvy se přesunula ze schématu do politiky.** Dokud musela mít kotvu i sázka, ukazovala pořád na `footer.tsx` a celý řez nic nedokazoval. `anchor` proto vypadl z `required` ve `finding.v1` a rozhoduje `outputs.<type>.anchor` (`required` je default a platí pro každý nález; nález bez kotvy padá na nový důvod `missing-anchor`). Modul [`anchor.py`](../../packages/core/src/agency/anchor.py) i drift zůstávají nedotčené — jen se nespouštějí nad outputem, který kotvu nemá.
+   **A pojistka, bez které by to byla díra:** `outputs.errors` odmítne politiku, která zruší kotvu a nedeklaruje `evidence.required`. Formulace platí přesně tak, jak ji plán napsal — ne „sázka nepotřebuje kotvu", ale **„sázka potřebuje jiný druh důkazu"**.
+2. **Generický zápis feedbacku (z Kroku 7).** `agency triage` má dvě slovesa a obě něco *dělají* — `accept` posílá sinkem, `reject` si pamatuje. Sázka nemá kam být poslána, takže celé „co se stalo" je záznam: `runs.record_feedback` + `agency feedback <id> <kind>`. Vokabulář je packův, takže ten příkaz žádný vlastní nemá a nikdy mít nebude. `state` outputu se **záměrně nemění** — `state` je místo v pipeline, verdikt je událost, a slepení těch dvou je právě to, proč musel být každý verdikt jedním z pěti slov.
+3. **Filtr `agency findings --type` (z Kroku 11).** Jeden pack teď píše víc druhů výstupu a zakladatel hledající tři sázky je nechce mezi čtyřiceti nálezy.
+
+**A jedna chyba, kterou našel až běh, ne úvaha.** `dedup.symbol_key` padal na `file:?` — takže **každý output bez kotvy sdílel jedno místo**, a pojistka „dvě tvrzení na různých místech jsou dvě tvrzení" se obrátila v svůj opak: všechno bylo na témže místě, tedy všechno porovnatelné, a čtyři různě formulované sázky se složily do jedné. Teď je bez kotvy místo prázdné a platí jen otisk — identické tvrzení slovo od slova. Rozhoduje o tom táž nesymetrie jako u prahu podobnosti: falešná duplicita zahodí práci, zmeškaná jen prodlouží frontu.
+
+**Co to znamená pro Krok 5:** `subject` už není jen vylepšení kontextové paměti. Je to **náhrada za místo v dedupu**, které anchorless outputy nemají — a čím víc typů bez kotvy vznikne, tím dřív ho bude potřeba. Proto je hned další na řadě.
+
+**Hotovo, když:** ~~`agency outputs --type bet` ukáže tři návrhy…~~ Splněno v `test_outputs.py` (řez má vlastní sekci, 10 testů): sázka bez kotvy projde, sázka s nestaženou stránkou ne, nález téhož packu kotvu pořád mít musí, `selection_rate 0.5` ze dvou zodpovězených, `precision` u toho nevznikne, zamítnutá sázka dojde do `do-not-report` dalšího běhu, a čtvrtá sázka v běhu padne na packův vlastní strop. Poslední test čte **skutečný `packs/ceo/pack.json`**, protože je to referenční kopie packu z jiného repa a nic jiného v sadě by si nevšimlo, že se obě poloviny rozešly.
+
+**Co zbývá pro ostrý provoz:** reálný běh CEO packu nad repem Kvesteros a přenos `pack.json` + `SKILL.md` tam. To se odsud udělat nedá.
 
 ---
 
-### Krok 5 — `subject` a `run.scope` (~1,5 dne)
+### Krok 5 — `subject` a `run.scope` (~1,5 dne) — *naléhavější, než plán čekal*
+
+**Co Krok 4 změnil na zadání:** `subject` už není jen vylepšení paměti. Output bez kotvy nemá v dedupu **žádné místo**, takže se u něj dnes uplatní jen otisk; `subject` je to, co mu místo vrátí. Čím víc typů bez kotvy vznikne, tím víc práce se bez něj ztratí ve frontě.
 
 **Co se mění:**
 
@@ -354,7 +369,7 @@ Pokrývá `pr_comment`, `github_project_item`, `board_decision`, `board_draft`, 
 
 ---
 
-### Krok 7 — feedback jako události a projekce `state` (~1,5 dne)
+### Krok 7 — feedback jako události a projekce `state` (~1,5 dne) — *část předsunuta do Kroku 4*
 
 **Proč:** dnešní `state` je skalár, který [`metrics`](../../packages/core/src/agency/metrics.py) čte na deseti místech, [`dedup`](../../packages/core/src/agency/dedup.py) ho zapisuje a `serve.py` i `cli.py` na něm staví výpis. Seznam událostí je datová změna **plus** jedna funkce, která v seznamu kroků snadno chybí.
 
@@ -389,7 +404,7 @@ CLI zůstává pro uživatele beze změny tam, kde to dává smysl: `agency acce
 
 ---
 
-### Krok 9 — uvolnit povinnou kotvu (~2 dny)
+### Krok 9 — uvolnit povinnou kotvu (~2 dny) — *jádro hotové v Kroku 4*
 
 **Proč až teď:** teprve tady existuje plná náhrada (Krok 2) a je ověřená (Krok 4).
 

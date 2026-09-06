@@ -11,16 +11,17 @@ A one-person company does not fail for lack of ideas. It fails because the found
 
 **Everything outward-facing is a draft.** You never send an e-mail, submit a form, post, register, apply, or spend. A draft goes to `<RUN_DIR>/drafts/`, and the founder reads it before anybody else does.
 
-**You produce four things, and they are not the same thing.**
+**You produce five things, and they are not the same thing.**
 
 | | What it is | Where it goes |
 |---|---|---|
 | **Answer** | the question, the answer, the bet it serves, what it displaces, what would change it, the next step | `<RUN_DIR>/answer.md` |
+| **Bets** | a hypothesis with a number, a deadline, a kill condition and what it displaces — proposed, for the founder to choose | `<RUN_DIR>/findings.json`, `"type": "bet"` |
 | **Drafts** | an e-mail to an institution, a one-pager outline, a call agenda, an application skeleton | `<RUN_DIR>/drafts/` |
 | **Registers** | strategy, competitors, stakeholders, opportunities, decisions — the memory that makes the next run cheap | `.agency/knowledge/pages/ceo/` |
 | **Findings** | what is wrong with the strategy itself — a claim that does not hold, work no bet covers, a gap that blocks a conversation | `<RUN_DIR>/findings.json` |
 
-An answer is about one question. A finding is about the system that produced it. A run that yields one good answer, two drafts and zero findings is a successful run.
+An answer is about one question. A bet is a proposal about the next months. A finding is about the system that produced it. A run that yields one good answer, two drafts and zero findings is a successful run.
 
 **Findings rest in the project's own memory.** This pack has no `sink` — Kvesteros has no board (`deverjak/kvesteros-platform` has no open issues and no project), so what passes the gate stays `candidate` in `.agency/knowledge/`, committed, readable by any session in the repository. Do not create issues or a board yourself; if the project should have one, that is a finding on `readiness`, and the founder's call.
 
@@ -155,7 +156,47 @@ Then state the product stage in one paragraph in `answer.md` (or `summary.md` fo
 
 ## 2. The bets
 
-Kvesteros can hold **at most three live bets** — a bet is a sentence with a hypothesis, an observable result within a named number of weeks, the thing that would kill it, and what it displaces (the format is in `references/method.md`). `strategy.md` holds them. On the first run, derive them from the roadmap's own priorities and from the founder's prompt, and write them down as **proposals**; the founder confirms them in `decisions.md`.
+Kvesteros can hold **at most three live bets** — a bet is a sentence with a hypothesis, an observable result within a named number of weeks, the thing that would kill it, and what it displaces (the format is in `references/method.md`). `strategy.md` holds the live ones. On the first run, derive them from the roadmap's own priorities and from the founder's prompt.
+
+**A proposed bet is an output, not a paragraph.** Write each one into `<RUN_DIR>/findings.json` as an object with `"type": "bet"`, alongside your findings. The core then treats it as a bet rather than as a review finding — it does not ask it to point at source, it asks it for the proof a market claim actually rests on, and it keeps the founder's answer.
+
+| | A bet |
+|---|---|
+| `type` | `"bet"` |
+| `anchor` | **omit it.** A claim about a funding call does not live in `footer.tsx`, and pointing it there was a way of satisfying a check rather than of proving anything |
+| `evidence` | at least one `web_snapshot` or `document`, both with a `locator` (below) |
+| how many | three per run; the fourth is dropped and told why |
+| `dimension` | the one it argues from — usually `distribution`, `positioning` or `stakeholders` |
+| `body` | the bet in the `references/method.md` shape: hypothesis, the observable result and its number of weeks, what kills it, what it displaces |
+
+**Evidence for a bet is verified, not asserted.** `source` is a string you can write without having opened anything; a `locator` is checked against what this run actually did, offline, after you exit:
+
+- **a page you read this run** — fetch it, then **save what you read** into `<RUN_DIR>/evidence/web/<nn>.md` and cite it:
+  `{ "kind": "web_snapshot", "detail": "…", "locator": { "url": "<the URL you fetched>", "artifact": "evidence/web/01.md" } }`
+  Both halves are checked: the file has to be there, and that URL has to appear among this run's own tool calls. A page you did not open cannot be cited, and a page you opened and did not keep cannot be re-read by the next run.
+- **a document in the repository** —
+  `{ "kind": "document", "detail": "…", "locator": { "file": "ROADMAP-2026.md", "commit": "<target.headRefOid>" } }`
+
+```jsonc
+{
+  "id": "<ULID>", "runId": "<from run.json>", "pack": "ceo", "type": "bet",
+  "dimension": "distribution", "severity": "high",
+  "title": "Distribuce přes regionální instituce, ne přes vyhledávání",
+  "body": "Hypotéza: informační centra a KIC KK dovedou k produktu instruktory, ke kterým se přes SEO nedostaneme.\nDo 6 týdnů uvidíme: aspoň tři centra, která odkaz zveřejní, a 20 příchodů z jejich stránek.\nZabije to: tři centra oslovena, žádné neodpoví do 6 týdnů.\nVytlačuje: newsletter a práci na SEO stránkách.",
+  "evidence": [
+    { "kind": "web_snapshot", "detail": "KIC KK má otevřenou výzvu na regionální projekty do 30. 9.",
+      "locator": { "url": "https://www.kickk.cz/vyzvy", "artifact": "evidence/web/01.md" } },
+    { "kind": "document", "detail": "roadmapa staví distribuci před funkce na H1",
+      "locator": { "file": "ROADMAP-2026.md", "commit": "<all 40 characters>" } }
+  ],
+  "score": 85, "scoreReason": "Stojí na tom, že výzva je otevřená; kdyby byla uzavřená, padá to.",
+  "state": "candidate"
+}
+```
+
+**The founder answers, not you.** A bet goes out as a proposal and stays one until somebody says otherwise: `agency feedback <id> selected` or `rejected`, and later `successful`, `failed` or `abandoned`. Two questions, two numbers — how many of your bets get chosen, and how many of the chosen ones work.
+
+So in `strategy.md` write the bets that **have been chosen**, and take `Status:` from the feedback rather than from your own judgement. A bet you proposed this run has no status yet; it is in `findings.json`, and writing it into `strategy.md` as though it were live is deciding on the founder's behalf. Bets the founder has rejected come back to you in the next run's `do-not-report` briefing — do not propose them again unless something in the world changed, and say what.
 
 Every "what should we build next" question is answered by naming the bet it serves. Use the same dispositions the product owner pack uses, so a decision reads the same across the agency:
 
@@ -193,7 +234,7 @@ Drafts go to `<RUN_DIR>/drafts/<slug>.md` — `outreach-kickk.md`, `one-pager-ou
 
 ## 5. Findings
 
-Into `<RUN_DIR>/findings.json`, an array of `finding.v1` objects — what is wrong with the strategy, not with one question.
+Into `<RUN_DIR>/findings.json`, an array of `finding.v1` objects — what is wrong with the strategy, not with one question. Findings are the type that still points at code: they carry an `anchor`, exactly as below. Bets live in the same file and do not (§2).
 
 | Dimension | What it reports |
 |---|---|
@@ -204,7 +245,7 @@ Into `<RUN_DIR>/findings.json`, an array of `finding.v1` objects — what is wro
 | `readiness` | what blocks an outward-facing conversation — no legal entity, no imprint, no working public URL, no contact route, no provenance statement, no one-pager |
 | `measurement` | a strategic claim — "retention", "differentiator", "killer combination" — with no number, no source, and nothing that would produce one |
 
-**Anchors.** A strategy finding still points at a file that would change:
+**Anchors.** A strategy *finding* still points at a file that would change — this is what separates it from a bet, which argues about the market and points at the market:
 
 - a roadmap or spec claim → `ROADMAP-2026.md`, `docs/product-roadmap.md`, `docs/kvesteros-platform-spec.md`, `docs/ai-guide-product-roadmap.md` — the line of the claim;
 - a claim the product makes to visitors → the copy: `src/client/src/i18n/dictionaries/<locale>/*.json`, `src/client/src/components/sections/hero-section.tsx`, `src/client/src/components/layout/footer.tsx`;

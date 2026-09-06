@@ -83,8 +83,15 @@ def do_not_report(project: Project) -> str | None:
     `by-design` means "never report this again" and must survive; a
     `not-reproducible` from March may simply be reproducible today.
     """
+    # Selected by POLARITY, not by the word. A pack's negative verb is its
+    # own — `rejected` for a finding, `not_selected` for a bet, `duplicate`
+    # for a bug — and reading the literal string would quietly hand this
+    # briefing to review packs only. Rows written before polarity existed
+    # carry `rejected` and nothing else, so the word stays as a fallback.
     rows = [r for r in _runs.read_trail(project).values()
-            if r.get("state") == "rejected" and (r.get("title") or "").strip()]
+            if (r.get("polarity") == "negative"
+                or (r.get("polarity") is None and r.get("state") == "rejected"))
+            and (r.get("title") or "").strip()]
     if not rows:
         return None
 
@@ -132,6 +139,10 @@ def _view(run, rec: dict, finding: dict, decision: dict | None,
     who = (rec.get("agent") or {}).get("hire")
     view = {
         "id": finding.get("id"), "title": finding.get("title"),
+        # What kind of output this was. Without it the next run reads a bet
+        # and a finding as the same thing and cannot tell "we already decided
+        # this is out of scope" from "we already bet on this".
+        "type": finding.get("type") or "finding",
         "dimension": finding.get("dimension"), "severity": finding.get("severity"),
         "file": a.get("file"), "line": a.get("line"),
         # The symbol, when the anchor had one: it is how a finding is matched
@@ -262,6 +273,7 @@ def _trail_view(row: dict) -> dict:
     a = row.get("anchor") or {}
     return {
         "id": row.get("id"), "title": row.get("title"),
+        "type": row.get("type") or "finding",
         "dimension": row.get("dimension"), "severity": row.get("severity"),
         "file": a.get("file"), "line": a.get("line"),
         "symbol": ((a.get("symbol") or {}).get("name")
