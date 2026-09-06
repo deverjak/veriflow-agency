@@ -258,7 +258,8 @@ def launch_argv(memory_dir: str, prompt: str,
                 resume: str | None = None,
                 remote_control: str | None = None,
                 no_questions: bool = False,
-                append_prompt: str | None = None) -> tuple[list[str], dict]:
+                append_prompt: str | None = None,
+                settings: str | None = None) -> tuple[list[str], dict]:
     """What to finish the run with.
 
     `memory_dir` is what the agent is allowed to read outside its working
@@ -312,6 +313,11 @@ def launch_argv(memory_dir: str, prompt: str,
     delivered = bool(append_prompt) and bool(providers.appends_system_prompt(name))
     if delivered:
         argv += [providers.appends_system_prompt(name), append_prompt]
+    # Hooks travel as an argument, never as a file in the project (R5). One
+    # value, so it is safe here too.
+    hooked = bool(settings) and bool(spec.get("hookFlag"))
+    if hooked:
+        argv += [str(spec["hookFlag"]), settings]
     argv += [str(x) for x in (spec.get("extraArgs") or [])]
 
     # Authorization: handing the agent a path without the right to use it is a
@@ -348,6 +354,58 @@ def launch_argv(memory_dir: str, prompt: str,
         # question only the record can answer once the terminal is gone.
         info["remoteControl"] = str(remote_control)
     return argv, info
+
+
+#: Where a run's tool calls are recorded, when the runner can carry a hook.
+TOOL_CALLS = "tool-calls.jsonl"
+
+
+def hook_settings(run_dir: Path, provider: str | None = None) -> str | None:
+    """The `--settings` payload that makes the runner report its own tool calls.
+
+    A hook, not a promise: `evidence[].source` is a free string, so a finding
+    can cite `agency graph impact` without ever having run it and nothing
+    could tell. This is what turns that claim into a fact.
+
+    Built here and passed on the launch line — **nothing is written into the
+    project and nothing is installed into the user's harness** (R5). The
+    RUN_DIR is baked into the hook's own command, so the hook needs no
+    environment variable to find the run it belongs to.
+
+    `None` when the runner cannot take a hook as an argument (codex reads its
+    hooks from a config file in the project, which is the thing R5 forbids).
+    Probed on 2026-09-06 — see `providers.supportsHooks`.
+    """
+    if not providers.spec(provider or "claude").get("supportsHooks"):
+        return None
+    command = f'agency hook tool-call --run-dir "{posix(run_dir)}"'
+    return json.dumps({"hooks": {"PostToolUse": [
+        {"matcher": "*", "hooks": [{"type": "command", "command": command}]}]}})
+
+
+def record_tool_call(run_dir: Path, payload: dict) -> dict | None:
+    """One line of `tool-calls.jsonl`, from a PostToolUse hook's own stdin.
+
+    The shape of what arrives is the runner's, probed on 2026-09-06 rather
+    than assumed: `tool_name`, `tool_input.command` (the literal command line,
+    which is the whole basis of provenance) and `tool_response`. There is no
+    exit code in it — what there is is stdout and stderr — so the time is
+    added here and the outcome is not claimed.
+
+    `None` for a call with no command: only shell calls can back a cited
+    source, and a `Read` is not evidence that a command ran.
+    """
+    tool = payload.get("tool_name")
+    command = ((payload.get("tool_input") or {}).get("command")
+               if isinstance(payload.get("tool_input"), dict) else None)
+    if not command:
+        return None
+    row = {"at": now(), "tool": tool, "command": " ".join(str(command).split())}
+    path = Path(run_dir) / TOOL_CALLS
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a", encoding="utf-8", newline="\n") as f:
+        f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    return row
 
 
 def session_name(pack_name: str, run_id: str) -> str:

@@ -576,7 +576,11 @@ def cmd_run(args, chain: dict | None = None) -> int:
         bypass=bool(getattr(args, "bypass", False)),
         remote_control=remote, no_questions=alone,
         append_prompt=(rejected_before.read_text(encoding="utf-8")
-                       if rejected_before.is_file() else None))
+                       if rejected_before.is_file() else None),
+        # Makes the runner report its own tool calls into RUN_DIR, which is
+        # what turns `evidence[].source` from a claim into a fact. Nothing is
+        # written into the project for it.
+        settings=runs.hook_settings(run.dir, provider))
     rec = run.record()
     rec["agent"] = agent_info
     run.save_record(rec)
@@ -1678,6 +1682,28 @@ def _target_label(target: dict) -> str:
     return target.get("title") or "—"
 
 
+def cmd_hook(args) -> int:
+    """What the runner's own PostToolUse hook calls, once per tool call.
+
+    Reads the hook payload from stdin, because that is how the runner hands it
+    over. It is deliberately the dumbest command in the tool: append a line and
+    exit 0. A hook that can fail is a hook that can take a run down with it, so
+    a malformed payload, an unwritable directory or a runner shape nobody has
+    seen yet all end the same way — silently, with the run carrying on.
+
+    That silence is affordable precisely because a missing `tool-calls.jsonl`
+    makes the gate skip the provenance check entirely rather than assume the
+    worst (`ingest.commands_run`).
+    """
+    try:
+        payload = json.loads(sys.stdin.read() or "{}")
+        if isinstance(payload, dict):
+            runs.record_tool_call(Path(args.run_dir), payload)
+    except (ValueError, OSError):
+        pass
+    return 0
+
+
 def cmd_status(args) -> int:
     project = _project(args)
     all_runs = runs.load_runs(project)
@@ -2038,6 +2064,15 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--by", default=runs.HUMAN,
                    help="who decides — `hire:<id>` for a specialist (ready-made in context.json), `human` for a person")
     s.set_defaults(fn=cmd_note)
+
+    s = sub.add_parser("hook", parents=[common],
+                       help="called by the runner's own hooks, not by a person")
+    hsub = s.add_subparsers(dest="event", required=True)
+    h = hsub.add_parser("tool-call", parents=[common],
+                        help="record one PostToolUse call into RUN_DIR/tool-calls.jsonl")
+    h.add_argument("--run-dir", required=True)
+    s.set_defaults(fn=cmd_hook)
+    h.set_defaults(fn=cmd_hook)
 
     s = sub.add_parser("status", parents=[common], help="overview of the project's runs")
     s.add_argument("--limit", type=int, default=10)

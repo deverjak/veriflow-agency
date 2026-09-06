@@ -18,6 +18,7 @@ and a human's triage are for. It checks whether a finding CAN be true at all.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from . import dedup, knowledge, proc
@@ -33,7 +34,79 @@ GATE_REASONS = {
     "phantom-file": "the file does not exist at the analysed commit",
     "phantom-line": "the line is past the end of the file as of the analysis",
     "below-score": "score below the project threshold",
+    "unproven-source": "evidence cites a command that never ran in this run",
 }
+
+#: What makes a `source` a claim about something that RAN, rather than a
+#: pointer to something that can be read. Explicit, not a heuristic: an early
+#: version keyed on "contains a space", which made
+#: `CLAUDE.md#rules-that-will-bite-you` a command and would have dropped an
+#: honest finding for citing a document.
+COMMAND_PREFIXES = ("agency ", "git ", "gh ", "npx ", "npm ", "python ",
+                    "pnpm ", "yarn ", "code-review-graph ")
+
+
+def _is_command(source: str) -> bool:
+    return str(source or "").strip().startswith(COMMAND_PREFIXES)
+
+
+def _head(command: str) -> list[str]:
+    """The command and its subcommands — everything before the first flag.
+
+    Flags and their values are deliberately not compared. An agent that wrote
+    `--depth 2` and ran `--depth 3` is lying about a detail, not about having
+    looked at the graph; dropping its finding for that would teach packs to
+    cite nothing rather than to cite accurately.
+    """
+    head: list[str] = []
+    for token in str(command or "").split():
+        if token.startswith("-"):
+            break
+        head.append(token)
+    return head
+
+
+def commands_run(run: Run) -> list[str] | None:
+    """What this run actually executed — `None` when nobody was recording.
+
+    `None` and `[]` mean opposite things and the difference is the whole
+    safety of this check: no file means the hook never ran (an attended run, a
+    codex run), and a gate stage that treated that as "ran nothing" would drop
+    every honest finding in those runs.
+    """
+    path = run.dir / _runs.TOOL_CALLS
+    if not path.is_file():
+        return None
+    found: list[str] = []
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if row.get("command"):
+                    found.append(str(row["command"]))
+    except OSError:
+        return None
+    return found
+
+
+def unproven(finding: dict, ran: list[str]) -> str | None:
+    """The first cited command that never ran, or `None` when all of them did."""
+    heads = [_head(c) for c in ran]
+    for item in finding.get("evidence") or []:
+        source = (item or {}).get("source")
+        if not _is_command(source):
+            continue
+        want = _head(source)
+        if not any(head[:len(want)] == want or want[:len(head)] == head
+                   for head in heads):
+            return " ".join(want)
+    return None
 
 
 #: The line a blocked run is read by. The pack writes the whole file; this is
@@ -113,6 +186,9 @@ def gate(project: Project, run: Run, findings: list[dict], min_score: int | None
     kept: list[dict] = []
     dropped: list[dict] = []
     errs = _schema_errors(findings)
+    # Loaded once. `None` means nothing was recording this run, and then the
+    # whole check is skipped — never drop a finding because a hook did not run.
+    ran = commands_run(run)
 
     for i, f in enumerate(findings):
         def drop(reason: str, detail: str = "") -> None:
@@ -134,6 +210,12 @@ def gate(project: Project, run: Run, findings: list[dict], min_score: int | None
         if lines is not None and a.get("line", 1) > lines:
             drop("phantom-line", f"line {a['line']} > {lines} lines in the file")
             continue
+
+        if ran is not None:
+            cited = unproven(f, ran)
+            if cited:
+                drop("unproven-source", f"“{cited}” did not run in this run")
+                continue
 
         score = f.get("score")
         if min_score is not None and isinstance(score, int) and score < min_score:
@@ -337,6 +419,12 @@ def ingest(project: Project, run: Run, min_score: int | None = None) -> dict:
         "held": held,
     }
     rec["gatedBy"] = by_reason or None
+    # Which population this run belongs to (R6). A gate stage that only some
+    # runs are subject to must not leave those runs and the rest looking alike
+    # — otherwise `unproven-source` never appearing reads as "nobody lies"
+    # rather than "nobody was checked".
+    rec["context"] = {**(rec.get("context") or {}),
+                      "toolCalls": commands_run(run) is not None}
     if dispatch_errors:
         rec["dispatchErrors"] = dispatch_errors
     # The run's summary is the pack's contract (`RUN_DIR/summary.md`). The gate
