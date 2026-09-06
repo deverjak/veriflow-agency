@@ -178,6 +178,14 @@ Prerequisites: `git`, `uv`, VS Code 1.85+; a reviewer additionally needs `gh`
 `agency doctor` checks all of it — **before** a run, not halfway through —
 and only asks about what the packs actually in the project need.
 
+It also reads the project's own `CLAUDE.md` and `AGENTS.md`. Those reach the
+specialist on their own — the runner starts the agent in the project, or in a
+worktree carrying the committed copy, and never passes or overrides that file
+— so a specialist works under two sets of instructions at once. Where they
+disagree is the founder's business, with one exception `doctor` will name: a
+house rule forbidding a tool a hired pack stands on. It quotes the sentence
+and its line, and stops there. Which of the two gives is not a runner's call.
+
 ## Shape
 
 Three things, each with one responsibility. The boundary between them is a

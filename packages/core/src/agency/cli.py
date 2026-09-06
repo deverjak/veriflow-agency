@@ -13,7 +13,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import anchor, chain as chains, config, graph, ingest, knowledge, metrics, packs, proc, providers, runs, serve as serving
+from . import anchor, chain as chains, config, graph, ingest, instructions, knowledge, metrics, packs, proc, providers, runs, serve as serving
 from .util import bundled, out, posix, read_json, ulid
 
 # ---------------------------------------------------------------- helpers
@@ -117,8 +117,14 @@ def cmd_doctor(args) -> int:
 
     hired = packs.available(project)
     wanted: set[str] = set()
+    # The same requirements, indexed the other way round: a tool, and who
+    # would be left without it. `wanted` answers "does anyone need this";
+    # naming the specialist is what makes a conflict actionable.
+    by_tool: dict[str, list[str]] = {}
     for p in hired:
         wanted |= set(p.requires)
+        for tool in p.requires:
+            by_tool.setdefault(tool, []).append(p.name)
 
     def needed(tool: str) -> bool:
         return not hired or tool in wanted
@@ -156,6 +162,23 @@ def cmd_doctor(args) -> int:
     # about it would.
     tool_check("repo slug", "gh", project.slug,
                "no remote — the specialists in this project need one")
+
+    # Two sets of instructions, one specialist. `CLAUDE.md` reaches the agent
+    # on its own — the runner starts it in the project (or in a worktree that
+    # carries the committed copy) and never passes or overrides that file — so
+    # a house rule against a tool the pack stands on is invisible until a run
+    # is already breaking it. Not fatal: the project may well be right, and
+    # which of the two gives is not a question a runner gets to answer.
+    house = instructions.conflicts(project.root, by_tool)
+    for hit in house:
+        check(f"rules vs {hit['tool']}", False,
+              f"{hit['file']}:{hit['line']} · needed by {', '.join(hit['packs'])} · "
+              f"“{hit['rule']}”", fatal=False)
+    seen = instructions.paths(project.root)
+    if seen and by_tool and not house:
+        check("house rules", True,
+              ", ".join(p.name for p in seen)
+              + " · nothing there forbids what the specialists need", fatal=False)
 
     if needed("code-review-graph"):
         g = graph.state(project.root).data
@@ -208,6 +231,15 @@ def cmd_doctor(args) -> int:
             icon = out.ok("✓") if c["ok"] else (out.err("✗") if c["fatal"] else out.warn("!"))
             print(f"  {icon} {c['name']:24} {out.dim(c['detail'])}")
         print()
+        if house:
+            # The fork, said out loud. A warning that only names the collision
+            # leaves the founder with "and now what" — and the answer is short
+            # enough to print: one of the two has to give, and neither the
+            # runner nor the specialist is allowed to pick.
+            fork = ("Change the rule, or the pack that needs the tool — "
+                    "a run cannot choose for you.")
+            print(f"  {out.warn('Two sets of instructions disagree.')} "
+                  f"{out.dim(fork)}\n")
         if fatal:
             print(f"  {out.err('A run would fail.')} Fix the items marked ✗.\n")
         else:
