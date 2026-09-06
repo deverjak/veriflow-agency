@@ -1060,7 +1060,11 @@ class Handler(BaseHTTPRequestHandler):
                 # depends on the client remembering to add `?offset=` is a
                 # resume that will one day replay an hour of tool calls.
                 resume = self.headers.get("Last-Event-ID") or (query.get("offset") or ["0"])[0]
-                return self._events(project, run, _int(resume))
+                # Passed through as text, not as an int: an id is
+                # `<stream>.<notes>` since Agency's own remarks joined the
+                # feed, and `int("42.3")` throws — which would silently resume
+                # from the very beginning and replay an hour of tool calls.
+                return self._events(project, run, resume)
             if tail == "output":
                 name = (query.get("name") or [""])[0]
                 if name not in _outputs(run):
@@ -1170,7 +1174,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(text)
 
-    def _events(self, project, run, offset: int) -> None:
+    def _events(self, project, run, offset: str | int) -> None:
         """The agent's own stream, translated, as server-sent events.
 
         Nothing new is recorded for this: `runs.attend` already writes every
@@ -1191,8 +1195,20 @@ class Handler(BaseHTTPRequestHandler):
         rec = run.record()
         dialect = providers.streaming((rec.get("agent") or {}).get("provider") or "claude")[1]
         path = run.dir / "agent.jsonl"
-        sent = max(0, offset)
+        notes_path = run.dir / runs.NOTES
+        # Two files, two counters, one id — `<stream>.<notes>`. Agency's own
+        # remarks cannot go into `agent.jsonl` without corrupting the runner's
+        # transcript, and a single counter over two files would resume in the
+        # wrong place the moment either one moved. An old id with no dot still
+        # reads correctly as "stream line N, no notes yet".
+        stream_at, notes_at = offset, 0
+        if isinstance(offset, str) and "." in offset:
+            head, _, tail = offset.partition(".")
+            stream_at, notes_at = _int(head), _int(tail)
+        sent = max(0, _int(stream_at))
+        noted = max(0, notes_at)
         handle = None
+        notes_handle = None
         last_beat = time.monotonic()
 
         def write(chunk: str) -> bool:
@@ -1222,9 +1238,29 @@ class Handler(BaseHTTPRequestHandler):
                 if not line.strip():
                     continue
                 for e in events.parse(dialect or "", line.rstrip("\r\n")):
-                    if not write(f"id: {sent}\ndata: "
+                    if not write(f"id: {sent}.{noted}\ndata: "
                                  f"{json.dumps(dataclasses.asdict(e), ensure_ascii=False)}\n\n"):
                         return False
+
+        def drain_notes() -> bool:
+            """Agency's own remarks — already in the same vocabulary, so they
+            need no dialect and arrive in the feed beside the agent's work."""
+            nonlocal noted
+            while True:
+                where = notes_handle.tell()
+                line = notes_handle.readline()
+                if not line.endswith("\n"):
+                    notes_handle.seek(where)
+                    return True
+                noted += 1
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                e = events.Event(kind="note", detail=row.get("detail"))
+                if not write(f"id: {sent}.{noted}\ndata: "
+                             f"{json.dumps(dataclasses.asdict(e), ensure_ascii=False)}\n\n"):
+                    return False
 
         try:
             while True:
@@ -1233,6 +1269,11 @@ class Handler(BaseHTTPRequestHandler):
                     for _ in range(sent):        # resume where the phone stopped
                         if not handle.readline():
                             break
+                if notes_handle is None and notes_path.is_file():
+                    notes_handle = open(notes_path, encoding="utf-8", errors="replace")
+                    for _ in range(noted):
+                        if not notes_handle.readline():
+                            break
 
                 # Read the status BEFORE draining, never after: `runs.attend`
                 # closes the stream file and only then writes the record, so a
@@ -1240,6 +1281,8 @@ class Handler(BaseHTTPRequestHandler):
                 # The other order drops whatever arrived in between.
                 finished = run.record().get("status") != "running"
                 if handle is not None and not drain():
+                    return
+                if notes_handle is not None and not drain_notes():
                     return
                 if finished:
                     write("event: done\ndata: "
@@ -1254,6 +1297,8 @@ class Handler(BaseHTTPRequestHandler):
         finally:
             if handle is not None:
                 handle.close()
+            if notes_handle is not None:
+                notes_handle.close()
 
 
 def _int(value, default: int = 0) -> int:

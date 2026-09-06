@@ -148,6 +148,15 @@ BUILTIN: dict[str, dict] = {
         # The `-file` variant does NOT error (an invented flag reliably does:
         # `error: unknown option`), it is simply ignored — so "it ran fine" is
         # no evidence at all here. Only the inline form actually arrives.
+        #
+        # How much fits, probed the same day on Windows, because inline is the
+        # only form there is and "40 lines will fit" was still a guess:
+        #   40 lines  →  4.4 KB argument, 4.6 KB command line  → ran
+        #   250 lines → 27.3 KB argument                       → ran
+        #   300 lines → 32.7 KB argument                       → WinError 206
+        # The wall is `CreateProcess`'s 32767-character command line, and it
+        # arrives as `FileNotFoundError`, which reads as a missing binary. See
+        # `runs.COMMAND_LINE_MAX`.
         "appendPromptFlag": "--append-system-prompt",
         # An event stream instead of silence. Without `--verbose`, `-p` emits
         # nothing until the very end, so ten minutes of work is indistinguishable

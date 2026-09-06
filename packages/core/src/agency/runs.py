@@ -311,6 +311,11 @@ def launch_argv(memory_dir: str, prompt: str,
     # reminded of. Takes exactly one value, so unlike the variadic flags below
     # it is safe anywhere ahead of the prompt.
     delivered = bool(append_prompt) and bool(providers.appends_system_prompt(name))
+    if delivered and not _fits([*argv, append_prompt, prompt]):
+        # Too long to hand over on the line. Dropping it costs the run its
+        # memory of what was already rejected; keeping it costs the run
+        # itself, with an error message pointing at the wrong thing.
+        delivered = False
     if delivered:
         argv += [providers.appends_system_prompt(name), append_prompt]
     # Hooks travel as an argument, never as a file in the project (R5). One
@@ -358,6 +363,27 @@ def launch_argv(memory_dir: str, prompt: str,
 
 #: Where a run's tool calls are recorded, when the runner can carry a hook.
 TOOL_CALLS = "tool-calls.jsonl"
+
+#: Agency's own remarks about a run in progress — a loop, a flood of refusals,
+#: a budget overrun. A SECOND file on purpose: `agent.jsonl` is the runner's
+#: raw transcript and writing our sentences into it would corrupt the one
+#: record of what the agent actually emitted. The phone's event stream reads
+#: both and interleaves them, so a person watching sees the warning in the
+#: feed they are already looking at rather than in a terminal they left.
+NOTES = "notes.jsonl"
+
+
+def note_event(run_dir: Path, text: str) -> None:
+    """One remark into the run's own feed. Never fatal: a warning that takes
+    the run down with it is worse than the thing it was warning about."""
+    try:
+        path = Path(run_dir) / NOTES
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a", encoding="utf-8", newline="\n") as f:
+            f.write(json.dumps({"kind": "note", "detail": text, "at": now()},
+                               ensure_ascii=False) + "\n")
+    except OSError:
+        pass
 
 
 def hook_settings(run_dir: Path, provider: str | None = None) -> str | None:
@@ -717,6 +743,24 @@ def start(project: Project, pack_name: str, target: dict,
     return run
 
 
+#: What Windows will take as a whole command line, minus room to spare.
+#: `CreateProcess` caps at 32767 characters, and going over does NOT say so:
+#: probed on 2026-09-06, a 32.8 KB command line comes back as
+#: `FileNotFoundError: [WinError 206]`, which reads as "the binary is not
+#: there" and would send someone to `agency doctor` for an hour.
+#:
+#: The margin is real but not what protects us — the cap on `do-not-report.md`
+#: is 40 lines, which probed at 4.4 KB, so this only ever fires if something
+#: else grows unbounded. It is here so that when it does, the run loses the
+#: standing text and says so, rather than failing to start with the wrong
+#: error.
+COMMAND_LINE_MAX = 30000
+
+
+def _fits(argv: list[str]) -> bool:
+    return sum(len(a) + 3 for a in argv) < COMMAND_LINE_MAX
+
+
 #: How an agent's own run recognises itself. `cmd_run` and `cmd_chain` read
 #: these and refuse to start — a run is a leaf, not a node.
 RUN_ENV = "AGENCY_RUN"
@@ -915,7 +959,14 @@ def attend(project: Project, run: Run, launch: list[str], cwd: Path,
     started = time.monotonic()
     collected: list = []
     minutes = (budget or {}).get("minutes")
-    watch = Watch(run.dir, say=out.note, minutes=minutes, started=started)
+
+    def remark(text: str) -> None:
+        """To the terminal AND to the run's own feed — the person who needs to
+        hear it is not necessarily the one at this machine."""
+        out.note(text)
+        note_event(run.dir, text)
+
+    watch = Watch(run.dir, say=remark, minutes=minutes, started=started)
     # The runaway fuse. `timeout` given explicitly still wins — a caller that
     # named a ceiling meant it.
     if timeout is None and minutes:

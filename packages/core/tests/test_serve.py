@@ -757,6 +757,53 @@ def test_a_dropped_connection_resumes_from_the_browsers_own_header(daemon, proje
     assert [e["kind"] for e in progress] == ["text"]
 
 
+def test_agencys_own_warnings_reach_the_phone_too(daemon, project, make_run):
+    """A loop or a flood of refusals is worth saying while it happens, and the
+    person who needs to hear it is not necessarily the one at the machine.
+
+    It cannot go into `agent.jsonl` — that is the runner's raw transcript and
+    our sentences do not belong in it — so it is a second file, interleaved
+    here into the feed the phone is already reading.
+    """
+    from agency import runs as _runs
+
+    token = pair(daemon)
+    run = make_run(status="ok")
+    (run.dir / "agent.jsonl").write_text(
+        json.dumps({"type": "system", "subtype": "init", "session_id": "s1"}) + "\n",
+        encoding="utf-8")
+    _runs.note_event(run.dir, "Read has been called 5x in a row with the same arguments")
+
+    progress, _ = stream(daemon, run.id, project.root.name, token)
+
+    kinds = [e["kind"] for e in progress]
+    assert "note" in kinds, "the warning is in the same feed, not only in a terminal"
+    note = next(e for e in progress if e["kind"] == "note")
+    assert "5x in a row" in note["detail"]
+
+
+def test_a_resume_after_a_warning_does_not_replay_the_run(daemon, project, make_run):
+    """The id became `<stream>.<notes>` when Agency's own remarks joined the
+    feed. A client sending one back must not land at the beginning — that is an
+    hour of tool calls replayed on a train."""
+    from agency import runs as _runs
+
+    token = pair(daemon)
+    run = make_run(status="ok")
+    (run.dir / "agent.jsonl").write_text("\n".join([
+        json.dumps({"type": "system", "subtype": "init", "session_id": "s1"}),
+        json.dumps({"type": "assistant", "message": {"content": [
+            {"type": "text", "text": "still here"}]}}),
+    ]) + "\n", encoding="utf-8")
+    _runs.note_event(run.dir, "past the 25 minutes this pack calls normal")
+
+    progress, _ = stream(daemon, run.id, project.root.name, token,
+                         headers={"Last-Event-ID": "1.1"})
+
+    assert [e["kind"] for e in progress] == ["text"], (
+        "the first stream line and the first note were both already seen")
+
+
 def test_the_page_is_served_and_never_cached(daemon):
     """The phone's client is a file on this machine, read on every request —
     a phone holding yesterday's copy would be a bug with nowhere to look."""

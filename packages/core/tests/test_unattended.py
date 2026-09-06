@@ -629,3 +629,26 @@ def test_a_run_refused_the_same_tool_three_times_says_so_while_it_happens(
     assert any("needs" in s and "Bash" in s for s in out["said"])
     # And it is counted once, not twice, when the result also lists them.
     assert out["record"]["agent"]["denied"]["count"] == 3
+
+
+def test_standing_text_too_long_for_the_line_is_dropped_not_fatal():
+    """Probed on Windows 2026-09-06: past `CreateProcess`'s 32767-character
+    command line the launch fails as `FileNotFoundError: [WinError 206]`,
+    which reads as "the binary is not there". Losing the memory of what was
+    rejected is bad; losing the run to an error pointing at the wrong thing
+    is worse."""
+    argv, info = runs.launch_argv("/mem", "p", provider="claude",
+                                  append_prompt="x" * (runs.COMMAND_LINE_MAX + 1))
+
+    assert "--append-system-prompt" not in argv
+    assert info["systemPrompt"] is False, "and the record says it did not arrive"
+
+
+def test_a_forty_line_brief_fits_with_room_to_spare():
+    """The cap that actually applies. 40 lines probed at 4.4 KB against a
+    30 KB ceiling — this guard is for something else growing, not for this."""
+    brief = "\n".join(["- Session is not cleared when the tab closes — by design."] * 40)
+
+    _, info = runs.launch_argv("/mem", "p", provider="claude", append_prompt=brief)
+
+    assert info["systemPrompt"] is True

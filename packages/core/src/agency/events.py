@@ -39,6 +39,11 @@ class Event:
       * `denied`   — a tool call was refused (this is the one that matters)
       * `thinking` — the agent reasoning; `detail` is the text
       * `text`     — the agent said something; `detail` is the text
+      * `note`     — Agency itself, not the runner: a loop, a flood of
+                     refusals, a budget overrun. The only kind not translated
+                     out of a runner's stream, which is exactly why it needs
+                     to be in the same vocabulary — a phone watching a run
+                     should see the warning in the feed it is already reading
       * `done`     — the end; `turns`, `usd`, `denials`, `detail` = last message
     """
     kind: str
