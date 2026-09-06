@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 
-from agency import cli
+from agency import cli, packs, runs
 
 
 def _validate(project, run, capsys) -> tuple[int, dict]:
@@ -96,6 +96,56 @@ def test_the_agent_does_not_get_to_invent_cost_fields(project, make_run, monkeyp
     cost = run.record()["cost"]
     assert "note" not in cost, "a key run.v1 refuses must not survive the merge"
     assert cost["dimensions"] == 6, "a key it allows still comes through"
+
+    code, report = _validate(project, run, capsys)
+    assert code == 0, report
+
+
+# ------------------------------------------------------------------- context
+
+def _prepare(project, run, prompt=None):
+    """The preparation a real run does, minus launching anything."""
+    pack = packs.load("review-graph", project)
+    runs.write_context(run, pack, {"kind": "workspace"}, project.root, [], 0,
+                       prompt=prompt)
+    return run.record()["context"]
+
+
+def test_the_record_says_what_the_agent_was_handed(project, make_run, capsys):
+    """Without this block "precision dropped" has no independent variable: the
+    method, the house rules and the memory all change underneath the number."""
+    (project.root / "CLAUDE.md").write_text("# House\n\nBe careful.\n", encoding="utf-8")
+    run = make_run()
+    (run.dir / "evidence").mkdir(parents=True, exist_ok=True)
+    (run.dir / "evidence" / "known-findings.json").write_text("[1, 2, 3]", encoding="utf-8")
+
+    ctx = _prepare(project, run, prompt="look at the login flow")
+
+    assert [i["path"] for i in ctx["instructions"]] == ["CLAUDE.md"]
+    assert len(ctx["instructions"][0]["sha256"]) == 64
+    assert ctx["skill"]["path"].endswith("agency-review-graph/SKILL.md")
+    assert len(ctx["skill"]["sha256"]) == 64
+    assert ctx["promptBytes"] == len("look at the login flow")
+    # The number that means something about memory: three known findings, not
+    # however many bytes their formatting took.
+    assert [(e["name"], e["items"]) for e in ctx["evidence"]] == \
+           [("known-findings.json", 3)]
+
+    code, report = _validate(project, run, capsys)
+    assert code == 0, report
+
+
+def test_a_run_with_no_house_rules_and_no_prompt_still_records_the_block(
+        project, make_run, capsys):
+    """Absence has to be written down too. A block that only appears when
+    something interesting happened cannot be counted across runs."""
+    run = make_run()
+
+    ctx = _prepare(project, run)
+
+    assert ctx["instructions"] == []
+    assert ctx["promptBytes"] is None
+    assert ctx["conflicts"] == 0
 
     code, report = _validate(project, run, capsys)
     assert code == 0, report

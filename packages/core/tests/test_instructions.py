@@ -147,3 +147,20 @@ def test_a_project_without_instructions_gets_no_row_about_them(repo: Path, capsy
     checks = json.loads(capsys.readouterr().out)["checks"]
 
     assert not [c for c in checks if c["name"].startswith(("house rules", "rules vs"))]
+
+
+def test_a_run_under_a_conflicting_rule_records_that_it_happened(project, make_run):
+    """`doctor` reports a collision BEFORE a run; nothing recorded that the run
+    then went ahead under one anyway — and that is the run whose findings look
+    inexplicably thin six weeks later."""
+    from agency import packs, runs
+
+    install_pack(project, "graphy", GRAPH_PACK)
+    rules(project.root, "# Project\n\nDo not query `code-review-graph`.\n")
+    run = make_run()
+
+    runs.write_context(run, packs.load("graphy", project), {"kind": "workspace"},
+                       project.root, [], 0)
+
+    # A number, not the quoted sentence: the record counts, `doctor` explains.
+    assert run.record()["context"]["conflicts"] == 1

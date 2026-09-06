@@ -1425,6 +1425,10 @@ def cmd_metrics(args) -> int:
         table("by severity", r["bySeverity"])
         table("by specialist", r["byHire"])
         table("by model", r["byModel"])
+        # Only worth printing once a pack's method has more than one version
+        # in the data — one row here says nothing a pack row does not.
+        if len(r.get("bySkill") or {}) > 1:
+            table("by method version", r["bySkill"])
         ag = r.get("agreement") or {}
         if ag.get("hires", 0) > 1 and (ag["crossHire"] or ag["sameHire"]):
             print(f"  {out.dim('agreement')}")

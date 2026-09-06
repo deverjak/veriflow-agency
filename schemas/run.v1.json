@@ -484,6 +484,67 @@
         }
       }
     },
+    "context": {
+      "type": "object",
+      "description": "What the agent actually had. Without it, 'why did this pack get worse' has no independent variable.",
+      "additionalProperties": false,
+      "properties": {
+        "instructions": {
+          "type": "array",
+          "description": "CLAUDE.md / AGENTS.md as they were in the run's cwd. Loaded by the runner itself, never by Agency — recorded so a rewrite of the house rules is visible next to the precision it changed.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "sha256", "bytes"],
+            "properties": {
+              "path": { "type": "string" },
+              "sha256": { "type": "string" },
+              "bytes": { "type": "integer" }
+            }
+          }
+        },
+        "skill": {
+          "type": ["object", "null"],
+          "description": "The pack's method as it stood for this run. Its sha256 is the version of the method, so precision before and after a SKILL.md rewrite can be compared without anyone having tagged the rewrite.",
+          "additionalProperties": false,
+          "required": ["path", "sha256"],
+          "properties": {
+            "path": { "type": "string" },
+            "sha256": { "type": "string" },
+            "references": {
+              "type": "integer",
+              "description": "Files in the skill directory besides SKILL.md and pack.json — the method's supporting material, which a rewrite may add or drop without touching SKILL.md itself."
+            }
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "description": "The files handed over in RUN_DIR/evidence/ and how big each was. A run that got an empty memory and one that got forty findings are different runs, and today they look identical.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "bytes"],
+            "properties": {
+              "name": { "type": "string" },
+              "bytes": { "type": "integer" },
+              "items": { "type": ["integer", "null"] }
+            }
+          }
+        },
+        "promptBytes": {
+          "type": ["integer", "null"],
+          "description": "Size of the run's own prompt, when it had one. null = the pack takes no prompt or none was given."
+        },
+        "conflicts": {
+          "type": ["integer", "null"],
+          "description": "CLAUDE.md x pack needs collisions at the moment of the run. `doctor` reports these before a run; nothing recorded that the run then happened under one."
+        },
+        "toolCalls": {
+          "type": "boolean",
+          "description": "Whether the PostToolUse hook was active. A gate stage that depends on it must not silently treat these runs and hook-less runs as one population."
+        }
+      }
+    },
     "evidence": {
       "type": "object",
       "description": "Deterministic signal gathered before the run, for a pack that does not run over the graph — how many files changed, how many commits landed, how many findings the project already knows.",

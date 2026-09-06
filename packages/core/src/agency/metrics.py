@@ -79,6 +79,20 @@ class Tally:
         }
 
 
+def _method(rec: dict) -> str | None:
+    """Which version of the pack's method ran — `context.skill.sha256`, short.
+
+    An A/B test of a pack built out of one hash: rewrite `SKILL.md`, keep
+    running, and the two versions separate themselves in the numbers without
+    anyone having tagged the rewrite. `None` for a run recorded before
+    context fingerprints existed, so those stay out rather than pooling into
+    a bucket that pretends to be one method.
+    """
+    skill = ((rec.get("context") or {}).get("skill") or {})
+    digest = skill.get("sha256")
+    return f"{rec.get('pack') or '?'} {digest[:8]}" if digest else None
+
+
 def _who(rec: dict) -> tuple[str, str, str]:
     """Model, provider and worker of a run — the three ways to slice by who did it.
 
@@ -105,6 +119,7 @@ def collect(project: Project, runs: list[Run] | None = None) -> dict:
     by_provider: dict[str, Tally] = defaultdict(Tally)
     by_hire: dict[str, Tally] = defaultdict(Tally)
     by_pack: dict[str, Tally] = defaultdict(Tally)
+    by_skill: dict[str, Tally] = defaultdict(Tally)
     reasons: dict[str, int] = defaultdict(int)
     gated_by: dict[str, int] = defaultdict(int)
 
@@ -179,6 +194,7 @@ def collect(project: Project, runs: list[Run] | None = None) -> dict:
         wall += ((rec.get("cost") or {}).get("wallClockSeconds") or 0)
 
         model, provider, hire = _who(rec)
+        method = _method(rec)
         started = _parse(rec.get("startedAt"))
         run_undecided = 0
 
@@ -206,6 +222,8 @@ def collect(project: Project, runs: list[Run] | None = None) -> dict:
             by_provider[provider].add(state, by)
             by_hire[hire].add(state, by)
             by_pack[(rec.get("pack") or "—")].add(state, by)
+            if method:
+                by_skill[method].add(state, by)
             if state == "rejected" and d.get("reason"):
                 reasons[d["reason"]] += 1
             if state is None:
@@ -245,6 +263,10 @@ def collect(project: Project, runs: list[Run] | None = None) -> dict:
         "byProvider": {k: v.as_dict() for k, v in sorted(by_provider.items())},
         "byHire": {k: v.as_dict() for k, v in sorted(by_hire.items())},
         "byPack": {k: v.as_dict() for k, v in sorted(by_pack.items())},
+        # Precision per version of the method. What answers "did rewriting
+        # this SKILL.md help", which nothing could answer before the run
+        # record carried the hash of the method it ran under.
+        "bySkill": {k: v.as_dict() for k, v in sorted(by_skill.items())},
         # How often two workers land on the same thing. High cross-hire
         # agreement means the second provider is paying for confirmation
         # rather than for coverage — which is a reason to run them on

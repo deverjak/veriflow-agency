@@ -20,6 +20,7 @@ Judgement is the pack's job. Mixing the two makes neither verifiable.
 from __future__ import annotations
 
 import fnmatch
+import hashlib
 import json
 import os
 import re
@@ -31,7 +32,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import events, graph, proc, providers
+from . import events, graph, instructions, proc, providers
 from .config import AGENCY_DIR, Project
 from .util import out, posix, read_json, ulid, write_json
 
@@ -865,6 +866,82 @@ def discard(project: Project, run: Run, force: bool = False) -> dict:
     return {"run": run.id, "removed": posix(run.dir), **counts}
 
 
+def _sha256(path: Path) -> str | None:
+    """What is in the file, as one number. `None` when it cannot be read."""
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
+def _evidence_given(ev: Path) -> list[dict]:
+    """Every file handed over in `evidence/`, and how much of it there was.
+
+    `items` is the length of a JSON array rather than its size, because that
+    is the number that means something for memory: a run given forty known
+    findings and one given none are different runs, and `bytes` alone cannot
+    tell that apart from a change in formatting.
+    """
+    rows: list[dict] = []
+    for p in sorted(ev.glob("*")) if ev.is_dir() else []:
+        if not p.is_file():
+            continue
+        data = read_json(p, default=None) if p.suffix == ".json" else None
+        rows.append({"name": p.name, "bytes": p.stat().st_size,
+                     "items": len(data) if isinstance(data, list) else None})
+    return rows
+
+
+def context_block(run: Run, pack, wt: Path, prompt: str | None) -> dict:
+    """Fingerprints of what the agent is about to be handed — run.v1 `context`.
+
+    The independent variable. Precision is measured per pack, and until this
+    existed there was nothing to measure it AGAINST: the method, the house
+    rules and the memory all changed underneath the number without leaving a
+    mark, so "this pack got worse in October" had no answerable form.
+
+    Hashes rather than copies. The files are in git (`CLAUDE.md`, `SKILL.md`)
+    or regenerated per run (`evidence/`), so keeping a second copy in the run
+    record would grow it without adding a fact — whereas a hash is enough to
+    say "the same method as run X" and, when it differs, to go and diff the
+    two commits.
+
+    Read from `wt`, not from the project root: for a worktree run the house
+    rules the agent sees are the ones committed at the pull request's head,
+    which is exactly the version a rewrite in that same PR would change.
+    """
+    ins = []
+    for path in instructions.paths(wt):
+        digest = _sha256(path)
+        if digest:
+            ins.append({"path": posix(path.relative_to(wt)), "sha256": digest,
+                        "bytes": path.stat().st_size})
+
+    skill_md = pack.skill_dir / "SKILL.md"
+    digest = _sha256(skill_md)
+    skill = None
+    if digest:
+        try:
+            rel = posix(skill_md.relative_to(run.project.root))
+        except ValueError:
+            rel = posix(skill_md)
+        others = [p for p in pack.skill_dir.rglob("*")
+                  if p.is_file() and p.name not in ("SKILL.md", "pack.json")]
+        skill = {"path": rel, "sha256": digest, "references": len(others)}
+
+    return {
+        "instructions": ins,
+        "skill": skill,
+        "evidence": _evidence_given(run.dir / "evidence"),
+        "promptBytes": len(prompt.encode("utf-8")) if prompt else None,
+        # Always a number, never omitted when zero. "Checked, none" and "never
+        # checked" are different facts, and a field that only appears when it
+        # is interesting cannot be counted across runs.
+        "conflicts": len(instructions.conflicts(
+            wt, {tool: [pack.name] for tool in pack.requires})),
+    }
+
+
 def write_context(run: Run, pack, target: dict, wt: Path,
                   files: list[str], skipped: int,
                   prompt: str | None = None, worktree_owned: bool = True,
@@ -908,6 +985,14 @@ def write_context(run: Run, pack, target: dict, wt: Path,
                    "minScore": pack.min_score},
         "schemas": {"finding": "finding.v1", "run": "run.v1"},
     })
+
+    # The same preparation, fingerprinted into the record. Here rather than in
+    # its own step because this is the one moment everything the agent gets is
+    # assembled and nothing has run yet — a hash taken later would be of the
+    # files as the run left them, which is a different question.
+    rec = run.record()
+    rec["context"] = context_block(run, pack, wt, prompt)
+    run.save_record(rec)
 
 
 # ---------------------------------------------------------------- trail
