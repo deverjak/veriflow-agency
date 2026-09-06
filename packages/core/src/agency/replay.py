@@ -77,6 +77,7 @@ def pin(project: Project, run, name: str) -> dict:
     already refuses to make.
     """
     rec = run.record()
+    context = read_json(run.dir / "context.json", default={})
     decided = _runs.decisions(run)
     gold: list[dict] = []
     for f in run.findings():
@@ -105,7 +106,13 @@ def pin(project: Project, run, name: str) -> dict:
         # of them a result.
         "target": {k: v for k, v in (rec.get("target") or {}).items()
                    if not str(k).startswith("_")},
-        "prompt": read_json(run.dir / "context.json", default={}).get("prompt"),
+        "prompt": context.get("prompt"),
+        # Which files the run was pointed at. Part of the pinned state, not a
+        # detail: a replay that asked `gh` for the file list again would need
+        # the pull request to still exist and to still say the same thing —
+        # and a merged-and-deleted branch is GitHub's default. It would also
+        # quietly change what the eval measures.
+        "files": list(context.get("files") or []),
         "gold": gold,
     }
     path = evals_dir(project) / f"{name}.json"

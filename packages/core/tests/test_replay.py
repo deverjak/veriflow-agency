@@ -31,6 +31,10 @@ def _judged(project, make_run):
                        body="No caller reaches `retryOnce` since the queue rewrite.",
                        anchor={"symbol": {"name": "retryOnce", "range": [1, 4]}})
     run = make_run(findings=[good, bad])
+    # A fixture pins the file list too — a replay that asked `gh` again would
+    # need the pull request to still exist and still say the same thing.
+    from agency.util import write_json as _wj
+    _wj(run.dir / "context.json", {"prompt": None, "files": ["src/auth.ts"]})
     ids = [f["id"] for f in run.findings()]
     runs.append_decision(run, ids[0], "sent", by=BY)
     runs.append_decision(run, ids[1], "rejected", reason="by-design", by=BY)
@@ -136,7 +140,7 @@ def test_the_cli_fails_the_run_when_something_regressed(project, make_run, capsy
     replay.pin(project, run, "pr-479")
 
     code = cli.main(["replay", "--fixture", "pr-479", "--repo", str(project.root),
-                     "--json"])
+                     "--score-only", "--json"])
     data = json.loads(capsys.readouterr().out)
 
     # The pinned run still has both findings on disk, the rejected one included.
@@ -148,3 +152,75 @@ def test_replaying_without_a_fixture_says_how_to_make_one(project):
     import pytest
     with pytest.raises(SystemExit, match="agency replay --pin"):
         cli.main(["replay", "--pack", "review-graph", "--repo", str(project.root)])
+
+
+def test_a_replay_runs_the_pack_again_over_the_pinned_commit(project, make_run,
+                                                             monkeypatch, capsys):
+    """The commit is the whole point. Resolving the target again would compare
+    a method change with a code change and call the sum of the two a result."""
+    from agency import proc
+    from agency.util import write_json
+
+    run, good, bad = _judged(project, make_run)
+    fixture = replay.pin(project, run, "pr-479")
+    seen = {}
+
+    def agent(argv, cwd=None, env=None, on_line=None, timeout=None):
+        fresh = next(r for r in runs.load_runs(project)
+                     if r.record().get("status") == "running")
+        seen["target"] = fresh.record()["target"]
+        seen["chain"] = fresh.record().get("chain")
+        # Today's method finds the true one again and not the rejected one.
+        write_json(fresh.findings_path, [{**good, "runId": fresh.id}])
+        on_line('{"type":"result","subtype":"success","is_error":false,'
+                '"num_turns":4,"session_id":"s","result":"ok",'
+                '"permission_denials":[]}')
+        return 0
+
+    monkeypatch.setattr(proc, "stream", agent)
+
+    code = cli.main(["replay", "--fixture", "pr-479", "--repo", str(project.root)])
+    capsys.readouterr()
+
+    assert seen["target"]["headRefOid"] == fixture["target"]["headRefOid"]
+    assert seen["chain"] is None, "a replay is not a chain member"
+    assert code == 0, "nothing rejected came back"
+
+
+def test_a_replay_that_brings_back_a_rejected_finding_fails(project, make_run,
+                                                            monkeypatch, capsys):
+    """The rule with one reading, now over a real run rather than a comparison."""
+    from agency import proc
+    from agency.util import write_json
+
+    run, good, bad = _judged(project, make_run)
+    replay.pin(project, run, "pr-479")
+
+    def agent(argv, cwd=None, env=None, on_line=None, timeout=None):
+        fresh = next(r for r in runs.load_runs(project)
+                     if r.record().get("status") == "running")
+        write_json(fresh.findings_path, [{**good, "runId": fresh.id},
+                                         {**bad, "runId": fresh.id}])
+        on_line('{"type":"result","subtype":"success","is_error":false,'
+                '"num_turns":4,"session_id":"s","result":"ok",'
+                '"permission_denials":[]}')
+        return 0
+
+    monkeypatch.setattr(proc, "stream", agent)
+
+    code = cli.main(["replay", "--fixture", "pr-479", "--repo", str(project.root)])
+    printed = capsys.readouterr().out
+
+    assert code == 1
+    assert "already rejected" in printed
+
+
+def test_a_fixture_pins_the_files_too(project, make_run):
+    """Otherwise a replay would have to ask `gh` for the file list again — and
+    a merged branch that has been deleted is GitHub's default, so the eval
+    would stop working exactly when the history got long enough to be useful."""
+    run, _, _ = _judged(project, make_run)
+
+    fixture = replay.pin(project, run, "pr-479")
+
+    assert fixture["files"] == ["src/auth.ts"]

@@ -321,7 +321,15 @@ def _one_line(text: str, limit: int = 400) -> str:
     return flat if len(flat) <= limit else flat[:limit].rstrip() + "…"
 
 
-def cmd_run(args, chain: dict | None = None) -> int:
+def cmd_run(args, chain: dict | None = None, pinned: dict | None = None) -> int:
+    """Prepare and start one run.
+
+    `pinned` is a target somebody else already resolved — a replay over the
+    commit a fixture was recorded on. It is a separate argument from `chain`
+    on purpose: a replay is not a chain member, and reusing the chain block to
+    pin a target would put a `chain` block into the record of a run that has
+    no team.
+    """
     if getattr(args, "wait", False) and getattr(args, "json", False):
         raise SystemExit(
             "--wait and --json do not go together: the agent writes to this same "
@@ -409,7 +417,13 @@ def cmd_run(args, chain: dict | None = None) -> int:
             "no-prompt")
 
     shared_target = (chain or {}).get("target")
-    if shared_target is not None:
+    if pinned is not None:
+        # An eval: the same commit as last time, today's method. Resolving it
+        # again would compare a method change with a code change and call the
+        # sum of the two a result.
+        target = dict(pinned)
+        out.done(f"{(target.get('headRefOid') or '')[:8]}  {out.dim('pinned by a fixture')}")
+    elif shared_target is not None:
         # The chain resolved the target once, before its first step, and every
         # member gets that same one — otherwise a workspace pack in the same
         # chain quietly resolves its own target from whatever branch happens
@@ -1769,13 +1783,33 @@ def cmd_replay(args) -> int:
 
     results = []
     for fixture in chosen:
-        run = runs.find_run(project, fixture.get("fromRun"))
-        # Scoring only, for now: replaying means launching the pack again over
-        # the pinned commit, and the launch belongs to `cmd_run`. Until that is
-        # wired, this compares what the pinned run has on disk — which is what
-        # makes the numbers themselves testable.
-        findings = run.findings() if run else []
-        results.append(replay.compare(fixture, findings))
+        if getattr(args, "score_only", False):
+            # No agent: score whatever the pinned run already has on disk. What
+            # this checks is the fixture itself — a fixture that fails against
+            # its own run is a fixture with a broken answer key.
+            run = runs.find_run(project, fixture.get("fromRun"))
+            results.append(replay.compare(fixture, run.findings() if run else []))
+            continue
+
+        out.say(f"\n  {out.bold('replay')}  {fixture['name']}  "
+                f"{out.dim(fixture['pack'] + ' @ ' + (fixture['target'].get('headRefOid') or '')[:8])}")
+        step = argparse.Namespace(
+            **{**vars(args), "pack": fixture["pack"], "prompt": fixture.get("prompt"),
+               # Always streamed, even when the original was attended: without
+               # turns and a price there is nothing to compare the new run's
+               # cost against, and "better" that costs three times as much is
+               # not better.
+               "unattended": True, "wait": True, "launch": False, "json": False,
+               "revise": None, "remote_control": None, "force": True,
+               "pr": None, "latest_merged": False, "since": None})
+        before = {r.id for r in runs.load_runs(project)}
+        # `_files` is the same private key the ordinary path uses to carry the
+        # file list into preparation, so nothing downstream has to know a
+        # replay is happening.
+        cmd_run(step, pinned={**fixture["target"],
+                              "_files": list(fixture.get("files") or [])})
+        fresh = [r for r in runs.load_runs(project) if r.id not in before]
+        results.append(replay.compare(fixture, fresh[0].findings() if fresh else []))
 
     def human():
         print()
@@ -2202,6 +2236,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--pin", metavar="RUN",
                    help="turn a finished run's decided findings into a fixture")
     s.add_argument("--name", help="what to call the fixture being pinned")
+    s.add_argument("--score-only", action="store_true",
+                   help="do not run anything — score the pinned run's own findings, "
+                        "which checks the fixture rather than the method")
     s.set_defaults(fn=cmd_replay)
 
     s = sub.add_parser("cleanup", parents=[common],
