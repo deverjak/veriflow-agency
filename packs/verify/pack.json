@@ -1,0 +1,20 @@
+{
+  "name": "verify",
+  "title": "Second pair of eyes",
+  "description": "Judges what another specialist found. Opens each finding's anchor at the reviewed commit, derives the claim again from the code rather than from the finding's own words, and accepts or rejects it with a reason. Writes no findings of its own: whoever verifies does not get to discover, or they end up verifying themselves.",
+  "requires": ["git"],
+  "target": "pull-request",
+  "worktree": true,
+  "graph": true,
+  "prompt": "none",
+  "needs": [
+    "agency triage", "agency note", "agency findings", "agency graph",
+    "git"
+  ],
+  "dimensions": [
+    { "id": "anchor", "title": "Is the code where the finding says it is" },
+    { "id": "claim", "title": "Does the claim hold when derived again from the code" },
+    { "id": "consequence", "title": "Does the harm follow, or is it theoretical" },
+    { "id": "evidence", "title": "Does the cited evidence exist and say what it is said to say" }
+  ]
+}

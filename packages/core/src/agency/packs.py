@@ -23,11 +23,16 @@ from .util import bundled, posix, read_json
 
 PROMPT_MODES = ("required", "optional", "none")
 
-# The one pack that ships with the tool. Its subject is this system rather
-# than any project, which is what makes it copyable unchanged — and it is
-# the pack that writes the project-specific ones, so without it a fresh
-# repository has no way to get its first specialist. See `seed` below.
+# The packs that ship with the tool. Their subject is this system rather than
+# any project, which is what makes them copyable unchanged.
+#
+# `author` writes the project-specific ones, so without it a fresh repository
+# has no way to get its first specialist. `verify` judges what another pack
+# found — it needs to know nothing about the project either, because it works
+# from the finding's anchor and the code under it. See `seed` below.
 AUTHOR = "author"
+VERIFY = "verify"
+GENERIC = (AUTHOR, VERIFY)
 
 
 def graph_policy(value) -> dict | None:
@@ -126,8 +131,8 @@ def load(name: str, project: Project) -> Pack:
     known = ", ".join(p.name for p in available(project)) or "(none)"
     # The bootstrap is the one missing pack this tool can do something about,
     # so it is the one that gets a command instead of a path to copy by hand.
-    hint = (f"\n“{AUTHOR}” is the generic one — `agency init` puts it here."
-            if name == AUTHOR else "")
+    hint = (f"\n“{name}” is one of the generic ones — `agency init` puts it here."
+            if name in GENERIC else "")
     raise SystemExit(
         f"Unknown pack “{name}” in {project.name}. Available: {known}\n"
         f"A pack is a skill: {project.skills_dir}/agency-{name}/pack.json{hint}")

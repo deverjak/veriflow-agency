@@ -42,27 +42,35 @@ def cmd_init(args) -> int:
     records out of git. Everything else about this project is written BY that
     pack, in this repository, against this repository.
 
-    Safe to run twice: an `agency-author` already there is left alone.
+    Safe to run twice: a pack already there is left alone.
     """
     project = _project(args)
-    seeded = packs.seed(project, packs.AUTHOR, force=args.force)
+    # Both generic packs, because both are about this system rather than about
+    # any project: `author` writes the specialists, `verify` judges what they
+    # find. Everything else a project runs is written for it, by `author`.
+    seeded_all = [packs.seed(project, name, force=args.force)
+                  for name in packs.GENERIC]
+    seeded = seeded_all[0]
     ignored = packs.ignore_run_records(project)
     nxt = f'agency run {packs.AUTHOR} --prompt "what the new specialist should do"'
-    data = {"project": project.name, "pack": seeded,
+    data = {"project": project.name, "pack": seeded, "packs": seeded_all,
             "gitignore": ignored, "next": nxt}
 
     def line(icon: str, path: str, note: str) -> None:
         print(f"  {icon} {path}")
         print(f"      {out.dim(note)}")
 
+    note = {packs.AUTHOR: "it writes this project’s own specialists",
+            packs.VERIFY: "a second pair of eyes over what they find"}
+
     def human():
         print(f"\n  {out.bold(project.name)}\n")
-        if seeded["created"]:
-            line(out.ok("✓"), seeded["path"],
-                 "the one generic pack — it writes this project’s own specialists")
-        else:
-            line(out.warn("!"), seeded["path"],
-                 "already here, left as it is — `--force` copies over it")
+        for row in seeded_all:
+            if row["created"]:
+                line(out.ok("✓"), row["path"], note.get(row["pack"], "a generic pack"))
+            else:
+                line(out.warn("!"), row["path"],
+                     "already here, left as it is — `--force` copies over it")
         if ignored:
             line(out.ok("✓"), ".agency/.gitignore",
                  "run records stay out of git; knowledge/ is committed on purpose")
@@ -709,9 +717,19 @@ def cmd_chain(args) -> int:
     for position, member in enumerate(members, start=1):
         carried = {k: v for k, v in vars(args).items()
                    if k not in ("members", "fn", "focus")}
+        # A shared prompt is addressed to the chain, not to each member — so a
+        # member whose pack takes none simply does not get it. Passing it would
+        # abort the whole chain at that step, and that is exactly how `verify`
+        # (prompt: "none", deliberately: a verifier must not be handed an
+        # assignment that could steer its verdict) would take the chain down
+        # with it. A `--focus` aimed at such a member is still refused — that
+        # one was addressed to it on purpose, and dropping it silently would be
+        # worse than the error.
+        takes_prompt = packs.load(member.pack, project).run_policy["prompt"] != "none"
         step = argparse.Namespace(**{**carried, "pack": member.pack,
                                      "wait": True, "launch": False, "json": False,
-                                     "prompt": focus.get(member.label) or carried.get("prompt")})
+                                     "prompt": focus.get(member.label)
+                                     or (carried.get("prompt") if takes_prompt else None)})
         own = member.label in focus
         block = chains.block(chain_id, position, len(members), list(done))
         block["ownPrompt"] = own

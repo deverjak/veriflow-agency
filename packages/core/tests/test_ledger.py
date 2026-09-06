@@ -283,3 +283,31 @@ def test_only_what_passed_the_gate_reaches_memory(project, make_run):
     ids = [c["id"] for c in knowledge.ledger(project)]
     assert ids == [good["id"]]
     assert result["bundle"]["changed"], "ingest refreshes the ledger itself"
+
+
+def test_a_verifier_accepting_produces_a_confirmed_finding(project, make_run):
+    """Until now `machine-confirmed` only happened by accident — when two
+    workers happened to land on the same thing. This is the tier arising on
+    purpose, which is the whole reason the `verify` pack exists.
+
+    Note what it takes: the finding's own pack must have a sink. `accept` IS
+    dispatch, so in a project with no board a verifier's agreement is not
+    recorded at all and only its rejections leave a trace.
+    """
+    (project.root / "sink.py").write_text(
+        "import json; print(json.dumps({'item': 'PVTI_1'}))", encoding="utf-8")
+    from conftest import install_pack
+    install_pack(project, "review-graph",
+                 {"minScore": 80, "sink": "python sink.py --finding {id}"})
+
+    run = make_run(run_id=RUN_A, agent=CODEX)
+    ingest.ingest(project, run)
+    fid = run.findings()[0]["id"]
+
+    runs.dispatch(project, run, run.findings()[0], "hire:verify@claude")
+
+    c = knowledge.ledger(project)[0]
+    assert c["id"] == fid
+    assert c["trust"] == "machine-confirmed", (
+        "a second specialist agreed — that is exactly what this tier means")
+    assert [v["by"] for v in c["verified"]] == ["hire:verify@claude"]

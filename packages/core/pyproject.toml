@@ -30,6 +30,10 @@ packages = ["src/agency"]
 [tool.hatch.build.targets.wheel.force-include]
 "../../schemas" = "agency/_bundled/schemas"
 "../../packs/author" = "agency/_bundled/packs/author"
+# The two packs whose subject is this system rather than any one project, so
+# they are the only two that can ship unchanged. Every other pack in `packs/`
+# is an example carrying one project's facts.
+"../../packs/verify" = "agency/_bundled/packs/verify"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]

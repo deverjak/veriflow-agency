@@ -524,3 +524,95 @@ def test_ingest_records_that_a_handoff_exists(project, make_run):
     ingest.ingest(project, run)
     assert run.record()["outputs"]["handoff"] is True
     assert run.record()["outputs"]["summary"] is False
+
+
+# ------------------------------------------------------ the second pair of eyes
+
+def test_verify_ships_with_the_core_and_init_puts_it_there(project):
+    """It knows nothing about any project — it works from a finding's anchor
+    and the code under it — which is exactly what makes it copyable unchanged,
+    the same argument as for `author`."""
+    from agency import packs
+
+    cli.cmd_init(SimpleNamespace(repo=str(project.root), json=True, force=False))
+
+    names = {p.name for p in packs.available(project)}
+    assert {"author", "verify"} <= names
+    pack = packs.load("verify", project)
+    # It decides; it does not report. No sink, and nothing to send.
+    assert pack.sink is None
+    assert pack.run_policy["prompt"] == "none"
+
+
+def test_verify_judges_what_the_first_member_found(team, monkeypatch, capsys):
+    """The tier `machine-confirmed` was computable and described, and arose
+    only by accident when two workers happened to find the same thing. This is
+    the member that produces it on purpose.
+
+    The shipped `verify` is a pull-request pack (its own manifest is checked
+    above); what is exercised here is the chain mechanics it relies on — the
+    brief arrives, the verdict is signed as a specialist — over a workspace
+    chain, which is what these tests can run without a real PR and a graph.
+    """
+    install_pack(team, "verify", {"target": "workspace", "worktree": False,
+                                  "prompt": "none"})
+    # The upstream pack needs a sink, because `accept` IS dispatch: without a
+    # board there is nothing to send and the acceptance is deliberately not
+    # recorded (`test_bez_sinku_zustane_nalez_candidate`). So in a project with
+    # no board, a verifier's agreement leaves no trace — only its rejections do.
+    (team.root / "sink.py").write_text(
+        "import json, sys; print(json.dumps({'item': 'PVTI_1'}))", encoding="utf-8")
+    install_pack(team, "legal", {"target": "workspace", "worktree": False,
+                                 "prompt": "optional",
+                                 "sink": "python sink.py --finding {id}"})
+    verdicts = {"steps": 0}
+
+    def work(argv, cwd=None, env=None, on_line=None, timeout=None):
+        verdicts["steps"] += 1
+        run = next(r for r in runs.load_runs(team)
+                   if r.record().get("status") == "running")
+        rec = run.record()
+        if rec.get("pack") == "verify":
+            # What the real pack does: read upstream, decide, write no findings.
+            upstream = json.loads(
+                (run.dir / "evidence" / "upstream.json").read_text(encoding="utf-8"))
+            assert upstream["counts"]["findings"] == 1, "it must get the brief"
+            ctx = json.loads((run.dir / "context.json").read_text(encoding="utf-8"))
+            cli.main(["triage", "accept", upstream["findings"][0]["id"],
+                      "--repo", str(team.root), "--by", ctx["by"], "--json"])
+            write_json(run.findings_path, [])
+        else:
+            write_json(run.findings_path,
+                       [make_finding(team, run.id, title="Something to check")])
+            (run.dir / "summary.md").write_text("Found one.", encoding="utf-8")
+        if on_line:
+            on_line('{"type":"result","subtype":"success","is_error":false,'
+                    '"num_turns":2,"session_id":"s","result":"ok",'
+                    '"permission_denials":[]}')
+        return 0
+
+    monkeypatch.setattr(proc, "stream", work)
+
+    code = cli.cmd_chain(args(team, "legal", "verify"))
+    capsys.readouterr()
+
+    assert code == 0
+    first = next(r for r in runs.load_runs(team) if r.record()["pack"] == "legal")
+    decided = runs.decisions(first)
+    assert len(decided) == 1
+    # Signed as the verifier, not as a person and not as the chain: precision
+    # counts only `hire:` decisions, so this is what makes the number mean
+    # "a second specialist agreed".
+    assert list(decided.values())[0]["by"] == "hire:verify@claude"
+
+
+def test_verify_writes_no_findings_of_its_own(project):
+    """Whoever verifies does not get to discover — a pack that both finds and
+    confirms confirms itself, and `machine-confirmed` would mean nothing."""
+    from agency import packs
+
+    packs.seed(project, "verify")
+    text = (project.skills_dir / "agency-verify" / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "You write no findings" in text
+    assert "do not read the other run's transcript" in text.lower()
