@@ -18,6 +18,7 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import datetime, timezone
 
+from . import outputs, packs
 from .config import Project
 from .runs import Run, decisions, load_runs, normalize_by
 
@@ -97,6 +98,52 @@ class Tally:
             "scoreAccepted": mean(self.scores["accepted"]),
             "scoreRejected": mean(self.scores["rejected"]),
         }
+
+
+class Cycle:
+    """One lifecycle of one output type, counted by POLARITY.
+
+    `Tally` above knows the words `accepted`, `sent` and `rejected`, which is
+    exactly the assumption this whole change exists to remove: a bet is
+    `selected`, a decision is `upheld`, a bug is `confirmed`. Here the core
+    counts what the pack said the answer means and nothing else, and the pack
+    also supplies the name of the resulting ratio — `selection_rate`,
+    `success_rate`, `confirmation_rate`.
+
+    **One ratio per lifecycle, never per type.** A bet is asked two
+    questions — was it chosen, and did it work — and
+    `(selected + successful) / everything` is neither. `requires` is what
+    keeps an unchosen bet out of the second denominator, the same rule
+    `Tally` applies to findings nobody decided on.
+
+    The population differs from `precision` on purpose. Precision counts only
+    a chain member's verdict, because a person deciding a finding does it on
+    the board and nothing local sees it. A bet has no board: the founder
+    chooses it here, so `human` is the signal rather than pre-trail noise.
+    """
+
+    def __init__(self, metric: str | None = None) -> None:
+        self.metric = metric
+        self.positive = self.negative = self.neutral = self.undecided = 0
+
+    def add(self, polarity: str | None) -> None:
+        if polarity == "positive":
+            self.positive += 1
+        elif polarity == "negative":
+            self.negative += 1
+        elif polarity == "neutral":
+            self.neutral += 1
+        else:
+            self.undecided += 1
+
+    @property
+    def decided(self) -> int:
+        return self.positive + self.negative
+
+    def as_dict(self) -> dict:
+        return {"metric": self.metric, "value": _ratio(self.positive, self.decided),
+                "positive": self.positive, "negative": self.negative,
+                "neutral": self.neutral, "undecided": self.undecided}
 
 
 def _method(rec: dict) -> str | None:
@@ -370,6 +417,53 @@ def collect(project: Project, runs: list[Run] | None = None) -> dict:
     by_skill: dict[str, Tally] = defaultdict(Tally)
     reasons: dict[str, int] = defaultdict(int)
     gated_by: dict[str, int] = defaultdict(int)
+    # Only for types a pack wrote down (`outputs.own_types`). `finding` is
+    # everybody's whether they asked or not and its number already has a name.
+    by_cycle: dict[tuple[str, str, str], Cycle] = {}
+    packs_seen: dict[str, object] = {}
+
+    def pack_of(name: str):
+        if name not in packs_seen:
+            try:
+                packs_seen[name] = packs.load(name, project)
+            except SystemExit:
+                packs_seen[name] = None
+        return packs_seen[name]
+
+    def count_cycle(pack_name: str, finding: dict, decision: dict | None) -> None:
+        """One output's answer, filed under the question it answered.
+
+        One answer per output, because that is all `decisions()` can hand over
+        today — it folds the event log to the last write per id. A bet marked
+        `selected` and later `successful` therefore shows up under `outcome`
+        alone, and its earlier selection is not double-counted anywhere. The
+        per-lifecycle fold that would keep both is the feedback step, and
+        until it lands this number is honest rather than complete.
+        """
+        pack = pack_of(pack_name)
+        kind = str(finding.get("type") or outputs.DEFAULT_TYPE)
+        if not pack or kind not in outputs.own_types(pack):
+            return
+        policy = outputs.policy_for(pack, kind)
+        state = (decision or {}).get("state")
+
+        def cell(cycle) -> Cycle:
+            key = (pack_name, kind, cycle.name)
+            if key not in by_cycle:
+                by_cycle[key] = Cycle(cycle.metric)
+            return by_cycle[key]
+
+        # `lifecycle`/`polarity` are on events written since types existed;
+        # older ones are read through the policy, which is where the words
+        # were always going to be defined anyway.
+        answered = policy.lifecycle_of(state) if state else None
+        if answered is not None:
+            cell(answered).add(answered.polarity(state))
+        elif policy.lifecycles:
+            # Nobody answered. It counts once, against the first question that
+            # could have been asked — never against every lifecycle, or one
+            # unanswered bet would read as two.
+            cell(policy.lifecycles[0]).add(None)
 
     raw = kept = duplicates = sent = 0
     ages: list[float] = []
@@ -514,6 +608,7 @@ def collect(project: Project, runs: list[Run] | None = None) -> dict:
             by_provider[provider].add(state, by)
             by_hire[hire].add(state, by)
             by_pack[(rec.get("pack") or "—")].add(state, by)
+            count_cycle(rec.get("pack") or "—", f, d)
             if method:
                 by_skill[method].add(state, by)
             if state == "rejected" and d.get("reason"):
@@ -555,6 +650,13 @@ def collect(project: Project, runs: list[Run] | None = None) -> dict:
         "byProvider": {k: v.as_dict() for k, v in sorted(by_provider.items())},
         "byHire": {k: v.as_dict() for k, v in sorted(by_hire.items())},
         "byPack": {k: v.as_dict() for k, v in sorted(by_pack.items())},
+        # One ratio per LIFECYCLE of each type a pack declared for itself, and
+        # the pack names it. `finding` is absent unless a pack wrote it down:
+        # its number is `triage.precision` above, and a second ratio over the
+        # same decisions under a second name is not a measurement, it is an
+        # argument about which one is right.
+        "byLifecycle": {f"{p}/{t}/{c}": cell.as_dict()
+                        for (p, t, c), cell in sorted(by_cycle.items())} or None,
         # Precision per version of the method. What answers "did rewriting
         # this SKILL.md help", which nothing could answer before the run
         # record carried the hash of the method it ran under.

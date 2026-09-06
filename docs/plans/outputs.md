@@ -3,7 +3,7 @@
 **Datum:** 2026-09-06
 **Navazuje na:** [`agency-v1.md`](agency-v1.md) (pack je skill v projektu, žádná konfigurace), [`harness.md`](harness.md) (provenience tool callů, brána, metriky, revize packu), [`findings-ownership.md`](findings-ownership.md) (board je stav, lokál je brána a stopa), [`teams.md`](teams.md) (řetěz), [`shared-memory.md`](shared-memory.md) (paměť patří projektu)
 **Řeší:** jádro dnes umí evidovat jediný druh výstupu — nález s kotvou na soubor a řádek. PO a CEO produkují rozhodnutí, odpovědi, sázky a drafty, a **oba už jádro kvůli tomu obcházejí**. Plán zobecňuje mechanismy, které v jádru fungují (brána, dedup, sinky, paměť, metriky), tak aby přestaly předpokládat code-review nález — a nedělá z Agency univerzální platformu.
-**Stav k 6. 9. 2026:** Kroky 1 a 2 hotové a commitnuté (testy 412 zelených). Další na řadě: Krok 3.
+**Stav k 6. 9. 2026:** Kroky 1–3 hotové a commitnuté (testy 436 zelených). Další na řadě: Krok 4 — svislý řez `bet`, který ověří, jestli Kroky 1–3 sedí.
 
 **Nedělá:** nový generický agent framework. Žádný plugin systém metrik, žádný registr typů, žádná doménová znalost v jádru. Přibývají přesně dvě abstrakce — `TypePolicy` a `Run.scope`.
 
@@ -276,24 +276,35 @@ Nový důvod v `GATE_REASONS`: `unverified-evidence`. Citovaný příkaz zůstá
 
 ---
 
-### Krok 3 — `TypePolicy` (~1 den)
+### Krok 3 — `TypePolicy` (~1 den) — **hotovo**
 
 **Proč:** aby mohly vzniknout jiné typy než nález, aniž by jádro znalo jejich význam.
 
-**Co se mění:** `pack.json` dostane blok `outputs` (§1.3). Jádro z něj čte:
+**Co se změnilo:** nový modul `outputs.py`, `pack.json` dostal blok `outputs` (§1.3) a nález dostal nepovinné pole `type` (`finding`, když chybí — což je každý committed nález). Jádro z politiky čte:
 
 * `dedup` → jestli output vůbec vstupuje do [`mark_duplicates`](../../packages/core/src/agency/dedup.py)
-* `evidence.required` / `min` → nahrazuje `weak-evidence` navázaný na dimenzi ([`required_evidence`](../../packages/core/src/agency/ingest.py), 185, je předloha — jen se klíč přesune z dimenze na typ)
-* `feedback` → slovník, polarita, lifecycly a jejich jména metrik
-* `actions`, `memory`, `cardinality`
+* `evidence.required` / `min` → přebíjí `weak-evidence` navázaný na dimenzi ([`required_evidence`](../../packages/core/src/agency/ingest.py) je předloha; dimenze zůstává, když typ mlčí)
+* `feedback` → slovník, polarita, lifecycly, jejich jména metrik a nepovinné `reasons`
+* `actions`, `memory`, `cardinality` / `limit`
 
-Metriky přestanou počítat jeden globální `precision` a začnou počítat **jeden poměr na lifecycle**, pojmenovaný packem: review `precision`, CEO `selection_rate` a `success_rate`, QA `confirmation_rate`. Vzorec zůstává týž.
+Dva nové důvody v bráně: `unknown-type` (pack píše typ, který nemá v manifestu — mlčky zdefaultovat by schovalo přesně ten rozpor) a `over-cardinality`. **Strop se kontroluje jako poslední**, po všem, co soudí výstup samotný: nepoctivý jedenáctý výstup se má zahodit jako nepoctivý, ne jako jedenáctý, jinak se rozbitý pack schová za plnou kvótu.
 
-**Nedělá se plugin systém.** Šest packů, ne stovky. Politika je data, ne kód.
+Metriky počítají **jeden poměr na lifecycle**, pojmenovaný packem — `byLifecycle` v `agency metrics --json`, řádek na lifecycle v lidském výpisu. Nová třída `Cycle` počítá podle **polarity**, ne podle slov: `Tally` zná `accepted`/`sent`/`rejected`, což je přesně ten předpoklad, který se odstraňuje.
 
-**Testy:** `test_gate.py` — typ s `evidence.required: [web_snapshot]` neprojde na `code` evidenci; `test_anchor_metrics.py` — dva lifecycly dají dvě čísla a `requires` drží nevybrané mimo jmenovatel.
+**Dvě rozhodnutí, která stojí za zapsání:**
 
-**Hotovo, když:** `agency metrics` ukáže u packu s dvěma lifecycly dvě pojmenované metriky a ani jedna z nich není součet toho druhého.
+1. **`finding` žádnou druhou metriku nedostane.** `byLifecycle` pokrývá jen typy, které pack skutečně napsal (`outputs.own_types`). Precision už jméno má a druhý poměr nad týmiž rozhodnutími pod druhým jménem není měření, ale spor o to, které z nich platí.
+2. **Populace se u `Cycle` liší od precision záměrně.** Precision počítá jen verdikt člena řetězu, protože člověk rozhoduje nález na boardu a lokálně to nikdo nevidí. Sázka board nemá — zakladatel ji vybírá tady, takže `human` je signál, ne šum z doby před stopou.
+
+**Předsunuto z Kroku 5, protože na tom stojí Krok 4:** `type` je ve fingerprintu a `is_duplicate` odmítne porovnávat různé typy. Sázka a nález o téže stránce sdílejí podstatná jména a similarity vrstva by jedno složila do druhého.
+
+**Nedělá se plugin systém.** Šest packů, ne stovky. Politika je data, ne kód. Chyby v ní hlásí `agency doctor` (`outputs.errors`) — data, na která jádro reaguje, nespadnou, ale tiše se zdefaultují.
+
+**Testy:** nový `test_outputs.py`, 24 testů — výchozí politika beze změny, dva lifecycly, obě chyby v deklaraci, `unknown-type`, evidence per typ, strop a jeho pořadí, opt-out z dedupu, vokabulář feedbacku per typ.
+
+**Hotovo, když:** ~~`agency metrics` ukáže u packu s dvěma lifecycly dvě pojmenované metriky a ani jedna z nich není součet toho druhého.~~ Splněno.
+
+**Co zůstalo vědomě otevřené:** `decisions()` skládá události na **jedno** rozhodnutí na output (poslední zápis vyhrává), takže sázka označená `selected` a později `successful` se v metrikách objeví jen pod `outcome`. Číslo je tím poctivé, ale ne úplné — plný fold po lifecyclech je Krok 7 a teprve po něm dávají obě otázky současně smysl.
 
 ---
 

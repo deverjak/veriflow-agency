@@ -311,3 +311,85 @@ def test_a_finding_still_cannot_be_rejected_without_one(project, make_run):
 
     ev = runs.append_decision(run, fid, "rejected", reason="by-design")
     assert ev["lifecycle"] == "triage" and ev["polarity"] == "negative"
+
+
+# ------------------------------------------------------------ the metric
+
+def _decided(project, make_run, kind: str, state: str, body: str | None = None):
+    """A bet, ingested and then answered.
+
+    `body` is what keeps two of these apart: dedup compares the claim, so two
+    bets worded identically are one bet found twice — correctly — and the
+    second never reaches a decision at all.
+    """
+    _ceo(project)
+    commit = _commit(project)
+    f = make_finding(project, "x", pack="ceo", type=kind, evidence=[
+        {"kind": "document", "detail": "the roadmap names distribution first",
+         "locator": {"file": "src/auth.ts", "commit": commit}}])
+    if body:
+        f["body"] = body
+    run = make_run(findings=[f], pack="ceo")
+    ingest.ingest(project, run)
+    fid = run.findings()[0]["id"]
+    if state:
+        runs.append_decision(run, fid, state, by="human")
+    return run
+
+
+def test_the_pack_names_its_own_ratio(project, make_run):
+    """`precision` is the wrong word for whether a bet was chosen. The core
+    computes the ratio; the word is the pack's."""
+    from agency import metrics
+
+    run = _decided(project, make_run, "bet", "selected")
+    data = metrics.collect(project, [run])
+
+    cell = data["byLifecycle"]["ceo/bet/selection"]
+    assert cell["metric"] == "selection_rate"
+    assert cell["value"] == 1.0 and cell["positive"] == 1
+
+
+def test_the_two_questions_stay_two_numbers(project, make_run):
+    """The failure this exists to prevent: (selected + successful) over
+    everything, which is neither a selection rate nor a success rate."""
+    from agency import metrics
+
+    chosen = _decided(project, make_run, "bet", "selected")
+    worked = _decided(project, make_run, "bet", "successful",
+                      body="Regional information centres reach instructors we cannot.")
+    data = metrics.collect(project, [chosen, worked])
+
+    rows = data["byLifecycle"]
+    assert set(rows) == {"ceo/bet/selection", "ceo/bet/outcome"}
+    assert rows["ceo/bet/selection"]["metric"] == "selection_rate"
+    assert rows["ceo/bet/outcome"]["metric"] == "success_rate"
+    assert rows["ceo/bet/selection"]["positive"] == 1
+    assert rows["ceo/bet/outcome"]["positive"] == 1
+
+
+def test_an_unanswered_output_counts_once(project, make_run):
+    """Against the first question that could have been asked. Counting it
+    against every lifecycle would read one unanswered bet as two."""
+    from agency import metrics
+
+    run = _decided(project, make_run, "bet", "")
+    rows = metrics.collect(project, [run])["byLifecycle"]
+
+    assert rows["ceo/bet/selection"]["undecided"] == 1
+    assert rows["ceo/bet/selection"]["value"] is None, "nothing decided is not zero"
+    assert "ceo/bet/outcome" not in rows
+
+
+def test_a_finding_gets_no_second_name_for_precision(project, make_run):
+    """`finding` is every pack's whether it asked or not, and its number is
+    already called precision. A second ratio over the same decisions under a
+    second name is not a measurement, it is an argument."""
+    from agency import metrics
+
+    run = make_run()
+    ingest.ingest(project, run)
+    data = metrics.collect(project, [run])
+
+    assert data["byLifecycle"] is None
+    assert data["triage"]["precision"] is None and data["triage"]["undecided"] == 1

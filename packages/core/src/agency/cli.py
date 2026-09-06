@@ -1583,6 +1583,25 @@ def cmd_metrics(args) -> int:
                   f"{out.dim(f'{blind} of {total} runs were attended and recorded '
                              f'no cost or turns')}")
         print()
+
+        # One line per lifecycle of every type a pack declared. Named by the
+        # pack, because `precision` is the wrong word for whether a bet was
+        # chosen — and one number covering both "was it chosen" and "did it
+        # work" would be the wrong number as well.
+        cycles = r.get("byLifecycle") or {}
+        if cycles:
+            print(f"  {out.dim('By output type')}")
+            for key, cell in cycles.items():
+                pack_name, type_name, cycle_name = key.split("/", 2)
+                value = "—" if cell["value"] is None else f"{cell['value']:.2f}"
+                decided = cell["positive"] + cell["negative"]
+                name = (cell["metric"] or cycle_name)[:16]
+                counts = out.dim(f"{cell['positive']} of {decided} decided")
+                waiting = (out.dim(f"  ({cell['undecided']} undecided)")
+                           if cell["undecided"] else "")
+                print(f"    {(pack_name + ' ' + type_name)[:22]:24} "
+                      f"{name:18} {value}  {counts}{waiting}")
+            print()
         table("by dimension", r["byDimension"])
         table("by severity", r["bySeverity"])
         table("by specialist", r["byHire"])

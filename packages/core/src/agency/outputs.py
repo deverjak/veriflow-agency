@@ -220,8 +220,21 @@ def policy_for(pack, type_name: str | None) -> TypePolicy:
 
 
 def declares(pack, type_name: str | None) -> bool:
-    """Whether the pack actually claims this type, rather than inheriting it."""
+    """Whether the pack may produce this type at all."""
     return str(type_name or DEFAULT_TYPE) in policies(pack)
+
+
+def own_types(pack) -> set[str]:
+    """The types this pack WROTE DOWN, as opposed to the one it inherits.
+
+    The difference matters exactly once, and it is in the metrics: `finding`
+    is everybody's whether they asked or not, and its number already has a
+    name — `precision`, with its own population rule. Reporting a second
+    ratio over the same decisions under a second name would not add a
+    measurement, it would add an argument about which one is right.
+    """
+    declared = (pack.manifest.get("outputs") if pack else None) or {}
+    return {str(n) for n in declared if isinstance(n, str) and n}
 
 
 def errors(pack) -> list[str]:
