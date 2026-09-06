@@ -91,6 +91,50 @@ BUILTIN: dict[str, dict] = {
         # directory in this file, so it can be read in advance and a session
         # that would hang can be refused with a reason instead.
         "trustFile": ".claude.json",
+        # Can a hook, handed in on the launch line, be trusted to fire every
+        # single time with nobody there to answer a question about it? Probed
+        # on 2026-09-06 on claude 2.1.263, in a directory `claude` had never
+        # opened before:
+        #   -p --settings '{"hooks":{"Stop":[{"hooks":[{"type":"command",
+        #      "command":"echo FIRED > hookfired.txt"}]}]}}' "Say only: done"
+        #   → prints "done", exit 0, hookfired.txt contains FIRED
+        # No directory-trust dialog (expected — `-p` skips it per its own
+        # `--help` text) and, more importantly, no separate "review this
+        # hook" dialog either — unlike `noQuestionsArgs`/`trustFile` above,
+        # nothing had to be bought here, the hook just ran. A Stop hook that
+        # exits 2 is not a one-shot warning: fed a real `findings.json` write
+        # (granted via `editsGrant`) and a hook that fails once with "missing
+        # field 'score'" on stderr, the agent read that stderr, rewrote the
+        # file to add the field, and stopped again — the hook's own stdin
+        # payload carries `"stop_hook_active": true` on that second call,
+        # which is the field to key Krok 7's two-block guard on instead of
+        # the run counting its own calls. `--strict-mcp-config` and
+        # `--setting-sources` do not interact: a project's
+        # `.claude/settings.json` Stop hook fired identically with
+        # `--setting-sources project` in a fresh `git worktree` and in the
+        # main checkout, `--strict-mcp-config` present or not; `--setting-
+        # sources local` (no `project`) correctly suppressed it in both.
+        # A `PostToolUse` hook goes down the same path and its stdin payload
+        # carries `tool_input.command` — the literal command line, not just
+        # `tool_name` — which is the whole basis of evidence provenance.
+        # There is no `exitCode` in it; what it has is `tool_response`
+        # (`stdout`/`stderr`/`interrupted`) and `duration_ms`. And a hook
+        # needs no environment variable to find the run: the path is baked
+        # into the hook's own command string when `--settings` is built.
+        "supportsHooks": True,
+        # `--settings <file-or-json>` — "Path to a settings JSON file OR a
+        # JSON string" (`--help`, 2.1.263). The probe above used the inline
+        # JSON-string form; nothing has to be written into the target
+        # project to hand a hook over.
+        "hookFlag": "--settings",
+        # Confirmed by reading the actual stream, not the one-line help text:
+        # with `--include-hook-events` on top of `streamArgs` below, lifecycle
+        # events land as their own lines —
+        #   {"type":"system","subtype":"hook_started","hook_name":...,"hook_event":...}
+        #   {"type":"system","subtype":"hook_response","hook_name":...,"stdout":...,"stderr":...}
+        # — 8 such lines appeared across one run with a single Stop hook
+        # configured, interleaved with the assistant/tool turns.
+        "hookEventsArgs": ["--include-hook-events"],
         # An event stream instead of silence. Without `--verbose`, `-p` emits
         # nothing until the very end, so ten minutes of work is indistinguishable
         # from a hung process.
@@ -151,6 +195,26 @@ BUILTIN: dict[str, dict] = {
         "remoteControlFlag": None,
         "noQuestionsArgs": [],
         "trustFile": None,
+        # Codex has the hook TYPES — `PreToolUse`, `PostToolUse`, `Stop`,
+        # `SessionStart`, `SubagentStart`, `UserPromptSubmit`,
+        # `PermissionRequest` all appear as literal strings inside the
+        # 0.144.3 binary, wire-compatible in shape with claude's — but no
+        # launch-argument equivalent to `--settings` was found: `codex
+        # --help` / `codex exec --help` (0.144.3) list no such flag, and the
+        # same binary strings say hooks are read from a persisted project
+        # `.codex/config.toml` and gated behind hook trust — "' hooks need
+        # review before they can run." — that `--dangerously-bypass-hook-
+        # trust` exists specifically to skip ("DANGEROUS. Intended only for
+        # automation that already vets hook sources"). Trying `codex exec -c
+        # 'hooks.Stop=[]' --json "say hi"` on 2026-09-06 neither errored nor
+        # produced any observable hook effect, which is not evidence either
+        # way and was not pursued further — the answer does not turn on it:
+        # delivering a hook here means writing a config file into the target
+        # project, which is the thing R5 forbids. `supportsHooks: False`
+        # records that gap, not an absence of the underlying feature.
+        "supportsHooks": False,
+        "hookFlag": None,
+        "hookEventsArgs": [],
         "streamArgs": ["--json"],
         "streamDialect": "codex-jsonl",
         "extraArgs": [],
@@ -190,6 +254,7 @@ def spec(provider_id: str) -> dict:
              "bypassArgs": [], "streamArgs": [], "streamDialect": None,
              "resumeShape": [], "remoteControlFlag": None,
              "noQuestionsArgs": [], "trustFile": None,
+             "supportsHooks": False, "hookFlag": None, "hookEventsArgs": [],
              "models": [], "defaultModel": None, "unregistered": True}
     out = dict(s)
     out["id"] = provider_id

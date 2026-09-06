@@ -270,6 +270,22 @@ Kroky 1, 2 a 4 jsou na sobě nezávislé a jsou to dohromady čtyři hodiny. Kro
 
 ---
 
+## Fáze 12 — harness nad packy: smyčka se zavírá (~10 dní)
+
+> [`harness.md`](harness.md). Vzniklo 6. 9. 2026 ze studie [`affaan-m/ECC`](https://github.com/affaan-m/ECC): `metrics` umí říct `dimenze reuse 0.2`, a ta věta nikam nevede — mezi číslem a `SKILL.md` není žádná cesta kromě člověka, který si na to vzpomene. Plán uzavírá smyčku mezi tím, co pack našel, a tím, co s tím projekt udělal. **Nezvyšuje autonomii** (tu řídí `needs` a `--bypass`); zvyšuje kalibraci, která si autonomii teprve zaslouží.
+
+- [x] **Krok 0** — sonda hooků na reálném `claude` (6. 9. 2026, 2.1.263). Bere `--settings` JSON inline **a na schválení se neptá** ani v adresáři, kde nikdy neběžel; Stop hook s `exit 2` agenta opravdu donutí opravit soubor; `--include-hook-events` sype lifecycle události do proudu; `--append-system-prompt-file` **neexistuje** (Krok 2 jde inline); `--setting-sources` a `--strict-mcp-config` se neovlivňují; `codex` hooky má, ale předat se dají jen souborem v projektu. **Rozhodnuto: Kroky 4 a 7 se dělají celé**
+- [ ] **Fáze A** (Kroky 1, 13, 14, 2, 3) — `run.json.context` s otiskem `CLAUDE.md`/`SKILL.md`; `blocked` jako plnohodnotný výsledek vedle `no-findings`; attended a unattended jako dvě populace v metrikách; `do-not-report.md` a jeho doručení; `known-here.json`
+- [ ] **Fáze B** (Kroky 8, 9, 15) — generický pack `verify` jako člen řetězu (vyrábí `machine-confirmed` a rozhodnutá data); živý dohled nad proudem (smyčky, odmítnutí); `budget` v `pack.json` a cena na přijatý nález
+- [ ] **Fáze C** (Kroky 4, 5, 6, 7) — provenience důkazu (`tool-calls.jsonl` → `unproven-source`); důkaz podle dimenze (`weak-evidence`); `score` povinné; Stop hook jako druhá šance uvnitř běhu
+- [ ] **Fáze D** (Kroky 10, 11, 12) — `metrics --for-author`; `author --revise <pack>` píšící diff do `SKILL.md`; `agency replay` nad připnutými SHA s pravidlem *regrese = 0*
+
+**Hotovo, když:** projde přejímka ([`harness.md`](harness.md) §7) — deset podmínek nad `main-panelem`, z nichž nejtvrdší je bod 8: zakladatel podle briefu sám řekne, co v `SKILL.md` opravit, dřív než to navrhne autor.
+
+**Co drží pořadí uvnitř:** Fáze B jde před Fází C, i když je brána zajímavější — `verify` vyrábí rozhodnuté nálezy, na kterých stojí celá Fáze D, a palivo se hromadí běháním, ne psaním kódu. Fáze D nezačíná dřív než při ~10 rozhodnutých nálezech na pack; to je podmínka, ne doporučení.
+
+---
+
 ## Odloženo — čeká na spouštěč
 
 | co | odkud | spouštěč |
@@ -295,5 +311,7 @@ Kroky 1, 2 a 4 jsou na sobě nezávislé a jsou to dohromady čtyři hodiny. Kro
 | 8 — neattended běh | [`unattended.md`](unattended.md) Kroky 1–8 | ~3 dny | 1 (chain je hotový) |
 | 9 — PO zapíše, co rozhodne | [`po-writes.md`](po-writes.md) Kroky 2, 3, 5 (1, 4, 6 ruší Fáze 10) | ~4 h + sonda | nic |
 | 10 — Agency v1, redefinice | [`agency-v1.md`](agency-v1.md) Kroky 0–7 | ~6 dní | 8 (Krok 8 přejímky je součást Kroku 7) |
+| 11 — GitHub Project je pravda | [`findings-ownership.md`](findings-ownership.md) Kroky 1–7 | ~1,5 dne | 10 |
+| 12 — harness nad packy | [`harness.md`](harness.md) Krok 0 + Fáze A–D | ~10 dní | 11; Fáze D navíc na ~10 rozhodnutých nálezech na pack |
 
 Fáze 0–3 jsou **~2 dny** a uzavírají graf. Fáze 0–6 jsou **~6 dní** a dají paměť, která patří projektu a čte ji každý provider. Fáze 7 je dvě hodiny nad hotovým bundlem a nepřidává závislost — verze s démonem přidávala a byla proto zamítnuta.
