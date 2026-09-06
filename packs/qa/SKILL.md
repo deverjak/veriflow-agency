@@ -41,6 +41,7 @@ Read this section instead of a configuration file — there isn't one.
 <RUN_DIR>/context.json                 the prompt, the state of the working copy
 <RUN_DIR>/evidence/known-findings.json what this project already found and how it ended
 <RUN_DIR>/evidence/do-not-report.md   what this project already rejected — read it first
+<RUN_DIR>/evidence/known-here.json    what was ever found in the code this run touches
 <RUN_DIR>/evidence/known-specs.json    reproduction tests from earlier runs — runnable again
 <RUN_DIR>/evidence/known-pages.json    your own pages: what past sessions concluded
 <RUN_DIR>/evidence/recent-commits.txt  what has been happening in the project lately

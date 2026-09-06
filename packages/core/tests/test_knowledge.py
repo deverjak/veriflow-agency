@@ -15,7 +15,7 @@ import pytest
 from agency import knowledge, packs, runs
 from agency.util import ulid
 
-from conftest import install_pack
+from conftest import install_pack, make_finding
 
 
 # ------------------------------------------------------------------ identity
@@ -259,3 +259,57 @@ def test_every_memory_stat_stays_out_of_the_graph_block(project, make_run):
     assert set(stats) <= set(runs.MEMORY_STATS), (
         f"{sorted(set(stats) - set(runs.MEMORY_STATS))} would land in run.json → graph, "
         f"which run.v1 refuses")
+
+
+# --------------------------------------------------- memory about THIS code
+
+def test_a_run_gets_the_history_of_the_files_it_touches(project, make_run):
+    """A pull request into `src/auth.ts` wants the findings that were ever
+    about `src/auth.ts` far more than it wants the newest three hundred. That
+    is a question about shape, not ranking — hence a second short list rather
+    than a re-sort of the long one."""
+    older = make_run(findings=[
+        make_finding(project, "01D0000000000000000000000A"),
+        make_finding(project, "01D0000000000000000000000A", dimension="reuse",
+                     title="Elsewhere entirely",
+                     anchor={"file": "src/other.ts", "symbol": None}),
+    ], run_id="01D0000000000000000000000A")
+    assert len(older.findings()) == 2
+
+    run = make_run(run_id="01D0000000000000000000000B")
+    stats = knowledge.for_run(project, run, files=["src/auth.ts"])
+
+    nearby = json.loads((run.dir / "evidence" / knowledge.HERE).read_text(encoding="utf-8"))
+    assert [f["file"] for f in nearby] == ["src/auth.ts"]
+    assert stats["knownHere"] == 1
+
+
+def test_a_run_touching_nothing_familiar_gets_no_file(project, make_run):
+    """A file that is usually empty teaches the reader to stop opening it,
+    and then it is empty the one time it matters."""
+    make_run(run_id="01E0000000000000000000000A")
+    run = make_run(run_id="01E0000000000000000000000B")
+
+    stats = knowledge.for_run(project, run, files=["src/brand-new.ts"])
+
+    assert not (run.dir / "evidence" / knowledge.HERE).is_file()
+    assert "knownHere" not in stats
+
+
+def test_the_blast_radius_counts_as_here_too(project, make_run):
+    """The graph already paid for `impact.json` during the same preparation.
+    A finding on a symbol the change reaches is about this run even when its
+    file is nowhere in the diff."""
+    make_run(findings=[make_finding(project, "01F0000000000000000000000A")],
+             run_id="01F0000000000000000000000A")
+    run = make_run(run_id="01F0000000000000000000000B")
+    ev = run.dir / "evidence"
+    ev.mkdir(parents=True, exist_ok=True)
+    (ev / "impact.json").write_text(
+        json.dumps({"impacted_nodes": [{"name": "getUser", "kind": "function"}],
+                    "impacted_files": []}), encoding="utf-8")
+
+    knowledge.for_run(project, run, files=["src/totally-unrelated.ts"])
+
+    nearby = json.loads((ev / knowledge.HERE).read_text(encoding="utf-8"))
+    assert [f["symbol"] for f in nearby] == ["getUser"]

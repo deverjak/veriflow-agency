@@ -31,6 +31,7 @@ The failure this exists to prevent is not a broken `pack.json` — that one anno
 <RUN_DIR>/evidence/known-pages.json    your own pages: which specialists were written before, and why
 <RUN_DIR>/evidence/known-findings.json what this project's existing packs actually find
 <RUN_DIR>/evidence/do-not-report.md   what this project already rejected — read it first
+<RUN_DIR>/evidence/known-here.json    what was ever found in the code this run touches
 <RUN_DIR>/run.json                     the run record you complete at the end
 ```
 

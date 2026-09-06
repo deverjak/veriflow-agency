@@ -532,13 +532,14 @@ def prepare_graph(project: Project, wt: Path) -> dict:
 #: `finding.v1`. `test_graph_evidence.py` now checks this list against what
 #: `for_run` actually returns, which is the only version of this rule that
 #: cannot drift again.
-MEMORY_STATS = ("knownFindings", "knownPages", "knownSpecs", "knownRejections")
+MEMORY_STATS = ("knownFindings", "knownPages", "knownSpecs", "knownRejections",
+                "knownHere")
 
 
-def known_memory(project: Project, run: Run) -> dict:
+def known_memory(project: Project, run: Run, files: list[str] | None = None) -> dict:
     """The project's memory for this run. Assembled by `knowledge.for_run`."""
     from . import knowledge
-    return knowledge.for_run(project, run)
+    return knowledge.for_run(project, run, files)
 
 
 def _graph_evidence(ev: Path, name: str, answer: graph.Answer) -> None:
@@ -554,7 +555,7 @@ def collect_evidence(project: Project, wt: Path, run: Run, target: dict,
     """Graph signal. This is the part a plain diff cannot give."""
     ev = run.dir / "evidence"
     ev.mkdir(parents=True, exist_ok=True)
-    stats: dict = {"changedFiles": len(files), **known_memory(project, run)}
+    stats: dict = {"changedFiles": len(files)}
 
     write_json(ev / "graph-capabilities.json",
                {"driver": graph.DRIVER, "tool": graph.version(),
@@ -580,6 +581,10 @@ def collect_evidence(project: Project, wt: Path, run: Run, target: dict,
         if dirs:
             _graph_evidence(ev, "dead-code", graph.unreferenced(wt, dirs[0]))
 
+    # Memory last, deliberately: it narrows itself to the code this run
+    # touches, and the blast radius it narrows by is `impact.json` — which
+    # only exists once the lines above have run.
+    stats.update(known_memory(project, run, files))
     return stats
 
 
@@ -588,7 +593,7 @@ def collect_workspace_evidence(project: Project, run: Run, target: dict,
     """Signal for a run without a pull request: what has been happening lately."""
     ev = run.dir / "evidence"
     ev.mkdir(parents=True, exist_ok=True)
-    stats: dict = {"changedFiles": len(files), **known_memory(project, run)}
+    stats: dict = {"changedFiles": len(files), **known_memory(project, run, files)}
 
     base = target.get("baseRefOid")
     if base and base != target.get("headRefOid"):
