@@ -128,6 +128,227 @@ def _who(rec: dict) -> tuple[str, str, str]:
     return model, provider, agent.get("hire") or f"{pack}@{provider}"
 
 
+#: How many runs back a dimension may have found nothing before it is worth
+#: naming as a candidate for deletion. Not a verdict — a dimension can be
+#: right and rare — but a dimension that has not fired in twenty runs is
+#: costing a share of every run's context for nothing.
+SILENT_AFTER = 20
+
+#: How many findings of each outcome go into the brief as examples. Three, and
+#: chosen for variety rather than for being interesting: Anthropic's own note
+#: on few-shot prompting is "diverse, canonical examples", not edge cases
+#: stuffed into a prompt.
+EXAMPLES = 3
+
+
+def for_author(project: Project, pack_name: str) -> dict:
+    """Everything about one pack that could change how its method is written.
+
+    Not a dashboard. `agency metrics` answers "how is this project doing"; this
+    answers one question, for one reader, and the reader may be an agent: what
+    in this pack's `SKILL.md` is wrong?
+
+    Every number carries its own denominator, because the failure mode here is
+    specific and expensive — a dimension with one decided finding is not a
+    signal, and a revision that treats it as one makes the pack differently
+    random rather than better.
+    """
+    picked = [r for r in load_runs(project) if r.record().get("pack") == pack_name]
+    whole = collect(project, picked)
+
+    dims: dict[str, dict] = {}
+    last_seen: dict[str, int] = {}
+    gated: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    examples: dict[str, list[dict]] = {"accepted": [], "rejected": []}
+    blocked: list[dict] = []
+    methods: dict[str, dict] = {}
+    denied_tools: dict[str, int] = defaultdict(int)
+    stop_blocks = over_budget = 0
+
+    for index, run in enumerate(picked):
+        rec = run.record()
+        agent = rec.get("agent") or {}
+        dec = decisions(run)
+
+        if rec.get("status") == "blocked":
+            blocked.append({"run": run.id, "why": rec.get("exitReason"),
+                            "at": rec.get("startedAt")})
+        stop_blocks += agent.get("stopBlocks") or 0
+        over_budget += 1 if (rec.get("cost") or {}).get("overBudget") else 0
+        for tool in (agent.get("denied") or {}).get("tools") or []:
+            denied_tools[tool] += 1
+
+        digest = ((rec.get("context") or {}).get("skill") or {}).get("sha256")
+        if digest:
+            m = methods.setdefault(digest[:8], {"runs": 0, "accepted": 0, "rejected": 0,
+                                                "firstSeen": rec.get("startedAt")})
+            m["runs"] += 1
+
+        for reason, n in (rec.get("gatedBy") or {}).items():
+            gated["—"][reason] += n
+
+        for f in run.findings():
+            dim = f.get("dimension") or "—"
+            last_seen.setdefault(dim, index)
+            d = dec.get(f.get("id"))
+            state = d["state"] if d else None
+            if state in ("sent", "accepted"):
+                bucket = "accepted"
+            elif state == "rejected":
+                bucket = "rejected"
+            else:
+                continue
+            if digest and digest[:8] in methods:
+                methods[digest[:8]][bucket] += 1
+            if len(examples[bucket]) < EXAMPLES:
+                examples[bucket].append({
+                    "title": f.get("title"), "dimension": dim,
+                    "score": f.get("score"), "scoreReason": f.get("scoreReason"),
+                    "reason": (d or {}).get("reason"),
+                    "note": (d or {}).get("note"),
+                })
+
+    for dim, tally in whole["byDimension"].items():
+        row = dict(tally)
+        row["decided"] = tally["accepted"] + tally["rejected"]
+        # The sentence that keeps a revision honest. One decided finding is not
+        # a precision of 1.0, it is one finding.
+        row["signal"] = row["decided"] >= 5
+        row["silentFor"] = (len(picked) if dim not in last_seen
+                            else last_seen[dim])
+        dims[dim] = row
+
+    pages_ = [p for p in _knowledge_pages(project, pack_name) if p.get("stale")]
+
+    return {
+        "pack": pack_name,
+        "runs": len(picked),
+        # Which population every cost number below came from (Krok 14). A brief
+        # that mixes attended and unattended leads to a revision resting on an
+        # average over nothing.
+        "population": whole["cost"]["population"],
+        "triage": whole["triage"],
+        "byDimension": dims,
+        "gatedBy": {k: dict(v) for k, v in gated.items()} or None,
+        "rejectReasons": whole["rejectReasons"],
+        "examples": examples,
+        "blocked": blocked,
+        "deniedTools": dict(denied_tools) or None,
+        "stopBlocks": stop_blocks,
+        "overBudgetRuns": over_budget,
+        "usdPerSentFinding": whole["cost"].get("usdPerSentFinding"),
+        # What happened after the last change to the method itself.
+        "byMethod": methods,
+        "stalePages": [{"title": p.get("title"), "path": p.get("path")} for p in pages_],
+    }
+
+
+def _knowledge_pages(project: Project, pack_name: str) -> list[dict]:
+    from . import knowledge
+    return knowledge.pages(project, pack_name)
+
+
+def author_brief(data: dict) -> str:
+    """The same thing as markdown, because a person has to be able to read it.
+
+    That is not a nicety, it is the acceptance test of this whole step: if a
+    founder cannot say what to change in `SKILL.md` after reading this, an
+    agent will not manage it either, and the revision it writes will be
+    confident about nothing.
+    """
+    p = data["population"]
+    lines = [f"# What {data['pack']} has been doing", "",
+             f"{data['runs']} runs. Cost and behaviour numbers below come from "
+             f"{p.get('unattended', 0)} of them (streamed only); "
+             f"{p.get('attended', 0)} were attended and recorded neither.", ""]
+
+    t = data["triage"]
+    decided = t["accepted"] + t["rejected"]
+    lines += ["## Precision", "",
+              f"{t['accepted']} accepted / {t['rejected']} rejected"
+              + (f" — precision {t['precision']}" if t["precision"] is not None
+                 else " — nothing decided yet, so there is no precision"),
+              ""]
+    if decided < 10:
+        lines += [f"**{decided} decided findings is not enough to revise on.** "
+                  f"A method rewritten against this many is differently random, "
+                  f"not better. Run the pack more, decide what it finds, come back.",
+                  ""]
+
+    lines += ["## By dimension", "",
+              "| dimension | decided | precision | signal? | last found something |",
+              "|---|---|---|---|---|"]
+    for dim, row in sorted(data["byDimension"].items()):
+        silent = row["silentFor"]
+        when = "never" if silent >= data["runs"] and data["runs"] else f"{silent} runs ago"
+        lines.append(f"| {dim} | {row['decided']} | "
+                     f"{row['precision'] if row['precision'] is not None else '—'} | "
+                     f"{'yes' if row['signal'] else 'too few to tell'} | {when} |")
+    quiet = [d for d, r in data["byDimension"].items() if r["silentFor"] >= SILENT_AFTER]
+    if quiet:
+        lines += ["", f"Silent for {SILENT_AFTER}+ runs: **{', '.join(sorted(quiet))}** "
+                  f"— candidates for deletion. A dimension can be right and rare, "
+                  f"but it costs a share of every run's context either way."]
+    lines.append("")
+
+    if data["rejectReasons"]:
+        lines += ["## Why findings were rejected", ""]
+        lines += [f"- {reason}: {n}" for reason, n in data["rejectReasons"].items()]
+        lines.append("")
+
+    for bucket, heading in (("accepted", "Findings that held up"),
+                            ("rejected", "Findings that did not")):
+        if data["examples"][bucket]:
+            lines += [f"## {heading}", ""]
+            for e in data["examples"][bucket]:
+                bits = [f"**{e['title']}** ({e['dimension']}, score {e['score']})"]
+                if e.get("scoreReason"):
+                    bits.append(f"  - it rested on: {e['scoreReason']}")
+                if e.get("reason"):
+                    bits.append(f"  - rejected as `{e['reason']}`"
+                                + (f": {e['note']}" if e.get("note") else ""))
+                lines += ["- " + bits[0]] + bits[1:]
+            lines.append("")
+
+    if data["blocked"]:
+        lines += ["## Runs that could not finish", "",
+                  "A wall hit twice is a `needs` or a `SKILL.md` problem, not a "
+                  "project problem.", ""]
+        lines += [f"- {b['run'][:10]}: {b['why'] or 'see blocked.md'}" for b in data["blocked"]]
+        lines.append("")
+
+    trouble = []
+    if data["deniedTools"]:
+        trouble.append("- refused tools: "
+                       + ", ".join(f"{k} ({v} runs)" for k, v in data["deniedTools"].items())
+                       + " — either `needs` is too narrow or the method reaches for "
+                         "something it should not")
+    if data["stopBlocks"]:
+        trouble.append(f"- sent back to fix findings.json {data['stopBlocks']}x — a pack "
+                       f"that needs a second round every time has a SKILL.md problem")
+    if data["overBudgetRuns"]:
+        trouble.append(f"- over its own budget in {data['overBudgetRuns']} runs")
+    if data["usdPerSentFinding"] is not None:
+        trouble.append(f"- ${data['usdPerSentFinding']:.2f} per finding that reached the board")
+    if trouble:
+        lines += ["## How the runs themselves went", ""] + trouble + [""]
+
+    if len(data["byMethod"]) > 1:
+        lines += ["## What happened after the method changed", "",
+                  "| SKILL.md | runs | accepted | rejected |", "|---|---|---|---|"]
+        for digest, m in sorted(data["byMethod"].items(),
+                                key=lambda kv: kv[1]["firstSeen"] or ""):
+            lines.append(f"| {digest} | {m['runs']} | {m['accepted']} | {m['rejected']} |")
+        lines.append("")
+
+    if data["stalePages"]:
+        lines += ["## Pack pages nobody has reviewed lately", ""]
+        lines += [f"- {p['title']}" for p in data["stalePages"]]
+        lines.append("")
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def collect(project: Project, runs: list[Run] | None = None) -> dict:
     selected = runs if runs is not None else load_runs(project)
     now = datetime.now(timezone.utc)

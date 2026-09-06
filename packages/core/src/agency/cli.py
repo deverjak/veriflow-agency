@@ -1457,6 +1457,16 @@ def _bar(t: dict) -> str:
 
 def cmd_metrics(args) -> int:
     project = _project(args)
+
+    if getattr(args, "for_author", None):
+        # A different question with a different reader: not "how is this
+        # project doing" but "what in this pack's SKILL.md is wrong". It may
+        # well be read by an agent, so it comes out as markdown by default and
+        # as data on request.
+        packs.load(args.for_author, project)          # a typo, said now
+        brief = metrics.for_author(project, args.for_author)
+        return _emit(args, brief, lambda: print("\n" + metrics.author_brief(brief)))
+
     r = metrics.collect(project)
 
     def table(title: str, rows: dict) -> None:
@@ -2084,6 +2094,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("metrics", parents=[common],
                        help="precision, dedup, queue age — by dimension, severity and provider")
+    s.add_argument("--for-author", metavar="PACK",
+                   help="one pack's numbers as a brief for revising its method, "
+                        "not as a dashboard")
     s.set_defaults(fn=cmd_metrics)
 
     s = sub.add_parser("cleanup", parents=[common],
