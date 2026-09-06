@@ -32,7 +32,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import events, graph, instructions, proc, providers
+from . import events, graph, instructions, outputs, packs, proc, providers
 from .config import AGENCY_DIR, Project
 from .util import out, posix, read_json, ulid, write_json
 
@@ -1400,6 +1400,30 @@ def worker_id(pack_name: str, provider: str | None = None) -> str:
     return f"{pack_name}@{provider or 'claude'}"
 
 
+def feedback_policy(run: Run, finding_id: str):
+    """Which vocabulary this output's feedback is judged against.
+
+    The type is on the output, the policy is in the pack that wrote it, and
+    neither is knowable from the id alone — hence the lookup. Everything
+    falls back to the finding policy, so a run whose pack has been renamed or
+    removed can still be triaged: losing the ability to decide on old findings
+    because a pack is gone would be the worst possible way to fail.
+    """
+    kind = None
+    try:
+        for f in run.findings():
+            if f.get("id") == finding_id:
+                kind = f.get("type")
+                break
+    except Exception:
+        kind = None
+    try:
+        pack = packs.load((run.record().get("pack") or ""), run.project)
+    except (SystemExit, Exception):
+        pack = None
+    return outputs.policy_for(pack, kind)
+
+
 def append_decision(run: Run, finding_id: str, state: str,
                     reason: str | None = None, note: str | None = None,
                     by: str = HUMAN, ref: str | None = None,
@@ -1413,17 +1437,29 @@ def append_decision(run: Run, finding_id: str, state: str,
     `ref`/`url` carry where a `sent` decision landed — the board item, from
     the pack's sink. Absent for `rejected`, which never reaches a board.
     """
-    if state not in DECISION_STATES:
-        raise SystemExit(f"Unknown state “{state}”. Allowed: {', '.join(DECISION_STATES)}")
-    if state == "rejected" and not reason:
-        raise SystemExit(
-            "A rejection needs a reason (--reason). Allowed: " + ", ".join(REJECT_REASONS)
-            + "\nFree text would cost the same effort and yield no number — precision cannot be computed from it."
-        )
-    if reason and reason not in REJECT_REASONS:
-        raise SystemExit(f"Unknown reason “{reason}”. Allowed: {', '.join(REJECT_REASONS)}")
+    policy = feedback_policy(run, finding_id)
+    cycle = policy.lifecycle_of(state)
+    if cycle is None:
+        allowed = ", ".join(policy.kinds) or "(this type takes no feedback)"
+        raise SystemExit(f"Unknown state “{state}” for {policy.name}. Allowed: {allowed}")
+    polarity = cycle.polarity(state)
+
+    # A reason is asked for only where the pack named the reasons. For a
+    # finding those are the five in the board's own Reason field, and the
+    # requirement is the whole basis of precision; for a bet the founder did
+    # not pick it out of a list, and demanding one would invent a taxonomy the
+    # pack never asked for.
+    if cycle.reasons:
+        if polarity == "negative" and not reason:
+            raise SystemExit(
+                "A rejection needs a reason (--reason). Allowed: " + ", ".join(cycle.reasons)
+                + "\nFree text would cost the same effort and yield no number — precision cannot be computed from it."
+            )
+        if reason and reason not in cycle.reasons:
+            raise SystemExit(f"Unknown reason “{reason}”. Allowed: {', '.join(cycle.reasons)}")
 
     ev = {"kind": "decision", "findingId": finding_id, "state": state,
+          "lifecycle": cycle.name, "polarity": polarity,
           "reason": reason, "note": note, "by": validate_by(by), "at": now(),
           "ref": ref, "url": url}
     with open(run.decisions_path, "a", encoding="utf-8", newline="\n") as f:

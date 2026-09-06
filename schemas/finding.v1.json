@@ -22,6 +22,11 @@
       "type": ["string", "null"],
       "description": "Which of the pack's dimensions found this. Lets precision be measured per dimension."
     },
+    "type": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]*$",
+      "description": "What kind of output this is — `finding` when absent, which is every output written before types existed. The pack declares how each of its types is handled (`pack.json` → `outputs`): whether it deduplicates, what evidence it needs, what feedback it accepts, whether it may act, whether it may become memory. The core reads that policy and never the meaning: it does not know what a `bet` or a `decision` is, and the moment it does, every future specialist has to pretend to be a code reviewer again."
+    },
     "severity": { "enum": ["low", "medium", "high", "blocker"] },
     "title": { "type": "string", "minLength": 8, "maxLength": 200 },
     "body": {

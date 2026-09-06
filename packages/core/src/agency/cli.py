@@ -13,7 +13,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import anchor, chain as chains, config, graph, ingest, instructions, knowledge, metrics, packs, proc, providers, replay, runs, serve as serving
+from . import anchor, chain as chains, config, graph, ingest, instructions, knowledge, metrics, outputs, packs, proc, providers, replay, runs, serve as serving
 from .util import bundled, out, posix, read_json, ulid, write_json
 
 # ---------------------------------------------------------------- helpers
@@ -230,6 +230,12 @@ def cmd_doctor(args) -> int:
                     else (parts[0] if parts else ""))
             if token and not (project.root / token).is_file():
                 check(f"pack {p.name} sink", False, f"{token} not found", fatal=False)
+
+        # An output policy is data the core acts on, so a typo in it does not
+        # fail — it defaults, quietly and wrongly. `dedpu: false` would keep
+        # deduplicating and the pack's author would have no way to find out.
+        for problem in outputs.errors(p):
+            check(f"pack {p.name} outputs", False, problem, fatal=False)
 
     fatal = [c for c in checks if not c["ok"] and c["fatal"]]
 
@@ -2263,7 +2269,10 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("triage", parents=[common], help="decide on a finding — an agent calls this too")
     s.add_argument("action", choices=["accept", "reject"])
     s.add_argument("finding")
-    s.add_argument("--reason", choices=list(runs.REJECT_REASONS))
+    # No `choices`: which reasons are allowed depends on the output's type
+    # (`outputs.<type>.feedback.<lifecycle>.reasons`), which argparse cannot
+    # know. `runs.append_decision` validates and names the allowed set.
+    s.add_argument("--reason")
     s.add_argument("--note")
     s.add_argument("--by", default=runs.HUMAN,
                    help="who decides — `hire:<id>` for a specialist (ready-made in context.json), `human` for a person")

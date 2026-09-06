@@ -22,7 +22,7 @@ import json
 from pathlib import Path
 from urllib.parse import urlparse
 
-from . import dedup, knowledge, proc
+from . import dedup, knowledge, outputs, proc
 from . import runs as _runs
 from .config import Project
 from .runs import Run, load_runs, now
@@ -38,6 +38,8 @@ GATE_REASONS = {
     "unproven-source": "evidence cites a command that never ran in this run",
     "weak-evidence": "not the kind of proof this dimension stands or falls on",
     "unverified-evidence": "the evidence locator points at something this run did not produce",
+    "unknown-type": "an output of a type this pack does not declare",
+    "over-cardinality": "more of this type in one run than the pack allows",
 }
 
 #: What makes a `source` a claim about something that RAN, rather than a
@@ -339,7 +341,8 @@ def required_evidence(pack) -> dict[str, list[str]]:
 
 
 def gate(project: Project, run: Run, findings: list[dict], min_score: int | None,
-         evidence: dict[str, list[str]] | None = None) -> tuple[list[dict], list[dict]]:
+         evidence: dict[str, list[str]] | None = None,
+         pack=None) -> tuple[list[dict], list[dict]]:
     """Splits findings into those that pass and those dropped, with a reason."""
     kept: list[dict] = []
     dropped: list[dict] = []
@@ -348,6 +351,10 @@ def gate(project: Project, run: Run, findings: list[dict], min_score: int | None
     # whole check is skipped — never drop a finding because a hook did not run.
     ran = commands_run(run)
     urls = urls_fetched(run)
+    # How many of each type have already passed. The ceiling is the pack's own
+    # (`outputs.<type>.cardinality` / `limit`) — a CEO answer is one per run
+    # and a second one is not a second answer, it is a run that lost the plot.
+    seen_of_type: dict[str, int] = {}
 
     for i, f in enumerate(findings):
         def drop(reason: str, detail: str = "") -> None:
@@ -370,14 +377,28 @@ def gate(project: Project, run: Run, findings: list[dict], min_score: int | None
             drop("phantom-line", f"line {a['line']} > {lines} lines in the file")
             continue
 
-        wanted = (evidence or {}).get(f.get("dimension") or "")
-        if wanted:
-            kinds = {(e or {}).get("kind") for e in (f.get("evidence") or [])}
-            if not kinds & set(wanted):
-                drop("weak-evidence",
-                     f"{f.get('dimension')} needs {' or '.join(wanted)}, got "
-                     f"{', '.join(sorted(k for k in kinds if k)) or 'nothing'}")
-                continue
+        type_name = f.get("type") or outputs.DEFAULT_TYPE
+        if pack is not None and not outputs.declares(pack, type_name):
+            drop("unknown-type", f"“{type_name}” is not in this pack's `outputs`")
+            continue
+        policy = outputs.policy_for(pack, type_name)
+
+        # The type wins over the dimension when it says anything: the type is
+        # the coarser statement ("a bet stands on documents or the web") and a
+        # pack that declares both means the finer one for its findings.
+        wanted = policy.required_evidence or (evidence or {}).get(f.get("dimension") or "")
+        kinds = {(e or {}).get("kind") for e in (f.get("evidence") or [])}
+        if wanted and not kinds & set(wanted):
+            drop("weak-evidence",
+                 f"{type_name if policy.required_evidence else f.get('dimension')} "
+                 f"needs {' or '.join(wanted)}, got "
+                 f"{', '.join(sorted(k for k in kinds if k)) or 'nothing'}")
+            continue
+        if len(f.get("evidence") or []) < policy.min_evidence:
+            drop("weak-evidence",
+                 f"{type_name} needs {policy.min_evidence} pieces of evidence, "
+                 f"got {len(f.get('evidence') or [])}")
+            continue
 
         if ran is not None:
             cited = unproven(f, ran)
@@ -398,6 +419,17 @@ def gate(project: Project, run: Run, findings: list[dict], min_score: int | None
         if min_score is not None and isinstance(score, int) and score < min_score:
             drop("below-score", f"score {score} < {min_score}")
             continue
+
+        # Last, and after everything that judges the output itself: a ceiling
+        # is not a statement about this output, it is about how many came
+        # before it. Dropping the eleventh before checking whether it is
+        # honest would hide a broken pack behind a full quota.
+        ceiling = policy.max_per_run
+        if ceiling is not None and seen_of_type.get(type_name, 0) >= ceiling:
+            drop("over-cardinality",
+                 f"{type_name}: {ceiling} per run is this pack's own ceiling")
+            continue
+        seen_of_type[type_name] = seen_of_type.get(type_name, 0) + 1
 
         kept.append(f)
 
@@ -561,11 +593,17 @@ def ingest(project: Project, run: Run, min_score: int | None = None) -> dict:
         min_score = pack.min_score
 
     kept, dropped = gate(project, run, findings, min_score,
-                         evidence=required_evidence(pack))
+                         evidence=required_evidence(pack), pack=pack)
     for f in kept:
         f["fingerprint"] = dedup.fingerprint(f)
 
-    dups = dedup.mark_duplicates(kept, earlier_findings(project, run))
+    # A type may say it is not deduplicated (`outputs.<type>.dedup: false`).
+    # An answer is the case: two answers to the same question a month apart
+    # are two answers, and marking the second a duplicate of the first would
+    # throw away the one that is current.
+    dedupable = [f for f in kept
+                 if outputs.policy_for(pack, f.get("type")).dedup]
+    dups = dedup.mark_duplicates(dedupable, earlier_findings(project, run))
 
     rec = run.record()
     chain = rec.get("chain") or {}

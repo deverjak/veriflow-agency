@@ -98,6 +98,7 @@ def fingerprint(finding: dict) -> str:
     """Deterministický otisk. Stejný vstup, stejný otisk, na každém stroji."""
     parts = [
         (finding.get("pack") or "").split("@")[0],
+        finding.get("type") or "finding",
         finding.get("dimension") or "",
         symbol_key(finding),
         " ".join(signature(finding)),
@@ -137,6 +138,11 @@ def is_duplicate(new: dict, old: dict) -> tuple[bool, str]:
     """
     if new.get("fingerprint") and new["fingerprint"] == old.get("fingerprint"):
         return True, "fingerprint"
+    # Two outputs of different types are never the same output. A bet and a
+    # finding about the same page share their nouns, and without this the
+    # similarity layer would quietly fold one into the other.
+    if (new.get("type") or "finding") != (old.get("type") or "finding"):
+        return False, ""
     # Bez shody místa se neporovnává vůbec. Dva nálezy o téže věci v různých
     # funkcích jsou dva nálezy.
     if symbol_key(new) != symbol_key(old):
