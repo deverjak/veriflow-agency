@@ -349,6 +349,10 @@ function runNode(r) {
     ok: ['pass', 'charts.green'],
     'no-findings': ['circle-outline', undefined],
     'gated-out': ['filter', 'charts.orange'],
+    // Not "found nothing": the agent hit a wall and said so in blocked.md.
+    // Orange rather than red, because the thing to fix is usually outside
+    // the run — staging, a login, a missing field on the board.
+    blocked: ['circle-slash', 'charts.orange'],
     running: ['loading~spin', undefined],
     // Not an error: the agent was launched and the terminal was closed
     // before it finished. Dim, because there is nothing to act on.

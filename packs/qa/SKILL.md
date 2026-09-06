@@ -241,6 +241,27 @@ Specs stay in the run directory and are committed with it — they are reproduct
 
 **When someone runs after you** (`chain.position < chain.of`), write `<RUN_DIR>/handoff.md`: what you could not reproduce and why, what you left behind in the application, which findings rest on an assumption about intended behavior — that assumption is theirs to confirm, not yours. The whole file goes into their prompt.
 
+## When you cannot go on
+
+Some runs end at a wall rather than at an answer: staging does not respond, `gh` is not logged in, the board has no field this method assumes exists. Say so — write `<RUN_DIR>/blocked.md`:
+
+```markdown
+# Blocked
+
+**What I could not do:** verify the cancellation flow on staging.
+**Why:** https://staging.example.com returned 502 on every attempt (12 tries, 10 min).
+**What would unblock me:** a staging URL that answers, or permission to run it locally.
+**What I did instead:** nothing — the remaining dimensions all depend on this one.
+```
+
+The run is then recorded as `blocked` instead of `no-findings`, and that distinction is the whole point. An empty `findings.json` on its own says "I looked and there is nothing there" — which is a good result — and nobody reading it can tell that apart from "I never got started". **Silence is not a result.**
+
+Three rules:
+
+- **It is not a question.** Nothing waits for an answer; a run nobody is watching has nobody to ask. Write the file and finish.
+- **What you did manage still counts.** Write those findings as usual — being blocked does not throw them away, and a partial answer beats no answer.
+- **Only for a wall you actually hit.** A dimension that honestly found nothing is finished, not blocked. Claiming otherwise turns the one word for "fix something" into noise.
+
 ## 9. Cleanup
 
 Leave the application the way you found it: log out, close the browser, return any test data that could be safely restored. If you left something behind (an unfinished booking, a test account), write it at the end of `plan.md` — otherwise the next session finds it as a finding.

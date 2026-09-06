@@ -298,6 +298,38 @@ def test_a_failed_step_stops_the_chain(team, monkeypatch, capsys):
     assert runs.load_runs(team)[0].record()["status"] == "failed"
 
 
+def test_a_blocked_member_stops_the_chain(team, monkeypatch, capsys):
+    """A blocked member exits cleanly — it did what it could and said so —
+    which is exactly why the chain has to look at more than the exit code.
+    Carrying on hands the next specialist an empty handoff and pays it to
+    judge nothing: the most expensive way to learn nothing."""
+    def blocked_first(argv, cwd=None, env=None, on_line=None, timeout=None):
+        run = next(r for r in runs.load_runs(team)
+                   if r.record().get("status") == "running")
+        (run.dir / "blocked.md").write_text(
+            "# Blocked\n\n"
+            "**What I could not do:** reach staging.\n"
+            "**Why:** every request came back 502.\n", encoding="utf-8")
+        if on_line:
+            on_line('{"type":"result","subtype":"success","is_error":false,'
+                    '"num_turns":2,"session_id":"s","result":"Blocked.",'
+                    '"permission_denials":[]}')
+        return 0
+
+    monkeypatch.setattr(proc, "stream", blocked_first)
+
+    code = cli.cmd_chain(args(team, "legal", "po"))
+    printed = capsys.readouterr().out
+
+    assert code != 0
+    assert len(runs.load_runs(team)) == 1, "the second member should not have started"
+    assert runs.load_runs(team)[0].record()["status"] == "blocked"
+    # And it says WHY, in the blocked agent's own words — a chain that stops
+    # without naming the wall just moves the guessing somewhere else.
+    assert "blocked, not finished" in printed
+    assert "reach staging." in printed
+
+
 def test_a_stopped_chain_says_what_finished(team, monkeypatch, capsys):
     """An interrupted chain is still a result, only a shorter one — and it
     has to show where to pick it up by hand."""

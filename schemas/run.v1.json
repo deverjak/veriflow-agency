@@ -180,6 +180,10 @@
         "handoff": {
           "type": "boolean",
           "description": "RUN_DIR/handoff.md — a message addressed to the next member of the chain: what I did not finish, what not to trust, what rests on an assumption for them to confirm. Unlike summary.md, which is \"what I did\" for a human and for memory, this is \"what you need\". Falls back to summary.md when missing."
+        },
+        "blocked": {
+          "type": "boolean",
+          "description": "RUN_DIR/blocked.md — the agent hit a wall it could not get past: staging down, gh not logged in, a board field the method assumes is missing. Written by the pack, never by the core. It is a RESULT, not a question: nothing waits for an answer, because an unattended run has nobody to ask."
         }
       }
     },
@@ -345,13 +349,14 @@
         "ok",
         "no-findings",
         "gated-out",
+        "blocked",
         "needs-login",
         "quota",
         "abandoned",
         "failed",
         "queued"
       ],
-      "description": "abandoned is not failed: preparation succeeded and the agent was launched, then the terminal was closed before it finished. Nothing here can see that terminal, so the run stays open until a person closes it - which makes an abandoned run a fact worth recording rather than an error to hide."
+      "description": "abandoned is not failed: preparation succeeded and the agent was launched, then the terminal was closed before it finished. Nothing here can see that terminal, so the run stays open until a person closes it - which makes an abandoned run a fact worth recording rather than an error to hide. blocked is not no-findings for the same kind of reason: the agent could not get to an answer, and until it had a word for that, silence and success were the same record."
     },
     "exitReason": {
       "type": [

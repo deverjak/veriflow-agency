@@ -726,6 +726,21 @@ def cmd_chain(args) -> int:
             failed_at = position
             break
 
+        # A blocked member exits cleanly — it did what it could and said so —
+        # and that is exactly why the chain has to look. Carrying on would hand
+        # the next specialist an empty handoff and pay it to judge nothing,
+        # which is the most expensive way to learn nothing.
+        rec = run.record() if run else {}
+        if rec.get("status") == "blocked":
+            out.say()
+            out.fail(f"the chain stops at step {position}/{len(members)} ({member.label}) "
+                     f"— it is blocked, not finished")
+            out.say(f"  {out.warn(rec.get('exitReason') or 'see blocked.md')}")
+            out.say(f"  {out.dim('Clear that, then run the chain again. '
+                                 'The runs so far are recorded.')}")
+            failed_at = position
+            break
+
     reached = failed_at or len(members)
     if failed_at is None:
         out.say()
@@ -771,7 +786,7 @@ def _chain_report(chain_id: str, members, done: list[str], reached: int,
         if cost.get("usd"):
             bits.append(f"${cost['usd']:.2f}")
         denied = (agent.get("denied") or {}).get("count") or 0
-        left = [n for n in ("summary.md", "handoff.md", "agent.md")
+        left = [n for n in ("summary.md", "handoff.md", "blocked.md", "agent.md")
                 if (run.dir / n).is_file()]
         line = f"      {out.dim(' · '.join(bits))}"
         if denied:
@@ -1295,6 +1310,13 @@ def _ingest_report(run, data: dict) -> None:
         return
     c = data["counts"]
     print(f"\n  run {out.bold(run.id)}\n")
+    if data.get("blocked"):
+        # Ahead of the counts on purpose: a blocked run's headline is the wall
+        # it hit, not the two findings it managed before hitting it.
+        print(f"  {out.warn('  ⊘')} {out.bold('blocked')} — "
+              f"{data.get('blockedReason') or 'see RUN_DIR/blocked.md'}")
+        print(f"  {out.dim('    This is a result, not a failure: read blocked.md, '
+                           'clear the obstacle, run again.')}")
     print(f"  {c['raw']:3} findings written by the pack")
     if data["dropped"]:
         print(f"  {out.err(str(c['gated']).rjust(3))} dropped by the gate")
@@ -1613,7 +1635,7 @@ def cmd_status(args) -> int:
             "chain": rec.get("chain"),
             "exitReason": rec.get("exitReason"),
             "denied": (agent.get("denied") or {}).get("count") or 0,
-            "outputs": [n for n in ("summary.md", "handoff.md", "agent.md")
+            "outputs": [n for n in ("summary.md", "handoff.md", "blocked.md", "agent.md")
                         if (run.dir / n).is_file()],
             "findings": len(fs), "undecided": sum(1 for f in fs if f.get("id") not in dec),
         })
@@ -1632,6 +1654,7 @@ def cmd_status(args) -> int:
             return
         for d in rows:
             icon = {"ok": out.ok("✓"), "no-findings": out.ok("○"), "running": out.warn("…"),
+                    "blocked": out.warn("⊘"),
                     "abandoned": out.dim("×"), "failed": out.err("✗")}.get(
                         d["status"], out.dim("·"))
             pr = d["targetLabel"] or "—"
@@ -1640,6 +1663,11 @@ def cmd_status(args) -> int:
             print(f"  {icon} {d['id'][:10]} {pr[:18]:18} {d['findings']:3} findings "
                   f"{out.dim(f'{d['undecided']} undecided'):24} {out.dim(d['startedAt'] or '')}"
                   f"{'  ' + tag if tag else ''}")
+            # The word, not only the mark. `no-findings` and `blocked` are one
+            # character apart in the list and opposite in meaning, and the
+            # second one is asking for something to be fixed.
+            if d["status"] == "blocked":
+                print(f"      {out.warn('blocked')} {out.dim(d.get('exitReason') or 'see blocked.md')}")
         open_runs = [d for d in rows if d["status"] == "running"]
         if open_runs:
             print(f"\n  {out.warn('still open:')} "

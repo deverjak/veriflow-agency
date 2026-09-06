@@ -163,6 +163,7 @@ The body follows the shape the existing packs share, because a founder reading t
 7. **Writing `findings.json`** — one worked `finding.v1` example with this pack's own dimension and its own kind of evidence. Concrete beats abstract.
 8. **The project's memory** — `.agency/knowledge/pages/<name>/`, plain markdown, first line `Last reviewed: <date>`, then a `# Heading` — the index takes the page title from that heading. **Conclusions, not a diary**: the chronology is already in `log.md`, and a page that repeats it will eventually contradict it.
 9. **When you are running in a chain** — how to write `handoff.md`, and that starting other runs is refused.
+10. **When you cannot go on** — `blocked.md`, and it is not optional. Copy the section from `packs/qa/SKILL.md` with this pack's own examples of a wall (its staging, its board, its login). Without it the pack has no word for "I hit something I cannot get past", so it writes an empty `findings.json` instead and the run is recorded as `no-findings` — the same status a pack gets for looking honestly and finding nothing. A specialist that cannot tell those two apart cannot be run unattended, which is most of what a specialist is for.
 
 Put anything long — a decision method, a domain checklist, a playbook — in `references/*.md` and link it, the way `packs/ceo/` does. `SKILL.md` stays the method.
 
@@ -181,6 +182,27 @@ agency doctor --json
 which checks `requires` and, when you wrote one, that the `sink`'s first token exists on this machine.
 
 Fix what either one says before you finish. A pack that does not appear in `agency packs` is not a draft, it is a broken file.
+
+## When you cannot go on
+
+Some runs end at a wall rather than at an answer: staging does not respond, `gh` is not logged in, the board has no field this method assumes exists. Say so — write `<RUN_DIR>/blocked.md`:
+
+```markdown
+# Blocked
+
+**What I could not do:** verify the cancellation flow on staging.
+**Why:** https://staging.example.com returned 502 on every attempt (12 tries, 10 min).
+**What would unblock me:** a staging URL that answers, or permission to run it locally.
+**What I did instead:** nothing — the remaining dimensions all depend on this one.
+```
+
+The run is then recorded as `blocked` instead of `no-findings`, and that distinction is the whole point. An empty `findings.json` on its own says "I looked and there is nothing there" — which is a good result — and nobody reading it can tell that apart from "I never got started". **Silence is not a result.**
+
+Three rules:
+
+- **It is not a question.** Nothing waits for an answer; a run nobody is watching has nobody to ask. Write the file and finish.
+- **What you did manage still counts.** Write those findings as usual — being blocked does not throw them away, and a partial answer beats no answer.
+- **Only for a wall you actually hit.** A dimension that honestly found nothing is finished, not blocked. Claiming otherwise turns the one word for "fix something" into noise.
 
 ## 6. Hand it over
 

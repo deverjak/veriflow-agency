@@ -165,6 +165,27 @@ Findings reach the board on their own. `agency ingest` runs the gate right after
 
 A summary PR comment stays yours to post (`gh pr comment`, already in `needs`): write it about the review as a whole, referencing finding ids from `findings.json` — not one comment per finding.
 
+## When you cannot go on
+
+Some runs end at a wall rather than at an answer: staging does not respond, `gh` is not logged in, the board has no field this method assumes exists. Say so — write `<RUN_DIR>/blocked.md`:
+
+```markdown
+# Blocked
+
+**What I could not do:** verify the cancellation flow on staging.
+**Why:** https://staging.example.com returned 502 on every attempt (12 tries, 10 min).
+**What would unblock me:** a staging URL that answers, or permission to run it locally.
+**What I did instead:** nothing — the remaining dimensions all depend on this one.
+```
+
+The run is then recorded as `blocked` instead of `no-findings`, and that distinction is the whole point. An empty `findings.json` on its own says "I looked and there is nothing there" — which is a good result — and nobody reading it can tell that apart from "I never got started". **Silence is not a result.**
+
+Three rules:
+
+- **It is not a question.** Nothing waits for an answer; a run nobody is watching has nobody to ask. Write the file and finish.
+- **What you did manage still counts.** Write those findings as usual — being blocked does not throw them away, and a partial answer beats no answer.
+- **Only for a wall you actually hit.** A dimension that honestly found nothing is finished, not blocked. Claiming otherwise turns the one word for "fix something" into noise.
+
 ## 7. Cleanup
 
 `agency run` removes the worktree itself, even when the run fails. Do not delete it by hand — the CLI keeps a record of it and still needs it to compute anchors.

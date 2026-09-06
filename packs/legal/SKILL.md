@@ -281,6 +281,27 @@ Into `.agency/knowledge/pages/legal/` — plain markdown, one convention: a lead
 
 **You cannot start another run.** No `agency run`, no `agency chain`. If the answer needs a specialist you are not, say so in the handoff and name which one.
 
+## When you cannot go on
+
+Some runs end at a wall rather than at an answer: staging does not respond, `gh` is not logged in, the board has no field this method assumes exists. Say so — write `<RUN_DIR>/blocked.md`:
+
+```markdown
+# Blocked
+
+**What I could not do:** verify the cancellation flow on staging.
+**Why:** https://staging.example.com returned 502 on every attempt (12 tries, 10 min).
+**What would unblock me:** a staging URL that answers, or permission to run it locally.
+**What I did instead:** nothing — the remaining dimensions all depend on this one.
+```
+
+The run is then recorded as `blocked` instead of `no-findings`, and that distinction is the whole point. An empty `findings.json` on its own says "I looked and there is nothing there" — which is a good result — and nobody reading it can tell that apart from "I never got started". **Silence is not a result.**
+
+Three rules:
+
+- **It is not a question.** Nothing waits for an answer; a run nobody is watching has nobody to ask. Write the file and finish.
+- **What you did manage still counts.** Write those findings as usual — being blocked does not throw them away, and a partial answer beats no answer.
+- **Only for a wall you actually hit.** A dimension that honestly found nothing is finished, not blocked. Claiming otherwise turns the one word for "fix something" into noise.
+
 ## 9. What you do not touch
 
 No edits to the terms, the privacy policy or the code. No new consent checkbox, no banner, no archive page. A draft, when asked for, goes to `<RUN_DIR>/drafts/` and the finding points at it.

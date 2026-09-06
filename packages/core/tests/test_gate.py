@@ -284,3 +284,80 @@ def test_prvni_pozice_v_retezu_ceka_druha_dispatchuje_obe(project, make_run):
     assert upstream_finding["state"] == "sent"
     decided = runs.decisions(upstream_run)
     assert decided[upstream_finding["id"]]["by"] == "chain"
+
+
+# ------------------------------------------------------------------- blocked
+
+BLOCKED_MD = """\
+# Blocked
+
+**What I could not do:** verify the cancellation flow on staging.
+**Why:** https://staging.example.com returned 502 on every attempt.
+**What would unblock me:** a staging URL that answers.
+**What I did instead:** nothing — the other dimensions depend on this one.
+"""
+
+
+def test_a_wall_is_not_the_same_as_finding_nothing(project, make_run):
+    """`no-findings` used to mean three different things at once, and one of
+    them was "I hit a wall". Silence was indistinguishable from success, and
+    while that held, nothing could honestly be run unattended."""
+    run = make_run(findings=[])
+    (run.dir / "blocked.md").write_text(BLOCKED_MD, encoding="utf-8")
+
+    result = ingest.ingest(project, run)
+
+    rec = run.record()
+    assert rec["status"] == "blocked"
+    assert rec["outputs"]["blocked"] is True
+    # The sentence a person reads first, lifted out of the file into the record.
+    assert rec["exitReason"] == "verify the cancellation flow on staging."
+    assert result["blocked"] is True
+
+
+def test_a_blocked_run_keeps_the_findings_it_managed(project, make_run):
+    """Partial work is still work. Throwing it away would make the honest
+    report — saying you were blocked — the expensive one to write."""
+    rid = "01CCCCCCCCCCCCCCCCCCCCCCCC"
+    run = make_run(run_id=rid, findings=[
+        make_finding(project, rid),
+        make_finding(project, rid, dimension="reuse",
+                     title="Nothing imports the retry helper any more",
+                     body="No caller reaches `retryOnce`; the last one went "
+                          "away with the queue rewrite.",
+                     anchor={"line": 3, "symbol": {"name": "retryOnce",
+                                                   "range": [1, 4]}}),
+    ])
+    (run.dir / "blocked.md").write_text(BLOCKED_MD, encoding="utf-8")
+
+    result = ingest.ingest(project, run)
+
+    assert run.record()["status"] == "blocked"
+    assert result["counts"]["kept"] == 2
+
+
+def test_blocked_with_nothing_written_is_still_a_result(project, make_run):
+    """The ordinary shape of being blocked: no findings.json at all. Without
+    this branch the gate returned `noOutput` and the caller recorded `failed`,
+    which reads as "the tool broke" rather than "staging is down"."""
+    run = make_run()
+    run.findings_path.unlink()
+    (run.dir / "blocked.md").write_text(BLOCKED_MD, encoding="utf-8")
+
+    result = ingest.ingest(project, run)
+
+    assert not result.get("noOutput")
+    assert run.record()["status"] == "blocked"
+    # And the gate still did not invent an empty findings.json for it.
+    assert not run.findings_path.is_file()
+
+
+def test_no_findings_still_means_no_findings(project, make_run):
+    """The other half of the contract: a pack that looked and found nothing
+    must not start reading as blocked."""
+    run = make_run(findings=[])
+
+    ingest.ingest(project, run)
+
+    assert run.record()["status"] == "no-findings"
+    assert run.record()["outputs"]["blocked"] is False

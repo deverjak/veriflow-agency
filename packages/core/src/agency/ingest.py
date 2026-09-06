@@ -36,6 +36,40 @@ GATE_REASONS = {
 }
 
 
+#: The line a blocked run is read by. The pack writes the whole file; this is
+#: the one sentence that reaches `agency status` and the chain report, so it
+#: is the one the template puts first.
+BLOCKED_LEAD = "what i could not do"
+
+
+def blocked_reason(path: Path) -> str | None:
+    """The one sentence out of `blocked.md` that says what could not be done.
+
+    `None` when the file is not there. An empty file still counts as blocked —
+    the agent said something went wrong even if it said it badly, and turning
+    that back into "no findings" is exactly the confusion this exists to end.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    for line in text.splitlines():
+        line = line.strip().lstrip("*-# ").strip()
+        if not line:
+            continue
+        head, sep, rest = line.partition(":")
+        if sep and head.strip().strip("*").lower() == BLOCKED_LEAD:
+            return rest.strip().strip("*").strip() or None
+    # No template line. The first non-empty line that is not the heading is a
+    # better answer than nothing, because the alternative is a blocked run
+    # whose record cannot say a word about why.
+    for line in text.splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            return line.strip("*").strip()[:200]
+    return None
+
+
 def _schema_errors(findings: list[dict]) -> dict[int, list[str]]:
     """Contract errors by index. Without jsonschema, required fields only."""
     errs: dict[int, list[str]] = {}
@@ -179,14 +213,27 @@ def ingest(project: Project, run: Run, min_score: int | None = None) -> dict:
     findings that had never existed.
     """
     raw_path = run.dir / "findings.raw.json"
+    blocked_path = run.dir / "blocked.md"
+    is_blocked = blocked_path.is_file()
+    # Whether the pack wrote findings at all — kept separately because the gate
+    # must not invent an empty `findings.json` for a run that wrote none.
+    wrote_findings = raw_path.is_file() or run.findings_path.is_file()
+
     if raw_path.is_file():
         findings = read_json(raw_path, default=[])
-    elif not run.findings_path.is_file():
-        # Neither `findings.json` nor `findings.raw.json`. There is nothing to
-        # put through the gate and, more to the point, nothing to claim — the
-        # caller turns this into `failed: no-output`.
-        return {"run": run.id, "noOutput": True, "raw": 0, "kept": 0,
-                "duplicates": [], "dropped": [], "counts": None, "bundle": None}
+    elif not wrote_findings:
+        if not is_blocked:
+            # Neither `findings.json` nor `findings.raw.json`. There is nothing
+            # to put through the gate and, more to the point, nothing to claim
+            # — the caller turns this into `failed: no-output`.
+            return {"run": run.id, "noOutput": True, "raw": 0, "kept": 0,
+                    "duplicates": [], "dropped": [], "counts": None,
+                    "blocked": False, "bundle": None}
+        # Blocked and nothing else written is the ordinary shape of being
+        # blocked, not a failure to write: the agent said so in the one file
+        # it could still write. It goes through the rest of the gate with an
+        # empty list so the record comes out complete.
+        findings = []
     else:
         findings = run.findings()
         if findings:
@@ -223,7 +270,8 @@ def ingest(project: Project, run: Run, min_score: int | None = None) -> dict:
             if f.get("state") == "candidate":
                 f["state"] = "held"
 
-    write_json(run.findings_path, kept)
+    if wrote_findings:
+        write_json(run.findings_path, kept)
     if dropped:
         write_json(run.dir / "gated.json", dropped)
     elif (run.dir / "gated.json").is_file():
@@ -299,8 +347,20 @@ def ingest(project: Project, run: Run, min_score: int | None = None) -> dict:
     # know whether anyone stands behind it, and writing one needlessly is
     # cheaper than not having it the day it is needed.
     rec["outputs"] = {"summary": (run.dir / "summary.md").is_file(),
-                      "handoff": (run.dir / "handoff.md").is_file()}
-    rec["status"] = "ok" if kept else ("no-findings" if raw_count == 0 else "gated-out")
+                      "handoff": (run.dir / "handoff.md").is_file(),
+                      "blocked": is_blocked}
+    # Blocked first, and regardless of how many findings came with it. A run
+    # that hit a wall may well have finished two dimensions before it did, and
+    # throwing those away would make the honest report the expensive one. What
+    # must not survive is the old reading, where that same run was recorded as
+    # `no-findings` — the status a pack gets for looking and finding nothing.
+    if is_blocked:
+        rec["status"] = "blocked"
+        reason = blocked_reason(blocked_path)
+        if reason:
+            rec["exitReason"] = reason
+    else:
+        rec["status"] = "ok" if kept else ("no-findings" if raw_count == 0 else "gated-out")
     rec.setdefault("finishedAt", now())
     run.save_record(rec)
 
@@ -310,6 +370,8 @@ def ingest(project: Project, run: Run, min_score: int | None = None) -> dict:
         "kept": rec["counts"]["kept"],
         "sent": sent,
         "held": held,
+        "blocked": is_blocked,
+        "blockedReason": rec.get("exitReason") if is_blocked else None,
         "duplicates": dups,
         "dropped": [{k: v for k, v in d.items() if k != "finding"} for d in dropped],
         "dispatchErrors": dispatch_errors,
