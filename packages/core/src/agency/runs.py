@@ -364,6 +364,23 @@ def launch_argv(memory_dir: str, prompt: str,
 #: Where a run's tool calls are recorded, when the runner can carry a hook.
 TOOL_CALLS = "tool-calls.jsonl"
 
+#: Which tools can back a cited source, and which of their inputs is worth
+#: keeping. A whitelist per TOOL, not per key: `tool_input` of a `Write`
+#: carries the whole file, and a record of everything the agent touched would
+#: be a different file with a different purpose. A tool that is not here
+#: writes no row at all.
+#:
+#: `command` was the only one until 2026-09-06, which quietly meant that a
+#: pack whose work is on the web — `ceo` reads it every run and may not write
+#: a claim it cannot cite — was the one pack whose sources could never be
+#: checked: `WebFetch` and `WebSearch` carry a `url` and a `query`, never a
+#: `command`, so every one of their calls was dropped here.
+RECORDED_TOOLS = {
+    "Bash": ("command",),
+    "WebFetch": ("url",),
+    "WebSearch": ("query",),
+}
+
 #: Agency's own remarks about a run in progress — a loop, a flood of refusals,
 #: a budget overrun. A SECOND file on purpose: `agent.jsonl` is the runner's
 #: raw transcript and writing our sentences into it would corrupt the one
@@ -421,20 +438,29 @@ def record_tool_call(run_dir: Path, payload: dict) -> dict | None:
     """One line of `tool-calls.jsonl`, from a PostToolUse hook's own stdin.
 
     The shape of what arrives is the runner's, probed on 2026-09-06 rather
-    than assumed: `tool_name`, `tool_input.command` (the literal command line,
-    which is the whole basis of provenance) and `tool_response`. There is no
-    exit code in it — what there is is stdout and stderr — so the time is
-    added here and the outcome is not claimed.
+    than assumed: `tool_name`, `tool_input` (whose shape is the tool's own —
+    `command` for a shell call, `url` for a fetch) and `tool_response`. There
+    is no exit code in it — what there is is stdout and stderr — so the time
+    is added here and the outcome is not claimed.
 
-    `None` for a call with no command: only shell calls can back a cited
-    source, and a `Read` is not evidence that a command ran.
+    The input is kept under `input` rather than flat, because `command` is one
+    kind of input among several and a flat row would have to grow a key per
+    tool. Rows written before that change are flat and stay readable —
+    `ingest.commands_run` accepts both.
+
+    `None` for a tool that cannot back a cited source (`RECORDED_TOOLS`): a
+    `Read` is not evidence that anything ran.
     """
-    tool = payload.get("tool_name")
-    command = ((payload.get("tool_input") or {}).get("command")
-               if isinstance(payload.get("tool_input"), dict) else None)
-    if not command:
+    tool = str(payload.get("tool_name") or "")
+    keys = RECORDED_TOOLS.get(tool)
+    raw = payload.get("tool_input")
+    if not keys or not isinstance(raw, dict):
         return None
-    row = {"at": now(), "tool": tool, "command": " ".join(str(command).split())}
+    kept = {k: " ".join(str(raw[k]).split()) for k in keys
+            if raw.get(k) is not None and str(raw[k]).strip()}
+    if not kept:
+        return None
+    row = {"at": now(), "tool": tool, "input": kept}
     path = Path(run_dir) / TOOL_CALLS
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "a", encoding="utf-8", newline="\n") as f:

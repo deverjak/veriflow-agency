@@ -27,7 +27,8 @@ def _calls(run, *commands: str) -> None:
     path = run.dir / runs.TOOL_CALLS
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         for c in commands:
-            f.write(json.dumps({"at": runs.now(), "tool": "Bash", "command": c}) + "\n")
+            f.write(json.dumps({"at": runs.now(), "tool": "Bash",
+                                "input": {"command": c}}) + "\n")
 
 
 def _with_source(project, run_id, source: str) -> dict:
@@ -109,19 +110,82 @@ def test_the_hook_records_the_command_the_runner_reports(project, make_run):
         "tool_response": {"stdout": "{}", "stderr": ""},
     })
 
-    assert row["command"] == "agency graph impact --files src/x.ts"
+    assert row["input"]["command"] == "agency graph impact --files src/x.ts"
     assert ingest.commands_run(run) == ["agency graph impact --files src/x.ts"]
 
 
-def test_a_call_with_no_command_is_not_evidence(project, make_run):
-    """A `Read` is not proof that a command ran, so it is not written at all —
+def test_rows_written_before_the_input_key_are_still_read(project, make_run):
+    """Committed run history is not rewritten. A flat `{"command": …}` row —
+    every row this file held until 2026-09-06 — must keep proving what it
+    proved, or the change silently invalidates every past run's provenance."""
+    run = make_run()
+    path = run.dir / runs.TOOL_CALLS
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(json.dumps({"at": runs.now(), "tool": "Bash",
+                            "command": "agency graph impact --depth 3"}) + "\n")
+
+    assert ingest.commands_run(run) == ["agency graph impact --depth 3"]
+
+
+def test_the_web_is_recorded_too(project, make_run):
+    """The pack whose work is on the web was the one pack whose sources could
+    never be checked: `WebFetch` carries a `url`, never a `command`, so until
+    2026-09-06 every one of its calls was dropped here."""
+    run = make_run()
+
+    fetched = runs.record_tool_call(run.dir, {
+        "hook_event_name": "PostToolUse", "tool_name": "WebFetch",
+        "tool_input": {"url": "https://kickk.cz/vyzvy",
+                       "prompt": "what does the call require"},
+    })
+    searched = runs.record_tool_call(run.dir, {
+        "tool_name": "WebSearch", "tool_input": {"query": "KIC KK výzva 2026"}})
+
+    assert fetched["input"] == {"url": "https://kickk.cz/vyzvy"}, "the prompt is not a locator"
+    assert searched["input"] == {"query": "KIC KK výzva 2026"}
+
+
+def test_a_web_only_run_counts_as_someone_watching(project, make_run):
+    """`None` and `[]` mean opposite things (`commands_run`). A run that
+    fetched pages and ran no shell command was recorded — so a finding citing
+    a command that never ran must still be caught."""
+    run = make_run(findings=[_with_source(project, "x", "agency graph impact")])
+    runs.record_tool_call(run.dir, {
+        "tool_name": "WebFetch", "tool_input": {"url": "https://kickk.cz/"}})
+
+    result = ingest.ingest(project, run)
+
+    assert ingest.commands_run(run) == []
+    assert result["counts"]["kept"] == 0
+    assert result["dropped"][0]["reason"] == "unproven-source"
+    assert run.record()["context"]["toolCalls"] is True
+
+
+def test_a_tool_that_cannot_back_a_source_is_not_evidence(project, make_run):
+    """A `Read` is not proof that anything ran, so it is not written at all —
     a file of everything the agent touched would be a different file with a
-    different purpose."""
+    different purpose. And a `Write` payload carries the whole file, which is
+    the reason the whitelist is per tool rather than per key."""
     run = make_run()
 
     assert runs.record_tool_call(run.dir, {
         "tool_name": "Read", "tool_input": {"file_path": "src/auth.ts"}}) is None
+    assert runs.record_tool_call(run.dir, {
+        "tool_name": "Write", "tool_input": {"file_path": "a.ts",
+                                             "content": "x" * 5000}}) is None
     assert ingest.commands_run(run) is None, "and no empty file is left behind"
+
+
+def test_a_recorded_tool_with_an_empty_input_writes_nothing(project, make_run):
+    """A `WebSearch` whose query did not arrive is not a row with an empty
+    locator — it is no row, or the file starts proving calls it cannot show."""
+    run = make_run()
+
+    assert runs.record_tool_call(run.dir, {
+        "tool_name": "WebSearch", "tool_input": {"query": "  "}}) is None
+    assert runs.record_tool_call(run.dir, {
+        "tool_name": "Bash", "tool_input": None}) is None
+    assert ingest.commands_run(run) is None
 
 
 def test_the_hook_travels_as_an_argument_not_as_a_file(project, make_run):

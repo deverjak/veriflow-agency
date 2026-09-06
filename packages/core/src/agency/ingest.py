@@ -67,6 +67,22 @@ def _head(command: str) -> list[str]:
     return head
 
 
+def _command_of(row: dict) -> str | None:
+    """The shell command a recorded tool call ran, if it ran one.
+
+    Two shapes, on purpose: rows written before 2026-09-06 are flat
+    (`{"command": …}`), rows since carry the tool's own input under `input`,
+    because `command` is one kind of input among several. Committed run
+    history is not rewritten, so both are read.
+    """
+    if row.get("command"):
+        return str(row["command"])
+    data = row.get("input")
+    if isinstance(data, dict) and data.get("command"):
+        return str(data["command"])
+    return None
+
+
 def commands_run(run: Run) -> list[str] | None:
     """What this run actually executed — `None` when nobody was recording.
 
@@ -89,8 +105,9 @@ def commands_run(run: Run) -> list[str] | None:
                     row = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                if row.get("command"):
-                    found.append(str(row["command"]))
+                command = _command_of(row)
+                if command:
+                    found.append(command)
     except OSError:
         return None
     return found

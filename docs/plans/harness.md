@@ -523,6 +523,8 @@ Trojnásobek je jediná výjimka z pravidla „nezabíjet na heuristiku" (§0.5)
 - **`exitCode` v payloadu není.** Byl v původním příkladu vymyšlený. Co tam je: `tool_response.stdout` / `.stderr` / `.interrupted`. Provenienci to nevadí — otázka zní „spustil ten příkaz", ne „uspěl" — ale zapisovaný řádek musí odpovídat tomu, co hook doopravdy dostane. Čas si dopiš sám (`at`), payload ho nenese.
 - **PostToolUse se pouští jen po volání, které proběhlo.** Odepřené volání záznam nevyrobí, což je pro provenienci správně: „spustil jsem graf" má být false, když ho brána nepustila.
 
+**Doplněno 6. 9. 2026 ([`outputs.md`](outputs.md), Krok 1):** zapisovaný řádek už není `{at, tool, command}`, ale `{at, tool, input: {…}}`, a záznam se neváže na `command` — `WebFetch` a `WebSearch` `command` nemají a do téhle chvíle se zahazovaly, čímž byl `ceo` jediný pack, jehož zdroje nešlo zkontrolovat. Ploché historické řádky se čtou dál.
+
 Kam se má zapisovat, hook vědět nemusí a **žádnou ENV proměnnou na to nepotřebuje**: cesta k `RUN_DIR` se zapeče přímo do příkazu hooku ve chvíli, kdy Agency staví `--settings`. Ověřeno stejnou sondou — hook s absolutní cestou v příkazu psal tam, kam měl.
 
 **b) kontrola v bráně.** Nový důvod v `GATE_REASONS` ([`ingest.py:31`](../../packages/core/src/agency/ingest.py)): `unproven-source` — *„evidence cites a command that never ran in this run"*.

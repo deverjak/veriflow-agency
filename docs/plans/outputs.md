@@ -3,6 +3,8 @@
 **Datum:** 2026-09-06
 **Navazuje na:** [`agency-v1.md`](agency-v1.md) (pack je skill v projektu, žádná konfigurace), [`harness.md`](harness.md) (provenience tool callů, brána, metriky, revize packu), [`findings-ownership.md`](findings-ownership.md) (board je stav, lokál je brána a stopa), [`teams.md`](teams.md) (řetěz), [`shared-memory.md`](shared-memory.md) (paměť patří projektu)
 **Řeší:** jádro dnes umí evidovat jediný druh výstupu — nález s kotvou na soubor a řádek. PO a CEO produkují rozhodnutí, odpovědi, sázky a drafty, a **oba už jádro kvůli tomu obcházejí**. Plán zobecňuje mechanismy, které v jádru fungují (brána, dedup, sinky, paměť, metriky), tak aby přestaly předpokládat code-review nález — a nedělá z Agency univerzální platformu.
+**Stav k 6. 9. 2026:** Krok 1 hotový a commitnutý (testy 397 zelených). Rozpracovaný: Krok 2.
+
 **Nedělá:** nový generický agent framework. Žádný plugin systém metrik, žádný registr typů, žádná doménová znalost v jádru. Přibývají přesně dvě abstrakce — `TypePolicy` a `Run.scope`.
 
 ---
@@ -209,23 +211,27 @@ Viz §5. Output bez přirozeného zdroje zpětné vazby je `write-only`, ne life
 
 Pořadí je záměrné: **žádný krok neuvolní kontrolu dřív, než existuje její náhrada**, a ověřovací svislý řez je čtvrtý, ne poslední.
 
-### Krok 1 — provenience i pro tooly bez příkazu (~2 h)
+### Krok 1 — provenience i pro tooly bez příkazu (~2 h) — **hotovo**
 
 **Proč:** samostatná chyba s okamžitou hodnotou, nezávislá na zbytku plánu (§0.3).
 
-**Co se mění:** [`record_tool_call`](../../packages/core/src/agency/runs.py) přestane vyžadovat `tool_input.command` a zapíše obecnější řádek:
+**Co se změnilo:** [`record_tool_call`](../../packages/core/src/agency/runs.py) přestal vyžadovat `tool_input.command` a zapisuje obecnější řádek:
 
 ```json
 { "at": "…", "tool": "WebFetch", "input": { "url": "https://kickk.cz/…" } }
 ```
 
-`command` je jeden druh vstupu, ne podmínka záznamu. `unproven` čte dál jen řádky s příkazem — jeho chování se v tomhle kroku **nemění**, jen mu přibude, z čeho bude číst v Kroku 2.
+`command` je jeden druh vstupu, ne podmínka záznamu. `unproven` čte dál jen řádky s příkazem — jeho chování se v tomhle kroku **nezměnilo**, jen mu přibylo, z čeho bude číst v Kroku 2.
 
-**Pozor:** `input` se nesmí zapisovat celý bez rozmyslu — `tool_input` u `Write` obsahuje celý soubor. Zapisuje se whitelist klíčů podle toolu (`command`, `url`, `query`, `pattern`).
+**Whitelist je per TOOL, ne per klíč** (`RECORDED_TOOLS` v `runs.py`): `Bash → command`, `WebFetch → url`, `WebSearch → query`. Tool, který v mapě není, řádek nevyrobí vůbec. Důvod je dvojí — `tool_input` u `Write` nese celý soubor, a záznam všeho, čeho se agent dotkl, je jiný soubor s jiným účelem. Oproti první verzi tohohle kroku **v mapě není `Grep`**: `pattern` by dnes neměl konzumenta, protože `_is_command` `grep ` mezi `COMMAND_PREFIXES` nemá a žádný evidence kind se na něj neodkazuje. Až bude, přidá se řádek do mapy.
 
-**Testy:** `test_provenance.py` — `WebFetch` s `url` vyrobí řádek; `Write` s `content` řádek nevyrobí (nebo vyrobí bez obsahu).
+**Zpětná kompatibilita:** řádky psané před změnou jsou ploché (`{"command": …}`). `commands_run` čte přes nové `_command_of()` **oba tvary** — committed historie běhů se nepřepisuje a její provenience musí dál platit.
 
-**Hotovo, když:** CEO běh, který si otevřel tři stránky, má v `tool-calls.jsonl` tři řádky s URL.
+**Vedlejší důsledek, který je zlepšení:** běh, který jen stahoval web a nespustil žádný příkaz, nechá soubor existovat s nulou příkazů. `commands_run` proto vrátí `[]`, ne `None` — a nález, který v takovém běhu cituje příkaz, se poprvé správně zahodí jako `unproven-source`. Dřív takový běh soubor nezanechal vůbec a kontrola se přeskočila celá; „nikdo nezapisoval" se tím přestalo plést s „zapisovalo se a žádný příkaz neběžel".
+
+**Testy:** `test_provenance.py` — `WebFetch`/`WebSearch` vyrobí řádek s locatorem a bez `prompt`u; `Read` i `Write` nevyrobí nic; prázdný `query` nevyrobí řádek s prázdným locatorem; plochý historický řádek se dál čte; web-only běh je `toolCalls: true` a zahodí citovaný příkaz, který neběžel.
+
+**Hotovo, když:** ~~CEO běh, který si otevřel tři stránky, má v `tool-calls.jsonl` tři řádky s URL.~~ Splněno na úrovni jednotek; přejímka nad reálným CEO během patří k Kroku 4.
 
 ---
 
