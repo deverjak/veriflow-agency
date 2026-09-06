@@ -9,6 +9,68 @@
 
 ---
 
+## Pro další session — než začneš
+
+Tahle sekce je pro agenta (nebo pro mě za měsíc), který v plánu pokračuje. Číslované sekce níž jsou plán; tohle je způsob práce, který se u Kroků 1–4 osvědčil, a pasti, na které se cestou došláplo.
+
+### Kde to stojí, ověřitelně
+
+```powershell
+git log --oneline 31cbea3^..HEAD     # commity tohohle plánu, jeden na krok
+pwsh -NoProfile -File scripts/test.ps1   # jádro + smoke extension; musí říct „obojí prošlo“
+```
+
+Jen jádro, když jde o rychlost: `cd packages/core; uv run --with pytest --with jsonschema python -m pytest -q`
+
+Stav k 6. 9. 2026: Kroky 1–4 hotové, 446 testů. **Další je Krok 5** (`subject` + `run.scope`), a je naléhavější, než plán původně tvrdil — důvod je u Kroku 4.
+
+### První pohyb v Kroku 5
+
+V tomhle pořadí, protože každý další krok stojí na předchozím:
+
+1. **Dohodnout slovník `subject.kind`** a zapsat ho do §1.4 dřív, než se napíše kód. `bet:regional-distribution` ano, `strategy` ne — hrubý subject vypne pojistku v dedupu (§6, past 3).
+2. `subject` do `finding.v1` jako nepovinné pole, `dedup.symbol_key` → `subject_key` s pořadím *symbol → soubor → subject → nic*.
+3. `run.scope` — vyrábí ho **příprava**, ne agent (§3.2), a doménovou znalost dodá pack svým skriptem (`backlog.py snapshot` u PO, `strategy.md` u CEO, graf u review).
+4. `knowledge.here()` přepnout na průnik `subject ∩ scope`. **Pro review se výsledek nesmí změnit** — to je ta jediná věc, která v tomhle kroku dokáže selhat tiše.
+
+### Konvence, které drží plán a kód pohromadě
+
+**Jeden krok = jeden commit**, a v témže commitu se aktualizuje tenhle plán. Krok se v nadpisu označí `— **hotovo**`, „Co se mění" se přepíše na „Co se změnilo", a věta v „Hotovo, když" se ~~přeškrtne~~ a doplní, ne smaže — zůstane vidět, co se slibovalo.
+
+**Když kód řekne něco jiného než plán, opraví se plán, ne se to zamlčí.** Krok 1 zúžil whitelist oproti závorce v plánu, Krok 4 předsunul tři věci z jiných kroků; obojí je v plánu napsané i s důvodem. `harness.md` má na to vlastní odstavec („Čtyři věci, které plán tvrdil a kód říkal něco jiného") a stojí to za napodobení.
+
+**Jazyk:** plány v `docs/plans/` česky, všechno ostatní — kód, komentáře, testy, `SKILL.md`, CLI výstup — anglicky. Commit messages česky, ve stylu ostatních: co se změnilo, proč, a co se cestou ukázalo jinak.
+
+**Testy nesou důvod, ne jen tvrzení.** Docstring testu má říct, čemu ten test brání — `test_outputs.py` je tak psaný celý a je to to, co po refaktoru zůstane čitelné.
+
+### Pasti, na které se v Krocích 1–4 došláplo
+
+1. **Bash tool utne příkaz kolem 8 kB.** Heredoc s delším souborem skončí `unexpected EOF`. Delší obsah psát přes Write do scratchpadu a pak `cat >> soubor`.
+2. **Soubory mají CRLF.** `Read`/`Write` to řeší, `python -c` s `read_text`/`write_text` taky (universal newlines). Ruční porovnávání bajtů ne — `cat -A` to ukáže.
+3. **Kotvení `Edit` uvnitř třídy.** Anchor na `@property def decided` vložil novou třídu doprostřed `Tally` a osiřelý `as_dict` se stal metodou té nové. Testy to chytly hned, ale kotvit se má na text, který je v souboru jen jednou, a u tříd radši na jejich poslední řádek.
+4. **`install_pack(..., {"minScore": 0})` dá 70**, protože `int(m.get("minScore") or 70)` — nula je falsy. Test, který chce prahem neprocházet, musí dát `minScore` skutečné číslo.
+5. **Dva testovací outputy se stejným tělem jsou duplicita**, správně a nečekaně. Když test potřebuje dva různé outputy, musí mít dvě různá *tvrzení*, ne dva různé titulky — otisk se počítá z `body` a nikdy z titulku.
+6. **`agency doctor` a schéma jsou dvě různé vrstvy.** Pattern u `artifact` zastaví `/etc/passwd`, ale `evidence/../../x` mu vyhoví a chytá to až `resolve()`. Když se přidává kontrola cesty, patří obě.
+
+### Rozhodnutí, která se nesmějí tiše zvrátit
+
+Pokud se některé z nich příště ukáže jako špatné, ať se zvrátí **nahlas** — s odstavcem v plánu, ne úpravou kódu:
+
+| | proč |
+|---|---|
+| Brána nikdy nevolá ven (§3.1) | jinak dá témuž běhu dvě odpovědi ve dvou dnech a `replay` přestane být regresní test |
+| `scope` nepíše agent (§3.2) | jinak je paměť gameable a stejně přijde pozdě |
+| Jádro nepíše paměť (§3.3) | destilace není mechanická operace; `do-not-report` funguje jen proto, že rejection má triviální tvar |
+| `anchor: none` vyžaduje `evidence.required` | „sázka potřebuje jiný druh důkazu", ne „sázka nepotřebuje důkaz" |
+| `finding` nedostane druhou metriku | precision už jméno má; druhý poměr nad týmiž daty je spor, ne měření |
+| Lifecycle se nevymýšlí bez zdroje feedbacku (§5) | jinak vznikne framework, který půl roku vypadá, že se učí |
+
+### Co se odsud udělat nedá
+
+Ostrý běh CEO packu nad repem Kvesteros a přenos `packs/ceo/pack.json` + `SKILL.md` tam. `packs/` jsou referenční kopie packů, které živě bydlí v cizích repozitářích — proto poslední test v `test_outputs.py` čte skutečný `packs/ceo/pack.json`, aby si někdo všiml, kdyby se manifest a `SKILL.md` rozešly. Totéž bude platit pro PO v Kroku 10.
+
+---
+
 ## 0. Diagnóza — čím je to doložené
 
 ### 0.1 Dva packy jádro obcházejí, každý na jiné ose
