@@ -13,6 +13,7 @@
   ],
   "minScore": 70,
   "sink": "python .claude/skills/agency-po/scripts/backlog.py draft --finding {id} --run-dir {runDir}",
+  "budget": { "turns": 80, "minutes": 35 },
   "dimensions": [
     { "id": "happy-path", "title": "The main flows do what they promise" },
     { "id": "edge-cases", "title": "Boundaries, empty states, unexpected input" },

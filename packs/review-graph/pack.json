@@ -15,6 +15,7 @@
   ],
   "minScore": 80,
   "sink": "python .claude/skills/agency-po/scripts/backlog.py draft --finding {id} --run-dir {runDir}",
+  "budget": { "turns": 60, "minutes": 25 },
   "dimensions": [
     { "id": "correctness", "title": "Correctness and blast radius" },
     { "id": "tests", "title": "Test coverage" },

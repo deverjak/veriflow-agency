@@ -762,9 +762,13 @@ class Watch:
     wrong guess here costs a false alarm on every legitimate retry loop.
     """
 
-    def __init__(self, run_dir: Path, say=None) -> None:
+    def __init__(self, run_dir: Path, say=None, minutes: float | None = None,
+                 started: float | None = None) -> None:
         self.run_dir = run_dir
         self.say = say or (lambda text: None)
+        self.started = started if started is not None else time.monotonic()
+        self.minutes = minutes
+        self.over_budget = False
         self.loops = 0
         self._last: tuple | None = None
         self._same = 0
@@ -783,6 +787,15 @@ class Watch:
             return set()
 
     def see(self, event) -> None:
+        # Said the moment it happens rather than at the end, which is the whole
+        # difference: a PO run once burned 41 minutes and decided nothing, and
+        # nobody knew until it was over and the number was already spent.
+        if (self.minutes and not self.over_budget
+                and time.monotonic() - self.started > self.minutes * 60):
+            self.over_budget = True
+            self.say(f"past the {self.minutes:g} minutes this pack calls normal — "
+                     f"letting it finish, it may be mid-write")
+
         if event.kind == "tool":
             key = (event.tool, event.detail)
             if key == self._last:
@@ -811,10 +824,19 @@ class Watch:
                          f"needs it and `needs` in pack.json does not grant it")
 
 
+#: How far past its own declared budget a run has to go before it is treated
+#: as a fault rather than an overrun. Three times what the pack itself called
+#: normal is not a deviation any more, which is what makes this the one
+#: exception to "nothing is killed on a heuristic": the number is the pack's,
+#: not a guess about it.
+RUNAWAY = 3
+
+
 def attend(project: Project, run: Run, launch: list[str], cwd: Path,
            dialect: str | None = None, on_event=None,
            chain: dict | None = None, timeout: float | None = None,
-           append: bool = False, message_file: str = "agent.md") -> dict:
+           append: bool = False, message_file: str = "agent.md",
+           budget: dict | None = None) -> dict:
     """Start the agent, wait for it, and record how it went.
 
     `append` is a follow-up: the session is being continued, so its stream is
@@ -826,7 +848,12 @@ def attend(project: Project, run: Run, launch: list[str], cwd: Path,
     env = agent_env(run, chain)
     started = time.monotonic()
     collected: list = []
-    watch = Watch(run.dir, say=out.note)
+    minutes = (budget or {}).get("minutes")
+    watch = Watch(run.dir, say=out.note, minutes=minutes, started=started)
+    # The runaway fuse. `timeout` given explicitly still wins — a caller that
+    # named a ceiling meant it.
+    if timeout is None and minutes:
+        timeout = minutes * 60 * RUNAWAY
 
     if dialect:
         raw = (run.dir / "agent.jsonl").open("a" if append else "w", encoding="utf-8")
@@ -878,6 +905,17 @@ def attend(project: Project, run: Run, launch: list[str], cwd: Path,
     # here rather than observed by it. Carrying its object over wholesale let
     # a run invent `cost.note`, and the record then failed the schema this
     # same tool validates it against — so only the fields run.v1 knows survive.
+    # Over budget on either axis. `minutes` is measurable for every run that
+    # was waited for; `turns` only for a streamed one, so an attended run is
+    # simply never over on turns rather than being judged on a number it does
+    # not have (R6).
+    turn_budget = (budget or {}).get("turns")
+    over = bool(watch.over_budget)
+    if minutes and seconds > minutes * 60:
+        over = True
+    if turn_budget and (summary.get("turns") or 0) > turn_budget:
+        over = True
+
     inherited = {k: v for k, v in (rec.get("cost") or {}).items() if k in COST_FIELDS}
     # A follow-up adds to the run's totals; a first run has nothing to add to.
     was = inherited if append else {}
@@ -893,11 +931,17 @@ def attend(project: Project, run: Run, launch: list[str], cwd: Path,
            if tokens.get("input") is not None else {}),
         **({"outputTokens": _sum(was.get("outputTokens"), tokens["output"])}
            if tokens.get("output") is not None else {}),
+        **({"overBudget": True} if over else {}),
     }
     rec["finishedAt"] = now()
     run.save_record(rec)
     return {"exitCode": code, "wallClockSeconds": seconds,
             "turns": summary.get("turns"), "usd": summary.get("usd"),
+            "overBudget": over,
+            # 124 is what `proc.stream` returns when it stopped the agent at the
+            # ceiling. The caller needs to say that rather than "exited with
+            # 124", which reads like the runner crashed.
+            "runaway": code == 124 and bool(timeout),
             "denied": (agent.get("denied") or {}).get("count") or 0}
 
 

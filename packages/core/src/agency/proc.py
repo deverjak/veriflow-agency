@@ -12,6 +12,7 @@ import re
 import shutil
 import signal
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
@@ -112,11 +113,21 @@ def stream(args: Sequence[str], cwd: str | Path | None = None,
     except OSError:
         return 127
 
+    deadline = (time.monotonic() + timeout) if timeout else None
     try:
         for line in p.stdout:  # type: ignore[union-attr]
             line = line.rstrip("\r\n")
             if line and on_line:
                 on_line(line)
+            # The ceiling has to be checked HERE, not after the loop. A run
+            # that keeps talking never reaches `p.wait`, so a timeout enforced
+            # only there means "how long to wait after it stopped by itself" —
+            # which is not a ceiling at all, and is exactly what a runaway
+            # fuse must not be. (A run that hangs while emitting nothing still
+            # blocks in this loop; catching that needs a reader thread and is
+            # a different problem from a run that works too long.)
+            if deadline and time.monotonic() > deadline:
+                raise subprocess.TimeoutExpired(exe, timeout or 0)
         return p.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
         # The ceiling is time, not money: on a subscription the cost is an

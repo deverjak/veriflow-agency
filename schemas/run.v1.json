@@ -329,6 +329,10 @@
             "number",
             "null"
           ]
+        },
+        "overBudget": {
+          "type": "boolean",
+          "description": "The run went past what its pack declared normal for it (`budget` in pack.json). Not an error and not a stop — the run finishes, because it may be mid-write of findings.json. Recorded so a pack whose every run overruns can be told from one that had a bad day."
         }
       }
     },

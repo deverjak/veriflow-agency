@@ -138,6 +138,7 @@ Everything here is read by the core. Anything the *agent* acts on belongs in `SK
 | `needs` | The commands the agent is allowed to run, as **prefixes**: `"git"`, `"gh issue list"`, `"npx playwright test"`. Web access is a tool rule, not a command: `"WebSearch"`, `"WebFetch"`. Write and Edit are granted already — do not list them. |
 | `needsUnattended` | Consequential commands granted **only** when nobody could answer a prompt (a chain member, or `--unattended`). A command here keeps asking on a normal attended run. This is where `promote`, `decide`, anything hard to undo belongs. |
 | `minScore` | The gate's threshold, default 70. Raise it for a domain where a weak finding costs more than a missed one. |
+| `budget` | `{"turns": 60, "minutes": 25}` — what a NORMAL run of this pack costs. Both optional. It is a declaration, not a limit: over it the run is flagged and carries on, and only at three times over is it stopped as a runaway. Guess from what the method actually does — a pack that reads one diff is not a pack that drives a browser — and expect to correct it once real runs exist. |
 | `sink` | The command that puts one gated finding on the board, with `{id}` and `{runDir}`. **Omit it entirely when there is no board.** |
 | `dimensions` | `[{"id": …, "title": …}]` from step 3. |
 

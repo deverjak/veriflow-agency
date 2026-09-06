@@ -641,7 +641,7 @@ def cmd_run(args, chain: dict | None = None) -> int:
                                  'Turns, cost and a resumable session need '
                                  '--unattended.')}\n")
         return _wait_for_agent(project, run, launch, wt, wt_owned,
-                               dialect=dialect, chain=chain)
+                               dialect=dialect, chain=chain, budget=pack.budget)
 
     if args.launch:
         import os
@@ -911,13 +911,14 @@ def _hold_window(hold: bool) -> None:
 
 
 def _wait_for_agent(project, run, launch: list[str], wt: Path, wt_owned: bool,
-                    dialect: str | None = None, chain: dict | None = None) -> int:
+                    dialect: str | None = None, chain: dict | None = None,
+                    budget: dict | None = None) -> int:
     """`--wait`: start the agent, wait for it, and run the gate right away."""
     out.say(f"  {out.bold('launching ' + launch[0] + '…')}  "
             f"{out.dim('Ctrl-C stops the run')}\n")
     try:
         result = runs.attend(project, run, launch, wt,
-                             dialect=dialect, chain=chain,
+                             dialect=dialect, chain=chain, budget=budget,
                              on_event=_progress if dialect else None)
     except KeyboardInterrupt:
         info = runs.abandon(project, run, "stopped with Ctrl-C while the agent was running")
@@ -938,7 +939,17 @@ def _wait_for_agent(project, run, launch: list[str], wt: Path, wt_owned: bool,
 
     denied = (run.record().get("agent") or {}).get("denied") or {}
 
-    if code != 0:
+    if result.get("runaway"):
+        # Three times what the pack itself declared normal. The one place
+        # anything is stopped on a number, and the number is the pack's own.
+        minutes = (budget or {}).get("minutes")
+        why = (f"stopped at {runs.RUNAWAY}x the pack's own budget "
+               f"({minutes:g} min)" if minutes else "stopped at its ceiling")
+        runs.failed(run, why)
+        out.fail(f"{why} — the run is recorded as failed")
+        out.say(f"  {out.dim('Raise `budget` in pack.json if this is what a real run costs here.')}")
+        out.say()
+    elif code != 0:
         runs.failed(run, f"the agent exited with {code}")
         out.fail(f"the agent exited with {code} — the run is recorded as failed")
         if proc.which(launch[0]) is None:
@@ -1487,6 +1498,9 @@ def cmd_metrics(args) -> int:
                 continue
             print(f"  {out.dim(label.ljust(15))} {fmt(c[key])}  "
                   f"{out.dim(f'from {p.get(key, 0)} of {total} runs (streamed only)')}")
+        if c.get("usdPerSentFinding") is not None:
+            print(f"  {out.dim('per finding'.ljust(15))} ${c['usdPerSentFinding']:.2f}  "
+                  f"{out.dim('to get one onto the board (streamed runs only)')}")
         blind = p.get("attended") or 0
         if blind and total:
             print(f"  {out.dim('Blind')}           "

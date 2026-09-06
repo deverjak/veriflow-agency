@@ -97,6 +97,26 @@ class Pack:
         return int(self.manifest.get("minScore") or 70)
 
     @property
+    def budget(self) -> dict:
+        """What this pack considers a normal run — `{"turns": …, "minutes": …}`.
+
+        Both optional, and a pack that declares neither is not policed. The
+        pack is the only thing that could know: a legal review reading three
+        regulations and a reviewer walking one diff have nothing in common
+        except that somebody eventually pays for both.
+
+        It is a declaration, not a limit. Going over produces a line and a
+        flag; only three times over is treated as a fault (see `runs.attend`),
+        and that is the single exception to "nothing is killed on a heuristic"
+        — because three times a pack's own declared norm is not a deviation.
+        """
+        b = self.manifest.get("budget") or {}
+        turns = b.get("turns")
+        minutes = b.get("minutes")
+        return {"turns": int(turns) if turns else None,
+                "minutes": float(minutes) if minutes else None}
+
+    @property
     def requires(self) -> list[str]:
         return list(self.manifest.get("requires") or [])
 

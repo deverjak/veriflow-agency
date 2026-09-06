@@ -13,6 +13,7 @@
     "WebSearch", "WebFetch"
   ],
   "minScore": 80,
+  "budget": { "turns": 60, "minutes": 30 },
   "dimensions": [
     { "id": "positioning", "title": "Where we claim to differ and do not" },
     { "id": "focus", "title": "Roadmap and work in flight against the bets" },

@@ -20,6 +20,7 @@
   ],
   "minScore": 75,
   "sink": "python .claude/skills/agency-po/scripts/backlog.py draft --finding {id} --run-dir {runDir}",
+  "budget": { "turns": 60, "minutes": 25 },
   "dimensions": [
     { "id": "scope", "title": "Work in flight that no commitment covers" },
     { "id": "readiness", "title": "Is this actually ready to be built" },

@@ -123,7 +123,7 @@ def collect(project: Project, runs: list[Run] | None = None) -> dict:
     reasons: dict[str, int] = defaultdict(int)
     gated_by: dict[str, int] = defaultdict(int)
 
-    raw = kept = duplicates = 0
+    raw = kept = duplicates = sent = 0
     ages: list[float] = []
     run_rows = []
 
@@ -204,6 +204,10 @@ def collect(project: Project, runs: list[Run] | None = None) -> dict:
         raw += counts.get("raw") or 0
         kept += counts.get("kept") or 0
         duplicates += counts.get("duplicates") or 0
+        if (rec.get("trigger") or {}).get("attended") is False:
+            # Only from the runs whose price is known, so the two halves of
+            # the fraction come from the same population.
+            sent += counts.get("sent") or 0
         for k, v in (rec.get("gatedBy") or {}).items():
             gated_by[k] += v
 
@@ -324,6 +328,11 @@ def collect(project: Project, runs: list[Run] | None = None) -> dict:
             "usd": round(usd_total, 4) if pop["usd"] else None,
             "turns": turns_total if pop["turns"] else None,
             "denied": denied_total if pop["denied"] else None,
+            # What a finding that reached the board actually cost. One number,
+            # and it is the one that changes a decision about a model — both
+            # halves of it were already being written and nobody divided them.
+            "usdPerSentFinding": (round(usd_total / sent, 4)
+                                  if sent and pop["usd"] else None),
             # Every number above, and how many runs it could have come from.
             # A number without the population it came from is worse than no
             # number: it reads as if it were about all of them.

@@ -25,6 +25,12 @@ from agency.util import write_json
 #: binárkou — a ty ji potřebují zpátky.
 real_attend = proc.attend
 
+#: The same, for `proc.stream`. The guard in `conftest.py` stays in place — it
+#: is what stops a test reaching a real binary — and the one test below that
+#: examines this function fakes `Popen` under it, so nothing is launched
+#: either way.
+real_stream = proc.stream
+
 
 def agent(monkeypatch, code: int = 0, leaves=None):
     """Agent, ze kterého je vidět jen to podstatné: co po sobě nechal a jak
@@ -213,3 +219,116 @@ def test_wait_a_launch_se_vylucuji(project, capsys):
         cli.main(["run", "review-graph", "--wait", "--launch", "--repo", str(project.root)])
 
     assert "not allowed with" in capsys.readouterr().err
+
+
+# ------------------------------------------------------------------ budget
+
+def _budgeted(project, run, monkeypatch, *, seconds: float, budget: dict,
+              turns: int = 3):
+    """A run that takes `seconds` of wall clock, as far as the record cares."""
+    clock = {"t": 0.0}
+    monkeypatch.setattr(runs.time, "monotonic", lambda: clock["t"])
+
+    def stream(argv, cwd=None, env=None, on_line=None, timeout=None):
+        clock["t"] += seconds
+        on_line(json.dumps({"type": "result", "subtype": "success",
+                            "is_error": False, "num_turns": turns,
+                            "session_id": "s", "result": "done",
+                            "permission_denials": []}))
+        return 0
+
+    monkeypatch.setattr(proc, "stream", stream)
+    return runs.attend(project, run, ["claude", "-p"], project.root,
+                       dialect="claude-stream-json", budget=budget)
+
+
+def test_a_run_past_its_budget_is_flagged_and_still_finishes(project, make_run,
+                                                             monkeypatch):
+    """"Kill it" and "do nothing" are both wrong answers. It may be mid-write
+    of findings.json, and throwing that away costs more than the overrun."""
+    run = make_run()
+
+    result = _budgeted(project, run, monkeypatch, seconds=30 * 60,
+                       budget={"minutes": 25, "turns": None})
+
+    assert result["overBudget"] is True
+    assert run.record()["cost"]["overBudget"] is True
+    assert run.record()["status"] != "failed", "over budget is not a failure"
+
+
+def test_a_run_inside_its_budget_says_nothing(project, make_run, monkeypatch):
+    run = make_run()
+
+    result = _budgeted(project, run, monkeypatch, seconds=60,
+                       budget={"minutes": 25, "turns": None})
+
+    assert result["overBudget"] is False
+    assert "overBudget" not in run.record()["cost"]
+
+
+def test_turns_are_judged_only_where_they_are_measured(project, make_run,
+                                                       monkeypatch):
+    """`turns` exist only for a streamed run, so an attended one is never over
+    on turns rather than being judged on a number it does not have."""
+    run = make_run()
+
+    result = _budgeted(project, run, monkeypatch, seconds=60, turns=99,
+                       budget={"minutes": None, "turns": 60})
+
+    assert result["overBudget"] is True
+
+
+def test_three_times_over_is_a_fault_not_an_overrun(project, make_run, monkeypatch):
+    """The one place anything is stopped on a number — and the number is the
+    pack's own, which is what makes it a fault rather than a heuristic."""
+    run = make_run()
+    seen = {}
+
+    def stream(argv, cwd=None, env=None, on_line=None, timeout=None):
+        seen["timeout"] = timeout
+        return 124                      # what proc.stream returns at the ceiling
+
+    monkeypatch.setattr(proc, "stream", stream)
+    result = runs.attend(project, run, ["claude", "-p"], project.root,
+                         dialect="claude-stream-json",
+                         budget={"minutes": 25, "turns": None})
+
+    assert seen["timeout"] == 25 * 60 * runs.RUNAWAY
+    assert result["runaway"] is True
+
+
+def test_the_ceiling_stops_a_run_that_keeps_talking(monkeypatch):
+    """`proc.stream` used to apply its timeout only after the stream ended, so
+    a run that never stopped emitting never reached it — a ceiling that fires
+    only once the thing has stopped by itself is not a ceiling."""
+    import subprocess as sp
+
+    clock = {"t": 0.0}
+    monkeypatch.setattr(proc.time, "monotonic", lambda: clock["t"])
+
+    class FakeProc:
+        def __init__(self):
+            self.stdout = self
+            self.killed = False
+
+        def __iter__(self):
+            while True:
+                clock["t"] += 10
+                yield "line\n"
+
+        def close(self):
+            pass
+
+        def kill(self):
+            self.killed = True
+
+        def wait(self, timeout=None):
+            return 0
+
+    fake = FakeProc()
+    monkeypatch.setattr(sp, "Popen", lambda *a, **k: fake)
+    monkeypatch.setattr(proc, "which", lambda name: name)
+
+    code = real_stream(["claude", "-p"], timeout=25, on_line=lambda t: None)
+
+    assert code == 124 and fake.killed

@@ -11,6 +11,7 @@
     "agency triage", "agency note", "agency findings", "agency graph",
     "git"
   ],
+  "budget": { "turns": 50, "minutes": 20 },
   "dimensions": [
     { "id": "anchor", "title": "Is the code where the finding says it is" },
     { "id": "claim", "title": "Does the claim hold when derived again from the code" },

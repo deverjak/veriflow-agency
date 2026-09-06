@@ -12,6 +12,7 @@
     "git", "rg",
     "gh repo view", "gh issue list", "gh project list", "gh label list"
   ],
+  "budget": { "turns": 60, "minutes": 30 },
   "dimensions": [
     { "id": "subject", "title": "What the specialist judges — and what it must not" },
     { "id": "facts", "title": "The project facts the skill has to carry, because there is no config" },
