@@ -13,7 +13,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import anchor, chain as chains, config, graph, ingest, instructions, knowledge, metrics, packs, proc, providers, runs, serve as serving
+from . import anchor, chain as chains, config, graph, ingest, instructions, knowledge, metrics, packs, proc, providers, replay, runs, serve as serving
 from .util import bundled, out, posix, read_json, ulid, write_json
 
 # ---------------------------------------------------------------- helpers
@@ -1734,6 +1734,59 @@ def _target_label(target: dict) -> str:
     return target.get("title") or "—"
 
 
+def cmd_replay(args) -> int:
+    """`agency replay` — run a pack again over a commit it has already judged.
+
+    Without this, `author --revise` is a machine for unverifiable changes,
+    which is worse than no machine: it would produce confident diffs nobody
+    could check.
+    """
+    project = _project(args)
+
+    if getattr(args, "pin", None):
+        run = runs.find_run(project, args.pin)
+        if run is None:
+            raise SystemExit(f"No run {args.pin} in {project.name}.")
+        name = (getattr(args, "name", None)
+                or f"{run.record().get('pack')}-{run.id[:8].lower()}")
+        fixture = replay.pin(project, run, name)
+
+        def human():
+            out.done(f"{fixture['name']}  {out.dim(fixture['path'])}")
+            print(f"  {len(fixture['gold'])} decided findings pinned at "
+                  f"{(fixture['target'].get('headRefOid') or '')[:8]}")
+            print(f"  {out.dim('Commit it — a fixture is the project’s answer key.')}\n")
+
+        return _emit(args, fixture, human)
+
+    chosen = ([replay.find(project, args.fixture)] if getattr(args, "fixture", None)
+              else replay.fixtures(project, getattr(args, "pack", None)))
+    chosen = [f for f in chosen if f]
+    if not chosen:
+        raise SystemExit(
+            "No fixture to replay. Pin a finished run whose findings were decided:\n"
+            "  agency replay --pin <run> --name <fixture>")
+
+    results = []
+    for fixture in chosen:
+        run = runs.find_run(project, fixture.get("fromRun"))
+        # Scoring only, for now: replaying means launching the pack again over
+        # the pinned commit, and the launch belongs to `cmd_run`. Until that is
+        # wired, this compares what the pinned run has on disk — which is what
+        # makes the numbers themselves testable.
+        findings = run.findings() if run else []
+        results.append(replay.compare(fixture, findings))
+
+    def human():
+        print()
+        for r in results:
+            print(replay.report(r))
+            print()
+
+    _emit(args, {"results": results}, human)
+    return 0 if all(r["pass"] for r in results) else 1
+
+
 def cmd_hook(args) -> int:
     """What the runner's own PostToolUse hook calls, once per tool call.
 
@@ -2140,6 +2193,16 @@ def build_parser() -> argparse.ArgumentParser:
                    help="one pack's numbers as a brief for revising its method, "
                         "not as a dashboard")
     s.set_defaults(fn=cmd_metrics)
+
+    s = sub.add_parser("replay", parents=[common],
+                       help="run a pack again over a commit it already judged — "
+                            "and refuse a change that brings back a rejected finding")
+    s.add_argument("--pack", help="every fixture of this pack")
+    s.add_argument("--fixture", help="one fixture by name")
+    s.add_argument("--pin", metavar="RUN",
+                   help="turn a finished run's decided findings into a fixture")
+    s.add_argument("--name", help="what to call the fixture being pinned")
+    s.set_defaults(fn=cmd_replay)
 
     s = sub.add_parser("cleanup", parents=[common],
                        help="close a run that is not coming back and remove its worktree")
