@@ -557,12 +557,18 @@ def cmd_run(args, chain: dict | None = None) -> int:
     # asking something before the session is up. At the terminal the question
     # can simply be answered, and giving things up to avoid it would be a loss.
     alone = remote is not None and getattr(args, "origin", "cli") == "remote"
+    # What the project has already said no to, in front of the session rather
+    # than in a file somebody hopes gets read. Generated during preparation
+    # (`knowledge.for_run`); absent when the project has rejected nothing yet.
+    rejected_before = run.dir / "evidence" / knowledge.DO_NOT_REPORT
     launch, agent_info = runs.launch_argv(
         posix(project.agency_dir), prompt, provider=provider,
         model=getattr(args, "model", None), unattended=unattended,
         needs=needs, stream=unattended,
         bypass=bool(getattr(args, "bypass", False)),
-        remote_control=remote, no_questions=alone)
+        remote_control=remote, no_questions=alone,
+        append_prompt=(rejected_before.read_text(encoding="utf-8")
+                       if rejected_before.is_file() else None))
     rec = run.record()
     rec["agent"] = agent_info
     run.save_record(rec)

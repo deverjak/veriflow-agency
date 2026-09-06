@@ -135,6 +135,20 @@ BUILTIN: dict[str, dict] = {
         # — 8 such lines appeared across one run with a single Stop hook
         # configured, interleaved with the assistant/tool turns.
         "hookEventsArgs": ["--include-hook-events"],
+        # Text that goes in FRONT of the session rather than into the prompt —
+        # what the specialist must not have to be reminded of mid-run. ECC's
+        # own measurement is the reason this is not a skill: skills fire in
+        # 50–80% of runs, the system prompt in 100%.
+        #
+        # Probed on 2026-09-06 (claude 2.1.263), because `--help` alone would
+        # have got this wrong twice over:
+        #   -p --append-system-prompt "The magic string is X." "…does X appear
+        #      anywhere in your system prompt?…"            → YES-FOUND
+        #   -p --append-system-prompt-file f.txt "…same question…" → NO-NOT-FOUND
+        # The `-file` variant does NOT error (an invented flag reliably does:
+        # `error: unknown option`), it is simply ignored — so "it ran fine" is
+        # no evidence at all here. Only the inline form actually arrives.
+        "appendPromptFlag": "--append-system-prompt",
         # An event stream instead of silence. Without `--verbose`, `-p` emits
         # nothing until the very end, so ten minutes of work is indistinguishable
         # from a hung process.
@@ -215,6 +229,15 @@ BUILTIN: dict[str, dict] = {
         "supportsHooks": False,
         "hookFlag": None,
         "hookEventsArgs": [],
+        # No equivalent in `codex --help` / `codex exec --help` (0.144.3):
+        # codex takes its standing instructions from `AGENTS.md` in the
+        # project, which is the project's file and not ours to write. A pack
+        # running here gets the same brief the long way round — a key in
+        # `context.json` and a sentence in its SKILL.md telling it to read it
+        # — and the run record says which of the two happened, because a
+        # weaker delivery that is not written down is an unexplained gap in
+        # the numbers later.
+        "appendPromptFlag": None,
         "streamArgs": ["--json"],
         "streamDialect": "codex-jsonl",
         "extraArgs": [],
@@ -255,6 +278,7 @@ def spec(provider_id: str) -> dict:
              "resumeShape": [], "remoteControlFlag": None,
              "noQuestionsArgs": [], "trustFile": None,
              "supportsHooks": False, "hookFlag": None, "hookEventsArgs": [],
+             "appendPromptFlag": None,
              "models": [], "defaultModel": None, "unregistered": True}
     out = dict(s)
     out["id"] = provider_id
@@ -379,6 +403,16 @@ def authorization(provider_id: str, needs: list[str], mode: str = "grant") -> li
             # guards that with ordering; here it is enough to return the shape.
             argv += [flag, *rules]
     return argv
+
+
+def appends_system_prompt(provider_id: str) -> str | None:
+    """The flag that puts standing text in front of a session, or `None`.
+
+    `None` is an answer, not a gap: the caller then has to deliver the same
+    thing the weaker way and RECORD that it did, rather than quietly assuming
+    the agent was told.
+    """
+    return spec(provider_id).get("appendPromptFlag") or None
 
 
 def streaming(provider_id: str) -> tuple[list[str], str | None]:

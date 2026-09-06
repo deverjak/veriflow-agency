@@ -13,6 +13,7 @@ import json
 import pytest
 
 from agency import knowledge, packs, runs
+from agency.util import ulid
 
 from conftest import install_pack
 
@@ -165,3 +166,96 @@ def test_a_runs_summary_is_recorded(project, make_run):
     ingest_mod.ingest(project, without)
     assert without.record()["outputs"]["summary"] is False
     assert knowledge.summary(without) is None
+
+
+# ------------------------------------------------------- do not report again
+
+def _reject(project, run, title, reason, at):
+    """One rejection in the committed trail — the source this brief reads."""
+    runs.append_trail(project, {
+        "id": ulid(), "runId": run.id, "pack": "review-graph", "state": "rejected",
+        "title": title, "severity": "high", "dimension": "correctness",
+        "fingerprint": None, "anchor": {"file": "src/auth.ts", "line": 2},
+        "by": "hire:review-graph@claude", "reason": reason, "at": at,
+    })
+
+
+def test_the_rejections_come_back_as_something_readable(project, make_run):
+    """A row in a three-hundred-element array is not delivery. "This was
+    already rejected as by-design" is the most valuable sentence a new run
+    can be handed, so it gets its own file, in prose."""
+    run = make_run()
+    _reject(project, run, "Session survives the tab closing", "by-design", "2026-09-01T10:00:00Z")
+    _reject(project, run, "Retry loop is unbounded", "wrong-diagnosis", "2026-09-02T10:00:00Z")
+    _reject(project, run, "Cache key collides", "by-design", "2026-09-03T10:00:00Z")
+
+    text = knowledge.do_not_report(project)
+
+    assert "## by-design (2)" in text
+    assert "## wrong-diagnosis (1)" in text
+    assert "Session survives the tab closing" in text
+    # And it points at where the whole story is, not just the headline.
+    assert "findings/" in text
+
+
+def test_nothing_rejected_yet_means_no_file_at_all(project, make_run):
+    """A file that is always empty stops being read, and takes the ones that
+    matter down with it."""
+    make_run()
+    assert knowledge.do_not_report(project) is None
+
+
+def test_the_cap_cuts_inside_a_reason_never_a_whole_reason(project, make_run):
+    """`by-design` means "never report this again" and has to survive the cut;
+    `not-reproducible` from March may simply be reproducible today. Cutting by
+    age across the whole file would delete the durable category first, because
+    it is the one that stops accumulating."""
+    run = make_run()
+    for i in range(40):
+        _reject(project, run, f"Noisy finding number {i}", "not-reproducible",
+                f"2026-09-{(i % 28) + 1:02d}T10:00:00Z")
+    _reject(project, run, "That is the design", "by-design", "2026-01-01T10:00:00Z")
+
+    text = knowledge.do_not_report(project)
+
+    assert len(text.splitlines()) <= knowledge.DO_NOT_REPORT_LINES
+    # The oldest entry in the file, and it is still here.
+    assert "That is the design" in text
+    assert "## by-design" in text
+    # And what did not fit is admitted, not silently dropped.
+    assert "not listed" in text
+
+
+def test_a_run_is_handed_the_brief_next_to_its_memory(project, make_run):
+    """It has to be produced by the preparation, or nothing delivers it."""
+    run = make_run()
+    _reject(project, run, "Session survives the tab closing", "by-design",
+            "2026-09-01T10:00:00Z")
+    later = make_run(run_id=ulid())
+
+    stats = knowledge.for_run(project, later)
+
+    assert (later.dir / "evidence" / knowledge.DO_NOT_REPORT).is_file()
+    assert stats["knownRejections"] == 1
+
+
+def test_every_memory_stat_stays_out_of_the_graph_block(project, make_run):
+    """run.v1's `graph` has a CLOSED key list, so a stat `for_run` returns and
+    `MEMORY_STATS` does not name makes the whole record invalid — and nothing
+    notices, because the gate validates `finding.v1`. That happened for real
+    with `knownSpecs`. This is the check that cannot drift."""
+    run = make_run()
+    _reject(project, run, "Session survives the tab closing", "by-design",
+            "2026-09-01T10:00:00Z")
+    later = make_run(run_id=ulid())
+    (later.dir / "specs").mkdir(parents=True, exist_ok=True)
+    (later.dir / "specs" / "login.spec.ts").write_text("test", encoding="utf-8")
+    knowledge.for_run(project, later)
+
+    third = make_run(run_id=ulid())
+    stats = knowledge.for_run(project, third)
+
+    assert "knownSpecs" in stats and "knownRejections" in stats, "the case under test"
+    assert set(stats) <= set(runs.MEMORY_STATS), (
+        f"{sorted(set(stats) - set(runs.MEMORY_STATS))} would land in run.json → graph, "
+        f"which run.v1 refuses")

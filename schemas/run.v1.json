@@ -446,6 +446,10 @@
           ],
           "description": "What the agent was allowed to do. `grant` is the default — write into the working directory and the handed-over memory directory, plus the commands the pack's method declares in run.needs. `bypass` is a project opt-in that turns the checks off entirely. `ask` grants nothing: an attended agent asks, an unattended one is refused and finds nothing it can record. Written because \"the run found nothing\" and \"the run was not allowed to write anything\" are indistinguishable afterwards without it."
         },
+        "systemPrompt": {
+          "type": "boolean",
+          "description": "Whether what the project has already rejected was delivered in front of the session (`--append-system-prompt`) rather than left in a file for the agent to read. The two deliveries do not have the same hit rate, so a run that got the strong one and a run that got the weak one must not be counted as one population."
+        },
         "sessionId": {
           "type": [
             "string",

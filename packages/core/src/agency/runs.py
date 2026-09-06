@@ -257,7 +257,8 @@ def launch_argv(memory_dir: str, prompt: str,
                 bypass: bool = False,
                 resume: str | None = None,
                 remote_control: str | None = None,
-                no_questions: bool = False) -> tuple[list[str], dict]:
+                no_questions: bool = False,
+                append_prompt: str | None = None) -> tuple[list[str], dict]:
     """What to finish the run with.
 
     `memory_dir` is what the agent is allowed to read outside its working
@@ -305,6 +306,12 @@ def launch_argv(memory_dir: str, prompt: str,
         argv += providers.starts_without_asking(name)
     if model and spec.get("modelFlag"):
         argv += [spec["modelFlag"], model]
+    # Standing text in front of the session — what the run must not have to be
+    # reminded of. Takes exactly one value, so unlike the variadic flags below
+    # it is safe anywhere ahead of the prompt.
+    delivered = bool(append_prompt) and bool(providers.appends_system_prompt(name))
+    if delivered:
+        argv += [providers.appends_system_prompt(name), append_prompt]
     argv += [str(x) for x in (spec.get("extraArgs") or [])]
 
     # Authorization: handing the agent a path without the right to use it is a
@@ -330,7 +337,12 @@ def launch_argv(memory_dir: str, prompt: str,
         if spec.get("promptSeparator"):
             argv.append(spec["promptSeparator"])
         argv.append(prompt)
-    info = {"provider": name, "model": model, "bin": argv[0], "authorized": mode}
+    info = {"provider": name, "model": model, "bin": argv[0], "authorized": mode,
+            # Whether the standing text actually went in front of the session,
+            # or whether the run has to fall back on the agent reading a file.
+            # Two different deliveries with two different hit rates must not
+            # look like one population afterwards (R6).
+            "systemPrompt": bool(delivered)}
     if remote_control and spec.get("remoteControlFlag"):
         # Recorded, because "which session in the app is this run" is a
         # question only the record can answer once the terminal is gone.
@@ -510,8 +522,17 @@ def prepare_graph(project: Project, wt: Path) -> dict:
 
 #: Which of the collected stats is memory, not graph signal. Gathered during
 #: the same preparation, but it belongs elsewhere in the run record — `graph`
-#: describes the state of the index.
-MEMORY_STATS = ("knownFindings", "knownPages")
+#: describes the state of the index and has a CLOSED key list in run.v1, so a
+#: memory stat missing from here does not land in the wrong block, it makes the
+#: whole record invalid.
+#:
+#: That is not hypothetical: `knownSpecs` was returned by `knowledge.for_run`
+#: and absent here, so every graph run in a project with specs wrote a record
+#: that failed its own schema. Nothing noticed, because the gate validates
+#: `finding.v1`. `test_graph_evidence.py` now checks this list against what
+#: `for_run` actually returns, which is the only version of this rule that
+#: cannot drift again.
+MEMORY_STATS = ("knownFindings", "knownPages", "knownSpecs", "knownRejections")
 
 
 def known_memory(project: Project, run: Run) -> dict:
@@ -983,6 +1004,13 @@ def write_context(run: Run, pack, target: dict, wt: Path,
                    "handoffFile": "handoff.md"} if chain else None),
         "review": {"dimensions": [d.get("id") for d in pack.dimensions],
                    "minScore": pack.min_score},
+        # The weaker delivery of the same thing. A runner whose launch line can
+        # carry standing text (`claude`) gets this in front of the session and
+        # never has to be told to open it; a runner that cannot (`codex`) gets
+        # the path, and its SKILL.md is what makes it read it.
+        "doNotReport": (posix(Path("evidence") / knowledge.DO_NOT_REPORT)
+                        if (run.dir / "evidence" / knowledge.DO_NOT_REPORT).is_file()
+                        else None),
         "schemas": {"finding": "finding.v1", "run": "run.v1"},
     })
 

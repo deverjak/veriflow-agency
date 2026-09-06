@@ -525,3 +525,39 @@ def test_the_agent_knows_which_run_it_is(project, make_run, monkeypatch):
 
     assert seen[runs.RUN_ENV] == run.id
     assert seen[runs.CHAIN_ENV] == "01M1GNCGGXM3Y600AHXYY0V18J"
+
+
+# ------------------------------------------------- delivering what was rejected
+
+def test_what_was_already_rejected_goes_in_front_of_the_session():
+    """A file in RUN_DIR is a hope; the system prompt is a delivery. ECC
+    measured the difference — skills fire in 50-80% of runs, this in 100% —
+    and the flag was probed on 2026-09-06 because `--help` describes a
+    `-file` variant that silently does nothing."""
+    argv, info = runs.launch_argv("/mem", "p", provider="claude",
+                                  append_prompt="# already rejected\n- that one\n")
+
+    assert "--append-system-prompt" in argv
+    assert argv[argv.index("--append-system-prompt") + 1].startswith("# already rejected")
+    assert info["systemPrompt"] is True
+    # And it stands before the prompt, never after a variadic flag.
+    assert argv.index("--append-system-prompt") < argv.index("p")
+
+
+def test_a_runner_without_the_flag_says_so_instead_of_pretending():
+    """codex takes its standing instructions from AGENTS.md, which is the
+    project's file and not ours to write. The run then leans on context.json
+    plus the pack's own SKILL.md — a weaker delivery, and the record has to
+    show which one happened or the two become one population."""
+    argv, info = runs.launch_argv("/mem", "p", provider="codex",
+                                  append_prompt="# already rejected\n")
+
+    assert "--append-system-prompt" not in argv
+    assert info["systemPrompt"] is False
+
+
+def test_nothing_rejected_yet_adds_no_flag():
+    argv, info = runs.launch_argv("/mem", "p", provider="claude", append_prompt=None)
+
+    assert "--append-system-prompt" not in argv
+    assert info["systemPrompt"] is False

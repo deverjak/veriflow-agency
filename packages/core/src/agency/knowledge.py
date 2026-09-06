@@ -46,6 +46,79 @@ FOR_RUN_FINDINGS = 300
 #: file — an unlisted run is not lost, it is one directory over.
 LOG_RUNS = 50
 
+#: Ceiling on the do-not-report brief, in lines. It is small on purpose: this
+#: file is delivered into the system prompt, and something that goes in front
+#: of every single turn has to be read whole or it is worse than nothing.
+DO_NOT_REPORT_LINES = 40
+
+#: The file itself, next to `known-findings.json` in a run's evidence.
+DO_NOT_REPORT = "do-not-report.md"
+
+DO_NOT_REPORT_HEAD = """\
+# What this project has already rejected
+
+Do not report these again. Each carries the reason a person or a chain
+member rejected it, and a link to the finding where the full context is.
+"""
+
+
+def do_not_report(project: Project) -> str | None:
+    """The rejections, as a short briefing — `None` when there are none.
+
+    The single most valuable sentence a new run can be handed is "this was
+    already rejected as by-design", and until now it was one row in a
+    three-hundred-element array that nothing guaranteed would be read. Here
+    it is markdown, because it is meant to be read rather than parsed.
+
+    The source is the trail: committed, append-only, and it outlives the run
+    directory the finding came from — which is the whole reason a project can
+    still remember a rejection after `agency cleanup`.
+
+    The cap cuts by age WITHIN a reason, never by dropping a reason whole.
+    `by-design` means "never report this again" and must survive; a
+    `not-reproducible` from March may simply be reproducible today.
+    """
+    rows = [r for r in _runs.read_trail(project).values()
+            if r.get("state") == "rejected" and (r.get("title") or "").strip()]
+    if not rows:
+        return None
+
+    by_reason: dict[str, list[dict]] = {}
+    for row in sorted(rows, key=lambda r: r.get("at") or "", reverse=True):
+        by_reason.setdefault(row.get("reason") or "no reason given", []).append(row)
+
+    # Two lines of overhead per section (its heading and the blank after it),
+    # plus the header — which costs one line more than it has, because the join
+    # puts a blank after it — plus one held back for the "not listed" note.
+    budget = DO_NOT_REPORT_LINES - (len(DO_NOT_REPORT_HEAD.splitlines()) + 1) - 1
+    budget -= 2 * len(by_reason)
+
+    # Round-robin, newest first: every reason keeps its most recent entries and
+    # the oldest anywhere are what falls off the end.
+    picked: dict[str, list[dict]] = {reason: [] for reason in by_reason}
+    taken = 0
+    for depth in range(max(len(v) for v in by_reason.values())):
+        for reason, items in by_reason.items():
+            if depth < len(items) and taken < budget:
+                picked[reason].append(items[depth])
+                taken += 1
+
+    lines = [DO_NOT_REPORT_HEAD]
+    for reason, items in by_reason.items():
+        if not picked[reason]:
+            continue
+        lines.append(f"## {reason} ({len(picked[reason])})")
+        for row in picked[reason]:
+            title = " ".join(str(row.get("title") or "").split())
+            lines.append(f"- {title} (`{LEDGER}/{row['id']}.md`)")
+        lines.append("")
+
+    left = len(rows) - taken
+    if left > 0:
+        lines.append(f"_{left} older rejection(s) not listed — all of them are in "
+                     f"`evidence/known-findings.json`._")
+    return "\n".join(lines).rstrip() + "\n"
+
 
 def _view(run, rec: dict, finding: dict, decision: dict | None,
           notes: list[dict] | None) -> dict:
@@ -231,6 +304,15 @@ def for_run(project: Project, run) -> dict:
     if known["specs"]:
         write_json(ev / "known-specs.json", known["specs"])
         stats["knownSpecs"] = len(known["specs"])
+
+    # The same memory, once more and much shorter, for the one question a run
+    # should never have to rediscover: what has this project already said no
+    # to? Written only when there is something to say — a file that is always
+    # empty is a file that stops being read.
+    brief = do_not_report(project)
+    if brief:
+        (ev / DO_NOT_REPORT).write_text(brief, encoding="utf-8")
+        stats["knownRejections"] = brief.count("\n- ")
     return stats
 
 
