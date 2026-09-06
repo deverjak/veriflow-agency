@@ -1162,6 +1162,99 @@ def test_the_agent_is_killed_before_its_worktree_is_taken(daemon, project, monke
     assert order == ["kill", "abandon"]
 
 
+def finished(project, run_id: str, status: str = "completed") -> None:
+    """A Remote Control session that has done its work: it wrote how the run
+    went and then went on standing in its window.
+
+    `completed` rather than `ok` because that is what one really wrote. The
+    status at the end of a session belongs to the pack that told its agent to
+    write it, and neither the daemon nor the phone gets to have an opinion
+    about the word — only about whether `running` is still one of them.
+    """
+    run = runs.find_run(project, run_id)
+    rec = run.record()
+    rec["status"] = status
+    rec["exitReason"] = "one finding filed"
+    rec["finishedAt"] = runs.now()
+    rec["agent"] = {**(rec.get("agent") or {}), "remoteControl": "agency-qa-01m1"}
+    run.save_record(rec)
+
+
+def test_the_window_outlives_the_run_and_can_still_be_closed(daemon, project,
+                                                             monkeypatch):
+    """The gap this fills: a session writes its findings, the gate decides, the
+    record stops saying `running` — and the window goes on standing on the
+    machine. Ending it was tied to that status, so from that moment the only
+    way to close it was to walk over, and every session started from a phone
+    left one more window behind."""
+    spawns(daemon, monkeypatch)
+    killed = kills(monkeypatch)
+    token, run_id = started(daemon, project, monkeypatch)
+    finished(project, run_id)
+
+    code, data = call(daemon, "POST", f"/api/run/{run_id}/stop", token,
+                      {"project": project.root.name})
+
+    assert code == 200, data
+    assert data["stopped"] is True and len(killed) == 1
+    assert data["wasWorking"] is False       # a window was closed, not a run
+
+
+def test_closing_the_window_does_not_overturn_the_gate(daemon, project, monkeypatch):
+    """`abandon` is for a run whose agent never got to say anything. This one
+    did — status, reason and counts — and rewriting all three to `abandoned`
+    would throw away the work for the sake of the window it left open."""
+    spawns(daemon, monkeypatch)
+    kills(monkeypatch)
+    token, run_id = started(daemon, project, monkeypatch)
+    finished(project, run_id)
+
+    call(daemon, "POST", f"/api/run/{run_id}/stop", token,
+         {"project": project.root.name})
+
+    rec = runs.find_run(project, run_id).record()
+    assert rec["status"] == "completed"
+    assert rec["exitReason"] == "one finding filed"
+
+
+def test_a_finished_session_still_says_its_window_can_be_closed(daemon, project,
+                                                                monkeypatch):
+    """`canStop` is what the phone paints the button from, and it answers about
+    a process this daemon holds — not about a run. The two stopped being the
+    same question the moment a session outlived its own record."""
+    spawns(daemon, monkeypatch)
+    kills(monkeypatch)
+    token, run_id = started(daemon, project, monkeypatch)
+    finished(project, run_id)
+
+    code, state = call(daemon, "GET",
+                       f"/api/run/{run_id}?project={project.root.name}", token)
+
+    assert code == 200
+    assert state["status"] == "completed" and state["canStop"] is True
+
+
+def test_a_finished_session_holds_the_project_until_its_window_closes(
+        daemon, project, monkeypatch):
+    """Why it is worth a button at all: runs over one project go one at a time,
+    and a window nobody closed is a project nobody can use — from the phone
+    that opened it least of all."""
+    spawns(daemon, monkeypatch)
+    kills(monkeypatch)
+    token, run_id = started(daemon, project, monkeypatch)
+    finished(project, run_id)
+    busy, _ = call(daemon, "POST", "/api/run", token,
+                   {"project": project.root.name, "pack": "review-graph"})
+    assert busy == 409
+
+    call(daemon, "POST", f"/api/run/{run_id}/stop", token,
+         {"project": project.root.name})
+
+    again, data = call(daemon, "POST", "/api/run", token,
+                       {"project": project.root.name, "pack": "review-graph"})
+    assert again == 200, data
+
+
 def test_stopping_gives_the_project_back(daemon, project, monkeypatch):
     """Why anybody presses it: one run at a time over one project, so a session
     nobody closes is a project nobody can use."""

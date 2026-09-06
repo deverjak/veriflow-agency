@@ -724,14 +724,19 @@ class Daemon:
         it. `--remote-control` hands the conversation to the Claude app and the
         window waits on the machine for somebody to close it, which is fine
         while you are sitting there and useless from a train: the project stays
-        busy, the worktree stays claimed, and the run stays `running` for as
-        long as the window is up.
+        busy, the worktree stays claimed, and the window stays up.
 
         So: kill the tree first and only then close the record, because
-        `abandon` removes the worktree and an agent still alive in it would be
-        deleted mid-write. What comes out is `abandoned` — which is what that
-        status has always meant here: preparation worked, the agent ran, and
-        the terminal went away before it finished.
+        removing the worktree under an agent still alive in it would delete it
+        mid-write.
+
+        What the record says afterwards depends on what it said before. A run
+        still `running` becomes `abandoned` — preparation worked, the agent
+        ran, and the terminal went away before it finished. A run that already
+        wrote how it went keeps every word of it: a Remote Control session
+        gates itself and then goes on standing in its window, so by the time
+        anybody presses this the finished run is not what is being ended — the
+        window is.
 
         A run this daemon does not hold is refused rather than closed. It may
         still be genuinely working at the machine, and the difference between
@@ -757,16 +762,23 @@ class Daemon:
                                         "the worktree."}
             stopped = job.stop()
             self.jobs.pop(job.id, None)
-            info = runs.abandon(project, run, f"stopped from {device.name}")
+            working = run.record().get("status") == "running"
+            info = (runs.abandon(project, run, f"stopped from {device.name}") if working
+                    else runs.release(project, run))
         append_audit(self.audit_path, {
             "action": "stop", "device": device.id, "deviceName": device.name,
             "project": key, "pack": job.pack, "runId": run.id, "job": job.id,
+            "wasWorking": working,
         })
         return 200, {"ok": True, "runId": run.id, "pack": job.pack, "project": key,
-                     "stopped": stopped,
+                     "stopped": stopped, "wasWorking": working,
                      "worktreeRemoved": bool(info.get("worktreeRemoved")),
-                     "message": "Stopped. The agent was killed where it stood, so "
-                                "whatever it was in the middle of is not finished."}
+                     "message": ("Stopped. The agent was killed where it stood, so "
+                                 "whatever it was in the middle of is not finished."
+                                 if working else
+                                 "The window is closed and the project is free again. "
+                                 "The run had already written how it went, and the "
+                                 "record still says it.")}
 
     def _spawn(self, key: str, pack_name: str, device: Device, argv: list[str],
                console: dict | None = None) -> Job:

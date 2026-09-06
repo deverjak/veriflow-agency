@@ -805,6 +805,20 @@ def unfinished(project: Project) -> list[Run]:
     return [r for r in load_runs(project) if r.record().get("status") == "running"]
 
 
+def free_worktree(project: Project, run: Run) -> str | None:
+    """Give back the checkout a run claimed, and say which one it was.
+
+    Only the filesystem half — the record is the caller's, because the two
+    callers disagree about what the run's status should say afterwards.
+    """
+    ctx = read_json(run.dir / "context.json", default={})
+    wt = ctx.get("worktree")
+    if ctx.get("worktreeOwned") is not False and wt and Path(wt).exists():
+        remove_worktree(project, Path(wt))
+        return wt
+    return None
+
+
 def abandon(project: Project, run: Run, reason: str | None = None) -> dict:
     """Close a run whose agent is not coming back, and free its worktree."""
     rec = run.record()
@@ -813,15 +827,27 @@ def abandon(project: Project, run: Run, reason: str | None = None) -> dict:
     rec["exitReason"] = reason or "the terminal was closed before the agent finished"
     rec.setdefault("finishedAt", now())
 
-    freed = None
-    ctx = read_json(run.dir / "context.json", default={})
-    wt = ctx.get("worktree")
-    if ctx.get("worktreeOwned") is not False and wt and Path(wt).exists():
-        remove_worktree(project, Path(wt))
-        freed = wt
+    freed = free_worktree(project, run)
     rec.pop("worktree", None)
     run.save_record(rec)
     return {"run": run.id, "wasRunning": was == "running", "worktreeRemoved": freed}
+
+
+def release(project: Project, run: Run) -> dict:
+    """Take back what a finished run still holds, and leave its verdict alone.
+
+    A Remote Control session writes how the run went and then keeps standing
+    in its window until somebody closes it. Closing that window must not turn
+    `ok` into `abandoned`: the run did finish, the gate did decide, and the
+    only thing still claimed is the worktree. `abandon` is the other case —
+    a run whose agent never got to say anything.
+    """
+    freed = free_worktree(project, run)
+    rec = run.record()
+    if "worktree" in rec:
+        rec.pop("worktree")
+        run.save_record(rec)
+    return {"run": run.id, "wasRunning": False, "worktreeRemoved": freed}
 
 
 def discard(project: Project, run: Run, force: bool = False) -> dict:

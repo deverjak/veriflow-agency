@@ -682,12 +682,21 @@
       session.innerHTML = '';
       if (s.remoteControl) {
         const p = text('div', 'panel');
-        p.appendChild(text('b', null, s.status === 'running'
+        const live = s.status === 'running';
+        p.appendChild(text('b', null, live
           ? 'This session is live in the Claude app'
           : 'This session was driven from the Claude app'));
         p.appendChild(text('code', null, s.remoteControl));
-        p.appendChild(text('p', 'note', 'Claude Code is open in a window on the machine. '
-          + 'Everything it does is there and in that session — not here.'));
+        // Whether the window is still standing is the daemon's answer, not the
+        // record's — and it is the difference between a sentence that says
+        // where to look and one describing a window that closed an hour ago.
+        p.appendChild(text('p', 'note', live
+          ? 'Claude Code is open in a window on the machine. Everything it does is '
+            + 'there and in that session — not here.'
+          : s.canStop
+            ? 'The run has written how it went, and its window is still open on the '
+              + 'machine — which holds this project until it is closed.'
+            : 'Everything it did was there and in that session — not here.'));
         session.appendChild(p);
       }
 
@@ -711,7 +720,14 @@
     // session reachable — and the record is the only thing that knows.
     function paintAfter(s) {
       after.innerHTML = '';
-      if (s.status === 'running' && s.canStop) after.appendChild(stopper(s));
+      // A session outlives the run it was started for: it writes its findings,
+      // the gate decides, the record stops saying `running` — and the window
+      // goes on standing on the machine, holding the project, until somebody
+      // closes it. Tying this button to the status is what made that somebody
+      // have to be at the machine.
+      if (s.canStop && (s.status === 'running' || s.remoteControl)) {
+        after.appendChild(stopper(s));
+      }
       if (s.status === 'running' && !s.remoteControl) return;   // it is still talking
 
       if (s.canFollow) {
@@ -781,8 +797,12 @@
     // from before a restart, is closed at the machine — which is where its
     // window is.
     function stopper(s) {
-      const label = s.remoteControl
-        ? 'Close the session and its window'
+      // Three things the press can be, and the record says which: a run still
+      // working, a session still talking, and a session that has finished and
+      // is only holding its window open.
+      const done = s.status !== 'running';
+      const label = done ? 'Close the window on the machine'
+        : s.remoteControl ? 'Close the session and its window'
         : 'Stop this run';
       // Two taps rather than a dialog. The second label is the warning, so
       // there is nothing to read twice — and a misplaced thumb on a phone
@@ -791,7 +811,9 @@
       const b = button(label, 'danger', async () => {
         if (!armed) {
           armed = true;
-          b.textContent = 'Tap again — the agent is killed where it stands';
+          b.textContent = done
+            ? 'Tap again — the window closes, the record keeps what it says'
+            : 'Tap again — the agent is killed where it stands';
           setTimeout(() => { if (armed) { armed = false; b.textContent = label; } }, 5000);
           return;
         }
