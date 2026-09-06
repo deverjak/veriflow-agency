@@ -261,6 +261,53 @@ def gate(project: Project, run: Run, findings: list[dict], min_score: int | None
     return kept, dropped
 
 
+#: How many times one run may be sent back to fix its own output. Two, and
+#: then the gate has it. ECC hit the same wall and answered it with a switch
+#: (`GATEGUARD_FACT_FORCE_FULL_DENIALS`); the lesson underneath is not the
+#: switch, it is that a hook able to block forever produces a run that never
+#: finishes — which costs more than the findings it was trying to save.
+STOP_BLOCKS = 2
+
+
+def stop_errors(run_dir: Path, root: Path) -> list[str]:
+    """What is wrong with this run's `findings.json`, in the agent's own terms.
+
+    Deliberately only the two checks that need nothing but this run: the
+    contract, and whether the anchor exists at the commit under review. Dedup,
+    score distribution and provenance all need state from outside the run and
+    belong to the gate — a hook that reached for them would be a second gate
+    with a worse view.
+
+    Both checks are the gate's own functions, called rather than reimplemented:
+    a second implementation would drift, and the day it did, the agent would be
+    sent back to fix something the gate does not actually mind.
+    """
+    findings = read_json(Path(run_dir) / "findings.json", default=None)
+    if findings is None:
+        return ["findings.json is missing — write it before you stop."]
+    if not isinstance(findings, list):
+        return ["findings.json must be an array of finding.v1 objects."]
+
+    problems: list[str] = []
+    for i, msgs in _schema_errors(findings).items():
+        title = str((findings[i] or {}).get("title") or f"finding {i + 1}")[:60]
+        problems.append(f"{title}: {'; '.join(msgs)[:300]}")
+
+    for f in findings:
+        a = (f or {}).get("anchor") or {}
+        if not a.get("file") or not a.get("commit"):
+            continue
+        ok, lines = _exists_at_commit(Path(root), a.get("commit") or "", a["file"])
+        title = str((f or {}).get("title") or "")[:60]
+        if not ok:
+            problems.append(f"{title}: {a['file']} does not exist at "
+                            f"{(a.get('commit') or '')[:8]}.")
+        elif lines is not None and (a.get("line") or 1) > lines:
+            problems.append(f"{title}: line {a.get('line')} is past the end of "
+                            f"{a['file']} ({lines} lines).")
+    return problems
+
+
 def earlier_findings(project: Project, run: Run) -> list[dict]:
     """Findings from older runs, plus the trail — what deduplication compares
     against.

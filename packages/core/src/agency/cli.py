@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 
 from . import anchor, chain as chains, config, graph, ingest, instructions, knowledge, metrics, packs, proc, providers, runs, serve as serving
-from .util import bundled, out, posix, read_json, ulid
+from .util import bundled, out, posix, read_json, ulid, write_json
 
 # ---------------------------------------------------------------- helpers
 
@@ -1702,11 +1702,62 @@ def cmd_hook(args) -> int:
     """
     try:
         payload = json.loads(sys.stdin.read() or "{}")
-        if isinstance(payload, dict):
-            runs.record_tool_call(Path(args.run_dir), payload)
-    except (ValueError, OSError):
+    except ValueError:
+        return 0
+    if not isinstance(payload, dict):
+        return 0
+    run_dir = Path(args.run_dir)
+
+    if args.event == "stop":
+        return _hook_stop(run_dir)
+    try:
+        runs.record_tool_call(run_dir, payload)
+    except OSError:
         pass
     return 0
+
+
+def _hook_stop(run_dir: Path) -> int:
+    """The second chance, while the context that wrote the findings is alive.
+
+    `counts.gated` is a total loss today: the agent writes, exits, the gate
+    drops it, nobody repeats the run. Exit 2 with the problems on stderr hands
+    them back to the agent instead — probed on 2026-09-06, and it genuinely
+    works: an agent told a field was missing rewrote the file and stopped
+    again.
+
+    Two blocks at most, counted in the run's own record. The third stop passes
+    whatever it says, because a hook that can block forever produces a run that
+    never finishes — which costs more than the findings it was saving.
+    """
+    rec = read_json(run_dir / "run.json", default={})
+    blocked = ((rec.get("agent") or {}).get("stopBlocks")) or 0
+    if blocked >= ingest.STOP_BLOCKS:
+        return 0
+
+    ctx = read_json(run_dir / "context.json", default={})
+    root = Path((ctx.get("project") or {}).get("root") or run_dir)
+    try:
+        problems = ingest.stop_errors(run_dir, root)
+    except OSError:
+        return 0
+    if not problems:
+        return 0
+
+    rec["agent"] = {**(rec.get("agent") or {}), "stopBlocks": blocked + 1}
+    try:
+        write_json(run_dir / "run.json", rec)
+    except OSError:
+        pass
+
+    print("findings.json does not pass the contract yet — fix these and stop again:",
+          file=sys.stderr)
+    for p in problems[:20]:
+        print(f"  - {p}", file=sys.stderr)
+    if blocked + 1 >= ingest.STOP_BLOCKS:
+        print("  (this is the last time this will be checked — after the next "
+              "stop the gate has it)", file=sys.stderr)
+    return 2
 
 
 def cmd_status(args) -> int:
@@ -2076,8 +2127,12 @@ def build_parser() -> argparse.ArgumentParser:
     h = hsub.add_parser("tool-call", parents=[common],
                         help="record one PostToolUse call into RUN_DIR/tool-calls.jsonl")
     h.add_argument("--run-dir", required=True)
-    s.set_defaults(fn=cmd_hook)
     h.set_defaults(fn=cmd_hook)
+    h = hsub.add_parser("stop", parents=[common],
+                        help="check findings.json before the run is allowed to end")
+    h.add_argument("--run-dir", required=True)
+    h.set_defaults(fn=cmd_hook)
+    s.set_defaults(fn=cmd_hook)
 
     s = sub.add_parser("status", parents=[common], help="overview of the project's runs")
     s.add_argument("--limit", type=int, default=10)
@@ -2122,11 +2177,15 @@ def _force_utf8() -> None:
     import io as _io
     for name in ("stdout", "stderr"):
         stream = getattr(sys, name, None)
-        if stream is None or getattr(stream, "encoding", "").lower().startswith("utf"):
+        # `or ""` twice, because a stream can carry `encoding = None` — an
+        # in-memory one substituted by a caller, which is what a hook invoked
+        # from inside another process looks like. Crashing there would take
+        # down a run over the encoding of a message nobody is reading.
+        if stream is None or (getattr(stream, "encoding", "") or "").lower().startswith("utf"):
             continue
         try:
             stream.reconfigure(encoding="utf-8", errors="replace")
-            if stream.encoding.lower().startswith("utf"):
+            if (stream.encoding or "").lower().startswith("utf"):
                 continue
         except Exception:
             pass

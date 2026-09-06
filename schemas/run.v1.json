@@ -475,6 +475,13 @@
           ],
           "description": "How many turns the agent took, summed over the first session and every follow-up. Only a streamed run has one; an attended session inherits the terminal and nothing counts for it."
         },
+        "stopBlocks": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "How many times the Stop hook sent this run back to fix its own findings.json before it was allowed to finish. Capped at two, and the third attempt passes regardless — a hook that can block forever produces a run that never ends. A pack that needs two rounds every time has a SKILL.md problem, and this is the number that says so."
+        },
         "loops": {
           "type": [
             "integer",

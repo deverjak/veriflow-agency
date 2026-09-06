@@ -146,3 +146,71 @@ def test_a_runner_that_cannot_take_a_hook_says_so(project, make_run):
     run = make_run()
 
     assert runs.hook_settings(run.dir, "codex") is None
+
+
+# ------------------------------------------------ the second chance (Stop hook)
+
+def _stop(run, project) -> tuple[int, str]:
+    """The Stop hook, called the way the runner calls it."""
+    import io
+    import sys as _sys
+    from agency import cli
+    from agency.util import write_json as _write
+
+    _write(run.dir / "context.json", {"project": {"root": str(project.root)}})
+    stderr, _sys.stderr = _sys.stderr, io.StringIO()
+    stdin, _sys.stdin = _sys.stdin, io.StringIO("{}")
+    try:
+        code = cli.main(["hook", "stop", "--run-dir", str(run.dir),
+                         "--repo", str(project.root)])
+        return code, _sys.stderr.getvalue()
+    finally:
+        _sys.stderr, _sys.stdin = stderr, stdin
+
+
+def test_a_broken_findings_file_is_handed_back_while_it_can_be_fixed(project, make_run):
+    """`counts.gated` is a total loss: the agent writes, exits, the gate drops
+    it, nobody repeats the run. Exit 2 gives it back while the context that
+    wrote it is still alive."""
+    f = make_finding(project, "x")
+    del f["score"]
+    run = make_run(findings=[f])
+
+    code, said = _stop(run, project)
+
+    assert code == 2
+    assert "score" in said
+    assert run.record()["agent"]["stopBlocks"] == 1
+
+
+def test_a_finding_pointing_at_nothing_is_handed_back_too(project, make_run):
+    """The other check that needs only this run: does the anchor exist at the
+    commit under review."""
+    run = make_run(findings=[make_finding(project, "x",
+                                          anchor={"file": "src/nowhere.ts"})])
+
+    code, said = _stop(run, project)
+
+    assert code == 2 and "does not exist" in said
+
+
+def test_a_good_findings_file_simply_passes(project, make_run):
+    run = make_run()
+
+    code, said = _stop(run, project)
+
+    assert code == 0 and said == ""
+    assert "stopBlocks" not in (run.record().get("agent") or {})
+
+
+def test_the_third_stop_passes_whatever_it_says(project, make_run):
+    """A hook that can block forever produces a run that never finishes, which
+    costs more than the findings it was trying to save."""
+    f = make_finding(project, "x")
+    del f["score"]
+    run = make_run(findings=[f])
+
+    assert _stop(run, project)[0] == 2
+    assert _stop(run, project)[0] == 2
+    assert _stop(run, project)[0] == 0, "the third time the gate has it"
+    assert run.record()["agent"]["stopBlocks"] == 2

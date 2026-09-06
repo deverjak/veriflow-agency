@@ -378,9 +378,17 @@ def hook_settings(run_dir: Path, provider: str | None = None) -> str | None:
     """
     if not providers.spec(provider or "claude").get("supportsHooks"):
         return None
-    command = f'agency hook tool-call --run-dir "{posix(run_dir)}"'
-    return json.dumps({"hooks": {"PostToolUse": [
-        {"matcher": "*", "hooks": [{"type": "command", "command": command}]}]}})
+    def hook(event: str) -> dict:
+        return {"matcher": "*", "hooks": [{"type": "command", "command":
+                f'agency hook {event} --run-dir "{posix(run_dir)}"'}]}
+
+    return json.dumps({"hooks": {"PostToolUse": [hook("tool-call")],
+                                 # The second chance. `counts.gated` is a total
+                                 # loss today — the agent wrote, exited, the
+                                 # gate dropped it and nobody repeats the run —
+                                 # and this is the one moment its context is
+                                 # still alive enough to fix it.
+                                 "Stop": [hook("stop")]}})
 
 
 def record_tool_call(run_dir: Path, payload: dict) -> dict | None:
