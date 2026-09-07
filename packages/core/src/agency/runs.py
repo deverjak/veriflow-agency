@@ -1555,6 +1555,83 @@ def _set_finding_state(run: Run, finding_id: str, **fields) -> dict | None:
     return updated
 
 
+# ---------------------------------------------------------------- actions
+#
+# What an output DID, as opposed to what it says. The two were one field for
+# as long as the only thing an output could do was reach a GitHub board:
+# `sinks: {prComment, githubProjectItem}` — two destinations, hardcoded, with
+# no room for a result, a time, or a second attempt.
+#
+# The distinction that replaces it: the OUTPUT is what the specialist decided
+# or wrote; an ACTION is what changed in the world because of it. Most outputs
+# change nothing and that is not a gap — a bet is a proposal to a founder, a
+# finding in a project with no board rests in git.
+
+#: What the core calls an action when the sink does not name one. It is what
+#: the core actually knows — the pack's sink ran — and nothing more. Guessing
+#: `github_project_item` on the sink's behalf is the hardcoding this replaces.
+SINK_ACTION = "sink"
+
+_ACTION_KIND = re.compile(r"^[a-z][a-z0-9_-]*$")
+
+
+def _action(kind, result: str, *, target=None, remote_id=None,
+            url=None, error=None) -> dict:
+    """One action, in the shape `finding.v1` accepts.
+
+    `kind` comes off the sink's own JSON, so it is text this tool did not
+    write: anything that is not a name is replaced rather than stored, because
+    the alternative is a findings.json that only fails much later, in
+    `agency validate`, over a field nobody reads.
+    """
+    kind = str(kind or "").strip()
+    if not _ACTION_KIND.match(kind):
+        kind = SINK_ACTION
+    return {"kind": kind, "result": result,
+            "target": str(target) if target else None,
+            "remoteId": str(remote_id) if remote_id else None,
+            "url": str(url) if url else None,
+            "error": (str(error)[:400] if error else None),
+            "at": now()}
+
+
+def last_action(finding: dict) -> dict | None:
+    """The most recent action that actually changed something. `None` if none.
+
+    Backwards, because a retry appends: what a reader wants is where this
+    output ended up, not the first place it tried to go.
+    """
+    for action in reversed(finding.get("actions") or []):
+        if action.get("result") == "success":
+            return action
+    return None
+
+
+def acted_ref(finding: dict) -> str | None:
+    """Where this output ended up, as the other side calls it.
+
+    Reads both shapes on purpose. Every finding sent before 2026-09-07 carries
+    `sinks.githubProjectItem` and nothing else, and committed history is not
+    rewritten — the same rule evidence without a locator lives by.
+    """
+    action = last_action(finding)
+    if action and action.get("remoteId"):
+        return action["remoteId"]
+    return (finding.get("sinks") or {}).get("githubProjectItem")
+
+
+def append_action(run: Run, finding: dict, action: dict, **fields) -> dict:
+    """Records an action on one output and persists it, with any state change.
+
+    Appends rather than replaces: a sink that failed on Tuesday and succeeded
+    on Thursday is two facts, and keeping only the second one loses the
+    question worth asking — how often does this pack's board actually answer?
+    """
+    return _set_finding_state(
+        run, finding.get("id"),
+        actions=[*(finding.get("actions") or []), action], **fields) or {}
+
+
 def dispatch(project: Project, run: Run, finding: dict, by: str) -> dict:
     """Sends one gated finding through its pack's sink onto the board.
 
@@ -1564,12 +1641,12 @@ def dispatch(project: Project, run: Run, finding: dict, by: str) -> dict:
     board) this does nothing at all: the finding stays `candidate`, which is
     exactly the git-only fallback the pack's absence of a `sink` means.
 
-    On success the finding becomes `sent`, `sinks.githubProjectItem` carries
-    the board reference, and a `sent` event lands in both `decisions.jsonl`
-    and the committed trail. On failure — a non-zero exit, a timeout, or a
-    sink that did not print JSON — the finding stays `candidate` and the
-    caller records the error; a later `agency ingest` tries again, and the
-    sink's own idempotence marker keeps a retry from posting twice.
+    On success the finding becomes `sent`, an action carries what the sink
+    said it did, and a `sent` event lands in both `decisions.jsonl` and the
+    committed trail. On failure — a non-zero exit, a timeout, or a sink that
+    did not print JSON — the finding stays `candidate` and an action records
+    the attempt anyway; a later `agency ingest` tries again, and the sink's own
+    idempotence marker keeps a retry from posting twice.
     """
     by = validate_by(by)
     fid = finding.get("id")
@@ -1583,28 +1660,41 @@ def dispatch(project: Project, run: Run, finding: dict, by: str) -> dict:
     if not sink:
         return {"id": fid, "ok": False, "noSink": True, "ref": None, "url": None, "error": None}
 
+    def failed(error: str) -> dict:
+        """The attempt, recorded on the output. The state does not move: a
+        finding whose sink is down is still a candidate, and that is what
+        makes the next `agency ingest` try it again."""
+        # `SINK_ACTION` and not the pack's own word: a sink that failed did
+        # not get as far as saying what it was doing.
+        append_action(run, finding, _action(SINK_ACTION, "error", error=error))
+        return {"id": fid, "ok": False, "noSink": False, "ref": None, "url": None,
+                "error": error}
+
     cmd = shlex.split(sink.format(id=fid, runDir=posix(run.dir)))
     try:
         result = subprocess.run(
             cmd, cwd=project.root, env={**os.environ, RUN_ENV: run.id},
             capture_output=True, text=True, encoding="utf-8", timeout=120)
     except (OSError, subprocess.SubprocessError) as e:
-        return {"id": fid, "ok": False, "noSink": False, "ref": None, "url": None, "error": str(e)}
+        return failed(str(e))
 
     if result.returncode != 0:
-        error = (result.stderr or result.stdout or "").strip()[:400] or f"exit {result.returncode}"
-        return {"id": fid, "ok": False, "noSink": False, "ref": None, "url": None, "error": error}
+        return failed((result.stderr or result.stdout or "").strip()[:400]
+                      or f"exit {result.returncode}")
     try:
         data = json.loads(result.stdout)
     except json.JSONDecodeError:
-        return {"id": fid, "ok": False, "noSink": False, "ref": None, "url": None,
-                "error": "the sink printed no readable JSON"}
+        return failed("the sink printed no readable JSON")
 
     ref = data.get("item") or data.get("ref")
     url = data.get("url")
 
-    _set_finding_state(run, fid, state="sent",
-                       sinks={**(finding.get("sinks") or {}), "githubProjectItem": ref})
+    # What the pack says it did. `backlog.py` already prints `draft`,
+    # `comment`, `issue` — the core threw that away and recorded one
+    # hardcoded destination instead.
+    action = _action(data.get("kind"), "success", target=data.get("target"),
+                     remote_id=ref, url=url)
+    finding = append_action(run, finding, action, state="sent") or finding
     append_decision(run, fid, "sent", by=by, ref=ref, url=url)
     append_trail(project, {
         "id": fid, "runId": run.id, "pack": run.record().get("pack"),

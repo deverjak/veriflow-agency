@@ -341,6 +341,28 @@ def required_evidence(pack) -> dict[str, list[str]]:
     return out_
 
 
+def _may_act(pack, finding: dict) -> bool:
+    """May this output be sent anywhere at all?
+
+    `outputs.<type>.actions` has been declarable since types existed and
+    nothing read it, so a pack with a board would have posted its bets to it —
+    a proposal for the founder filed as a ticket. The policy is the pack's
+    answer to "does this kind of output belong outside", and this is the one
+    place that has to ask.
+    """
+    return outputs.policy_for(pack, finding.get("type")).actions != "none"
+
+
+def _upstream_pack(project: Project, run: Run):
+    """The pack that wrote an upstream run's findings — its policy decides
+    what may be dispatched, not the policy of whoever is ingesting now."""
+    from . import packs
+    try:
+        return packs.load(run.record().get("pack") or "", project)
+    except SystemExit:
+        return None
+
+
 def gate(project: Project, run: Run, findings: list[dict], min_score: int | None,
          evidence: dict[str, list[str]] | None = None,
          pack=None) -> tuple[list[dict], list[dict]]:
@@ -520,6 +542,14 @@ def earlier_findings(project: Project, run: Run) -> list[dict]:
     for fid, row in _runs.read_trail(project).items():
         if fid in seen or row.get("state") not in ("sent", "rejected"):
             continue
+        # Never this run's own rows. The run pool above already skips
+        # `r.id >= run.id`, but the trail had no such guard — so the second
+        # `agency ingest` over a run compared its findings against the trail
+        # rows the FIRST one wrote, and marked every sent finding a duplicate
+        # of itself. The docstring has always said "older runs, plus the
+        # trail", and a row this run wrote is neither.
+        if row.get("runId") == run.id:
+            continue
         pool.append({"id": fid, "fingerprint": row.get("fingerprint"),
                      "title": row.get("title"), "anchor": row.get("anchor"),
                      "state": row.get("state")})
@@ -572,6 +602,17 @@ def ingest(project: Project, run: Run, min_score: int | None = None) -> dict:
 
     if raw_path.is_file():
         findings = read_json(raw_path, default=[])
+        # Everything the core recorded about the WORLD is carried across. The
+        # raw file is what the PACK wrote, so re-running the gate rebuilds
+        # from it — which silently un-recorded a board item that had really
+        # been created. Idempotence is a promise about the JUDGEMENT (the same
+        # run gives the same verdicts); an action already taken is not a
+        # verdict and cannot be taken back by re-reading a file.
+        acted = {f.get("id"): f["actions"] for f in run.findings() if f.get("actions")}
+        if acted:
+            for f in findings:
+                if acted.get(f.get("id")):
+                    f["actions"] = acted[f["id"]]
     elif not wrote_findings:
         if not is_blocked:
             # Neither `findings.json` nor `findings.raw.json`. There is nothing
@@ -653,7 +694,7 @@ def ingest(project: Project, run: Run, min_score: int | None = None) -> dict:
     if last:
         own_by = f"hire:{_runs.worker_id(rec.get('pack') or 'unknown', (rec.get('agent') or {}).get('provider'))}"
         for f in kept:
-            if f.get("state") != "candidate":
+            if f.get("state") != "candidate" or not _may_act(pack, f):
                 continue
             result = _runs.dispatch(project, run, f, own_by)
             if result.get("noSink"):
@@ -671,6 +712,8 @@ def ingest(project: Project, run: Run, min_score: int | None = None) -> dict:
             decided = _runs.decisions(upstream_run)
             for f in upstream_run.findings():
                 if f.get("state") != "held" or f.get("id") in decided:
+                    continue
+                if not _may_act(_upstream_pack(project, upstream_run), f):
                     continue
                 result = _runs.dispatch(project, upstream_run, f, _runs.CHAIN)
                 if result.get("noSink"):

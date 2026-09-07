@@ -3,7 +3,7 @@
 **Datum:** 2026-09-06
 **Navazuje na:** [`agency-v1.md`](agency-v1.md) (pack je skill v projektu, žádná konfigurace), [`harness.md`](harness.md) (provenience tool callů, brána, metriky, revize packu), [`findings-ownership.md`](findings-ownership.md) (board je stav, lokál je brána a stopa), [`teams.md`](teams.md) (řetěz), [`shared-memory.md`](shared-memory.md) (paměť patří projektu)
 **Řeší:** jádro dnes umí evidovat jediný druh výstupu — nález s kotvou na soubor a řádek. PO a CEO produkují rozhodnutí, odpovědi, sázky a drafty, a **oba už jádro kvůli tomu obcházejí**. Plán zobecňuje mechanismy, které v jádru fungují (brána, dedup, sinky, paměť, metriky), tak aby přestaly předpokládat code-review nález — a nedělá z Agency univerzální platformu.
-**Stav k 7. 9. 2026:** Kroky 1–5 hotové a commitnuté (testy 459 zelených). Svislý řez `bet` prošel u Kroku 4 a **přeskládal zbytek plánu**; Krok 5 na to navázal — output má `subject`, běh má `scope` a paměť se poprvé zúžila i packu bez grafu. Další na řadě: Krok 6 (`actions` ze `sinks`).
+**Stav k 7. 9. 2026:** Kroky 1–6 hotové a commitnuté (testy 469 zelených). Svislý řez `bet` prošel u Kroku 4 a **přeskládal zbytek plánu**; Krok 5 dal outputu `subject` a běhu `scope`, Krok 6 nahradil `sinks` akcemi a cestou opravil dvě místa, kde `agency ingest` nebyl idempotentní. Další na řadě: Krok 7 (feedback jako události a projekce `state`).
 
 **Nedělá:** nový generický agent framework. Žádný plugin systém metrik, žádný registr typů, žádná doménová znalost v jádru. Přibývají přesně dvě abstrakce — `TypePolicy` a `Run.scope`.
 
@@ -22,16 +22,17 @@ pwsh -NoProfile -File scripts/test.ps1   # jádro + smoke extension; musí říc
 
 Jen jádro, když jde o rychlost: `cd packages/core; uv run --with pytest --with jsonschema python -m pytest -q`
 
-Stav k 7. 9. 2026: Kroky 1–5 hotové, 459 testů. **Další je Krok 6** (`actions` ze `sinks`).
+Stav k 7. 9. 2026: Kroky 1–6 hotové, 469 testů. **Další je Krok 7** (feedback jako události a projekce `state`).
 
-### První pohyb v Kroku 6
+### První pohyb v Kroku 7
 
 V tomhle pořadí:
 
-1. **Přečíst, kdo dnes `sinks` píše a kdo je čte,** dřív než se sáhne na tvar: [`runs.dispatch`](../../packages/core/src/agency/runs.py) zapisuje `sinks.githubProjectItem`, `cli.py:1628` a `knowledge.py:491` z toho čtou. Tvar se mění na jednom místě, čtenáři jsou tři.
-2. `actions[]` do `finding.v1` **vedle** `sinks`, ne místo něj — committed historie se nepřepisuje a `duplicateOf`/`sinks` v ní zůstanou platné. Čtenáři umí obojí, zapisuje se už jen nový tvar. Totéž se osvědčilo u evidence v Kroku 2.
-3. Akci zapisuje jádro v okamžiku, kdy sink odpoví — s `result`, `remoteId` a časem. `actions: "none"` (sázka) nezapisuje nic a **prázdné pole je legitimní stav**, ne chybějící data.
-4. Teprve pak `agency outputs` ukáže, co se na boardu doopravdy stalo. Migrace PO na tuhle cestu je Krok 10, ne tenhle.
+1. **Vypsat, kdo dnes `state` čte a kdo ho píše** — `metrics` na deseti místech, `dedup.mark_duplicates` ho zapisuje, `serve.py` i `cli.py` na něm staví výpis. Krok je datová změna **plus jedna funkce**, a ta funkce v seznamu kroků snadno chybí (§6, past 5).
+2. Události feedbacku do `decisions.jsonl` v plném tvaru `{outputId, kind, lifecycle, source, at, note}`. `source` (`core` / `human` / `chain:<pack>`) se **nevymýšlí** — `metrics` už dnes počítá rozhodnutí člena řetězu jinak než rozhodnutí člověka, jen se to nepřenáší (§3.4).
+3. **Projekce** `state = fold(events, policy)` na jednom místě. Nikdo jiný historii neskládá — to je celý smysl kroku, ne ten seznam událostí.
+4. `decisions()` skládá dnes události na **jedno** rozhodnutí na output (poslední zápis vyhrává), takže sázka označená `selected` a později `successful` se v metrikách objeví jen pod `outcome`. Otevřeno vědomě od Kroku 3; teprve tady se to dá dokončit.
+5. CLI zůstává pro uživatele stejné: `agency accept` / `agency reject` jsou zkratky, obecný tvar je `agency feedback <id> <kind>`. **CLI nemusí odhalovat vnitřní generalizaci všude.**
 
 ### Konvence, které drží plán a kód pohromadě
 
@@ -43,7 +44,7 @@ V tomhle pořadí:
 
 **Testy nesou důvod, ne jen tvrzení.** Docstring testu má říct, čemu ten test brání — `test_outputs.py` je tak psaný celý a je to to, co po refaktoru zůstane čitelné.
 
-### Pasti, na které se v Krocích 1–4 došláplo
+### Pasti, na které se v Krocích 1–6 došláplo
 
 1. **Bash tool utne příkaz kolem 8 kB.** Heredoc s delším souborem skončí `unexpected EOF`. Delší obsah psát přes Write do scratchpadu a pak `cat >> soubor`.
 2. **Soubory mají CRLF.** `Read`/`Write` to řeší, `python -c` s `read_text`/`write_text` taky (universal newlines). Ruční porovnávání bajtů ne — `cat -A` to ukáže.
@@ -52,6 +53,7 @@ V tomhle pořadí:
 5. **Dva testovací outputy se stejným tělem jsou duplicita**, správně a nečekaně. Když test potřebuje dva různé outputy, musí mít dvě různá *tvrzení*, ne dva různé titulky — otisk se počítá z `body` a nikdy z titulku.
 6. **`agency doctor` a schéma jsou dvě různé vrstvy.** Pattern u `artifact` zastaví `/etc/passwd`, ale `evidence/../../x` mu vyhoví a chytá to až `resolve()`. Když se přidává kontrola cesty, patří obě.
 7. **`shlex.split` sežere zpětná lomítka.** Příkaz v manifestu (`sink`, `scope`) se parsuje POSIXově, takže `C:\Python\python.exe` se rozpadne na nesmysl. Cesty v manifestu proto vždy s lomítky dopředu — a test, který potřebuje spustit interpret téhle sady, si ho musí přepsat přes `Path(sys.executable).as_posix()` a `shlex.quote`.
+8. **Python přes heredoc si nezaslouží důvěru u escapů.** Zpětné lomítko cestou zmizí (řetězec, který má do souboru zapsat lomítko a konec řádku, zapíše literál `n`) a trojité uvozovky v nahrazovaném textu ukončí řetězec toho skriptu. Cokoliv s escapy nebo s docstringy psát přes Write do scratchpadu a spustit jako soubor — je to jednou navíc a nikdy to nekousne.
 
 ### Rozhodnutí, která se nesmějí tiše zvrátit
 
@@ -247,7 +249,7 @@ Architektonický test každé další featury: *potřebuje to opravdu každý pa
 | `below-score` | `score < minScore` → zahodit | zaniká jako brána, `score` zůstává jako kalibrace (Krok 8) |
 | `dedup` | otisk z `pack`+`type`+`dimension`+`subject_key`+podpis `body` | hotovo (Kroky 3 a 5) |
 | `knowledge.here` | `subject ∩ run.scope` | hotovo (Krok 5) |
-| `sinks: {prComment, githubProjectItem}` | dvě zadrátované cesty ven | `actions[]` s výsledkem (Krok 6) |
+| `sinks: {prComment, githubProjectItem}` | `actions[]` s výsledkem, časem a jménem od packu | hotovo (Krok 6) |
 | `state` (skalár na nálezu) | jeden verdikt | projekce `fold(feedback_events, policy)` (Krok 7) |
 | `knowledge/pages/<pack>/` | píše je pack sám | beze změny — jádro paměť nepíše (§3.3) |
 | `do-not-report.md` | automaticky z trailu rejections | beze změny, jen zobecněná na negativní polaritu |
@@ -438,24 +440,33 @@ Metriky počítají **jeden poměr na lifecycle**, pojmenovaný packem — `byLi
 
 ---
 
-### Krok 6 — `actions` ze `sinks` (~0,5 dne)
+### Krok 6 — `actions` ze `sinks` (~0,5 dne) — **hotovo**
 
-**Proč:** `sinks: {prComment, githubProjectItem}` už jsou primitivní výsledky akcí, jen zadrátované na dvě cesty. Není to nový subsystém, je to zobecnění tvaru.
+**Proč:** `sinks: {prComment, githubProjectItem}` už byly primitivní výsledky akcí, jen zadrátované na dvě cesty. Není to nový subsystém, je to zobecnění tvaru.
 
-**Co se mění:**
+**Co se změnilo:**
 
 ```json
-"actions": [ { "kind": "board_decision", "target": "41",
-               "result": "success", "remoteId": "…", "at": "…" } ]
+"actions": [ { "kind": "draft", "target": "255", "result": "success",
+               "remoteId": "PVTI_X", "url": "…", "error": null, "at": "…" } ]
 ```
 
-Pokrývá `pr_comment`, `github_project_item`, `board_decision`, `board_draft`, `issue_promotion`. Prázdné pole je legitimní stav — CEO draft vyrobí artefakt a nic neodešle.
+**Rozdělení, které to drží:** *output = co specialista rozhodl nebo vytvořil; action = co se kvůli tomu skutečně změnilo ve světě.* Prázdné pole je legitimní stav a ten nejčastější — projekt bez boardu drží nálezy v gitu, sázka je návrh pro zakladatele a nedojde nikam.
 
-**Rozdělení, které se drží:** *output = co specialista rozhodl nebo vytvořil; action = co se kvůli tomu skutečně změnilo.*
+**Čtyři věci, které vyšly jinak, než plán čekal:**
 
-**Testy:** `test_decisions.py` — dnešní sink zapíše `actions[0].remoteId` a `cli.py:1628` i `knowledge.py:491` čtou z nového tvaru.
+1. **Slovník `kind` nedodává jádro, dodává ho sink.** Plán vypsal `pr_comment`, `github_project_item`, `board_decision`, `board_draft`, `issue_promotion` — jenže jádro o žádném z nich neví. Ví jedinou věc: *doběhl packův sink*. A packy to samy tisknou už dnes — `backlog.py` vrací `kind: draft | comment | issue | draft-note` a jádro to zahazovalo. `kind` se proto bere z odpovědi sinku, výchozí je `sink` (to, co jádro skutečně ví), a hodnota, která není jméno, se nahradí — je to text, který tenhle nástroj nepsal, a uložit ho neověřený znamená `findings.json`, který spadne až v `agency validate` nad polem, které nikdo nečte.
+2. **Neúspěšný pokus se zapisuje taky** (`result: "error"`). Bez toho žije „board to třikrát odmítl" jen ve třech různých záznamech běhů a z outputu to není vidět vůbec. `dispatchErrors` v `run.json` zůstává — je to jiná otázka (co tenhle *běh* neodeslal) a čte ho výpis ingestu.
+3. **`outputs.<type>.actions` se konečně čte.** Šlo deklarovat od Kroku 3 a nikdo se na to neptal — pack s boardem by tedy své sázky poslal na board a z návrhu pro zakladatele udělal ticket. Teď se typ s `actions: "none"` nedispatchuje vůbec, zůstane `candidate`, a ostatní typy téhož packu jdou dál.
+4. **A jedna chyba, kterou našel test, ne úvaha — dvakrát.** `agency ingest` se sám dokumentuje jako idempotentní a nebyl:
+   - **Akce se ztrácely.** Brána staví `findings.json` znovu z `findings.raw.json`, což je to, co napsal *pack* — takže druhý ingest tiše odzapsal položku na boardu, která doopravdy vznikla. Akce se proto přenášejí přes přestavbu. Idempotence je slib o **soudu** (týž běh dá tytéž verdikty); akce, která se stala, není verdikt a nedá se vzít zpět tím, že se znovu přečte soubor.
+   - **Běh byl duplicitou sám sebe.** `earlier_findings` přeskakuje běhy `r.id >= run.id`, ale polovina, která čte stopu, žádnou takovou pojistku neměla — druhý `ingest` tedy porovnal nálezy proti řádkům stopy, které zapsal ten *první*, a každý odeslaný nález označil za duplicitu sebe sama. Oprava je jeden řádek (`row.get("runId") == run.id`) a docstring té funkce ji vždycky předpokládal: *„findings from older runs, plus the trail"* — a řádek, který zapsal tenhle běh, není ani jedno.
 
-**Hotovo, když:** PO smí posílat rozhodnutí přes jádro a `agency outputs` u něj ukáže, co se na boardu doopravdy stalo.
+**Migrace:** `actions` **vedle** `sinks`, ne místo něj. Čtenáři umí obojí (`runs.acted_ref`), zapisuje se už jen nový tvar, committed historie se nepřepisuje — táž pravidla jako u evidence bez locatoru v Kroku 2. `sinks` má v schématu napsáno, že je superseded, a mimo jádro ho nikdy nikdo nečetl (rozšíření ani `backlog.py`).
+
+**Testy:** 10 nových, 469 celkem. `test_decisions.py` — sink řekne, co udělal, a jádro to zapíše; mlčící sink je `sink`; `Board Draft!` se jménem nestane; typ s `actions: "none"` se neodešle, zatímco druhý typ téhož packu ano; ledger čte referenci z nového tvaru; nález odeslaný před 7. 9. 2026 pořád ví, kam šel; akce přežije druhý ingest; output, který nedošel nikam, akce nemá; a běh není duplicitou sebe sama. `test_gate.py` — dosavadní tři sink testy přepsané na nový tvar, včetně `["error", "success"]` po opakovaném pokusu.
+
+**Hotovo, když:** ~~PO smí posílat rozhodnutí přes jádro a `agency outputs` u něj ukáže, co se na boardu doopravdy stalo.~~ Druhá polovina splněna — `agency findings --json` nese `actions[]` s výsledkem každého pokusu (příkaz se pořád jmenuje `findings`, přejmenování je Krok 11). První polovina je **Krok 10**: mechanismus stojí, migrace PO na něj do tohohle kroku nepatřila.
 
 ---
 

@@ -594,7 +594,7 @@ def _concept(members: list[dict], origin: dict) -> dict:
     # `state` on the finding itself IS the outcome now — candidate, held,
     # sent or rejected. No separate "status" derived from a decision.
     outcome = f.get("state") or "candidate"
-    ref = (f.get("sinks") or {}).get("githubProjectItem") or (decision.get("ref") if decision else None)
+    ref = _runs.acted_ref(f) or (decision.get("ref") if decision else None)
     url = decision.get("url") if decision else None
 
     return {

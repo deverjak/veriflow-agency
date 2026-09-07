@@ -1668,7 +1668,7 @@ def cmd_findings(args) -> int:
                 "file": a.get("file"), "line": a.get("line"),
                 "state": f.get("state"),
                 "decision": d.get("state") if d else None,
-                "ref": (f.get("sinks") or {}).get("githubProjectItem"),
+                "ref": runs.acted_ref(f),
                 "url": d.get("url") if d else None,
                 "reason": d.get("reason") if d else None,
                 "note": d.get("note") if d else None,
@@ -1680,6 +1680,11 @@ def cmd_findings(args) -> int:
                 row["target"] = rec.get("target") or {}
                 row["history"] = hist.get(fid, [])
                 row["duplicateOf"] = f.get("duplicateOf")
+                # What actually happened because of this output, with the
+                # attempts that failed. `ref` above is only where it ended
+                # up — which is the answer to a different question than "how
+                # often does this pack's board answer at all".
+                row["actions"] = f.get("actions") or []
                 row["score"] = f.get("score")
                 row["pack"] = f.get("pack")
                 if a.get("file"):

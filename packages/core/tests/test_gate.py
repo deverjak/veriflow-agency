@@ -215,8 +215,8 @@ def test_bez_sinku_zustane_nalez_candidate(project, make_run):
 
 
 def test_se_sinkem_nalez_dojde_na_board(project, make_run):
-    """Úspěšný sink: `state` se stane `sent`, `sinks.githubProjectItem` nese
-    referenci a stopa dostane řádek."""
+    """Úspěšný sink: `state` se stane `sent`, akce nese, co se doopravdy stalo,
+    a stopa dostane řádek."""
     install_pack(project, "review-graph", {"sink": SINK_TEMPLATE})
     _sink(project, 'print(\'{"item": "PVTI_X", "url": "https://example.com/PVTI_X"}\')\n')
     run = make_run()
@@ -227,7 +227,9 @@ def test_se_sinkem_nalez_dojde_na_board(project, make_run):
     assert vysledek["sent"] == 1
     saved = run.findings()[0]
     assert saved["state"] == "sent"
-    assert saved["sinks"]["githubProjectItem"] == "PVTI_X"
+    assert runs.acted_ref(saved) == "PVTI_X"
+    action = saved["actions"][0]
+    assert action["result"] == "success" and action["url"].endswith("PVTI_X")
     trail = runs.read_trail(project)
     assert trail[fid]["state"] == "sent"
     assert trail[fid]["ref"] == "PVTI_X"
@@ -247,13 +249,22 @@ def test_selhany_sink_necha_nalez_candidate_a_druhy_ingest_to_zkusi_znovu(projec
     assert run.findings()[0]["state"] == "candidate"
     assert prvni["dispatchErrors"] == [{"id": fid, "error": "boom"}]
     assert runs.read_trail(project) == {}
+    # Pokus, který se nepovedl, je pořád pokus — bez něj žije „board to
+    # třikrát odmítl" jen ve třech různých záznamech běhů.
+    assert [a["result"] for a in run.findings()[0]["actions"]] == ["error"]
 
     _sink(project, 'print(\'{"item": "PVTI_Y"}\')\n')
     druhe = ingest.ingest(project, run)
 
     assert druhe["sent"] == 1
     assert druhe["dispatchErrors"] == []
-    assert run.findings()[0]["state"] == "sent"
+    saved = run.findings()[0]
+    assert saved["state"] == "sent"
+    # Obojí se přidává, nepřepisuje: sink, který v úterý selhal a ve čtvrtek
+    # prošel, jsou dvě události, a jen ta druhá je horší odpověď na otázku,
+    # jak často ten board vůbec odpoví.
+    assert [a["result"] for a in saved["actions"]] == ["error", "success"]
+    assert runs.acted_ref(saved) == "PVTI_Y", "čte se poslední úspěšná, ne první pokus"
 
 
 def test_prvni_pozice_v_retezu_ceka_druha_dispatchuje_obe(project, make_run):

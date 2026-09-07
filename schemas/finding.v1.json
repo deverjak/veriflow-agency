@@ -193,9 +193,34 @@
       "description": "Five states. `candidate` rests only where the pack has no sink; `held` waits for the next chain member; `sent` and `rejected` are terminal; a decision event in decisions.jsonl carries who and why."
     },
     "duplicateOf": { "type": ["string", "null"] },
+    "actions": {
+      "type": "array",
+      "description": "What actually happened in the world because of this output. The distinction the whole field rests on: the OUTPUT is what the specialist decided or wrote, an ACTION is what changed outside because of it. An empty array is a legitimate state and a common one — a bet is a proposal to a founder and reaches nothing, a project with no board keeps its findings in git. Whether a type may act at all is the pack's policy (`outputs.<type>.actions`), and a type that says `none` is never dispatched.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "result", "at"],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_-]*$",
+            "description": "What was done, in the pack's own word — its sink prints it (`draft`, `comment`, `issue`) and the core never interprets it. `sink` when the sink said nothing: the core knows only that the pack's sink ran, and guessing at GitHub semantics on its behalf is exactly the hardcoding this replaces."
+          },
+          "result": {
+            "enum": ["success", "error"],
+            "description": "An attempt that failed is still recorded. Without it, 'the board refused this three times' lives only in three separate run records and cannot be seen from the output at all."
+          },
+          "target": { "type": ["string", "null"], "description": "What was acted ON, when the sink names it — a board item, an issue number." },
+          "remoteId": { "type": ["string", "null"], "description": "Identity of what the action produced on the other side. This is what `sinks.githubProjectItem` used to be, for one hardcoded destination." },
+          "url": { "type": ["string", "null"] },
+          "error": { "type": ["string", "null"], "description": "Why it failed, when it did. Truncated: this is a breadcrumb, and the sink's own output is the place for the whole story." },
+          "at": { "type": "string", "format": "date-time" }
+        }
+      }
+    },
     "sinks": {
       "type": "object",
-      "description": "Where the finding propagated to. Derived destinations, not the source of truth — when a sink fails, the finding is not lost.",
+      "description": "SUPERSEDED by `actions` on 2026-09-07; nothing writes it any more. Two hardcoded destinations from when the only thing an output could do was reach a GitHub board — kept because committed run history is full of it and readers still fall back to it, exactly as they do for evidence without a locator. Derived destinations, never the source of truth: when a sink fails, the finding is not lost.",
       "additionalProperties": false,
       "properties": {
         "prComment": { "type": ["string", "null"] },
