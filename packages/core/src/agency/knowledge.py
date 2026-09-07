@@ -54,10 +54,17 @@ DO_NOT_REPORT_LINES = 40
 #: The file itself, next to `known-findings.json` in a run's evidence.
 DO_NOT_REPORT = "do-not-report.md"
 
-#: Memory about the code THIS run is touching. Deliberately uncapped: it is
-#: units, not hundreds, and a list short enough to be read whole is the entire
-#: point of having a second one.
+#: Memory about what THIS run is about. Deliberately uncapped: it is units,
+#: not hundreds, and a list short enough to be read whole is the entire point
+#: of having a second one.
 HERE = "known-here.json"
+
+#: What the run is about — the `{kind, ref}` pairs `known-here.json` was
+#: narrowed by. Next to it rather than in `run.json` on purpose: the record
+#: keeps counts and the lists live beside it (`files[]` is in `context.json`,
+#: not in `target`), and a scope truncated to fit a record would be a lie
+#: about what the memory was actually narrowed by.
+SCOPE = "scope.json"
 
 DO_NOT_REPORT_HEAD = """\
 # What this project has already rejected
@@ -143,6 +150,10 @@ def _view(run, rec: dict, finding: dict, decision: dict | None,
         # and a finding as the same thing and cannot tell "we already decided
         # this is out of scope" from "we already bet on this".
         "type": finding.get("type") or "finding",
+        # What it is about, when the pack said so. This is what lets an output
+        # with no anchor be matched against a run's scope at all — a finding
+        # gets the same thing out of its anchor, and `subjects()` reads both.
+        "subject": finding.get("subject"),
         "dimension": finding.get("dimension"), "severity": finding.get("severity"),
         "file": a.get("file"), "line": a.get("line"),
         # The symbol, when the anchor had one: it is how a finding is matched
@@ -274,6 +285,7 @@ def _trail_view(row: dict) -> dict:
     return {
         "id": row.get("id"), "title": row.get("title"),
         "type": row.get("type") or "finding",
+        "subject": row.get("subject"),
         "dimension": row.get("dimension"), "severity": row.get("severity"),
         "file": a.get("file"), "line": a.get("line"),
         "symbol": ((a.get("symbol") or {}).get("name")
@@ -314,8 +326,77 @@ def _impact_scope(ev: Path) -> tuple[set[str], set[str]]:
     return files, symbols
 
 
-def here(known: list[dict], ev: Path, files: list[str]) -> list[dict]:
-    """The findings that are about the code this run is actually touching.
+def pairs(items) -> list[tuple[str, str]]:
+    """`{kind, ref}` objects as comparable pairs. Anything else is dropped.
+
+    A boundary function: half of what arrives here was printed by a pack's own
+    script, and a malformed row in it is not worth ending a run over — it is
+    worth not matching.
+    """
+    out: list[tuple[str, str]] = []
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        kind, ref = item.get("kind"), item.get("ref")
+        if kind and ref:
+            out.append((str(kind), str(ref)))
+    return out
+
+
+def scope(ev: Path, files: list[str], extra: list[dict] | None = None) -> list[dict]:
+    """What this run is ABOUT, in the same vocabulary as an output's `subject`.
+
+    Three sources, and none of them is the agent (see the plan, §3.2): a scope
+    the agent declared for itself would be memory it can widen to get more
+    context and narrow to avoid the rejections it does not like — and it would
+    arrive after the moment the memory is injected, which is before the agent
+    exists.
+
+      files   what this run is looking at — the changed files
+      graph   what the change reaches — `impact.json`, already paid for
+      extra   what the PACK says this run is about, from the command it
+              declares (`scope` in pack.json). This is the only place domain
+              knowledge enters, and it enters as data.
+
+    Ordered, deduplicated, and never interpreted: the core compares pairs.
+    """
+    impacted_files, symbols = _impact_scope(ev)
+    items = ([{"kind": "file", "ref": str(f)} for f in files]
+             + [{"kind": "file", "ref": f} for f in sorted(impacted_files)]
+             + [{"kind": "symbol", "ref": s} for s in sorted(symbols)]
+             + [{"kind": k, "ref": r} for k, r in pairs(extra)])
+    seen: set[tuple[str, str]] = set()
+    out: list[dict] = []
+    for item in items:
+        key = (item["kind"], item["ref"])
+        if key not in seen:
+            seen.add(key)
+            out.append(item)
+    return out
+
+
+def subjects(view: dict) -> set[tuple[str, str]]:
+    """Every name the place of one output has.
+
+    A `subject` is singular — one output is about one thing — but a place in
+    the code has two names, a file and a symbol, and the anchor carries both.
+    Both have to be matched or the generalisation would quietly change review:
+    a run whose scope holds `file:src/auth.ts` would stop seeing a finding
+    anchored to `getUser` inside that very file.
+    """
+    out: set[tuple[str, str]] = set()
+    s = view.get("subject") or {}
+    if s.get("kind") and s.get("ref"):
+        out.add((str(s["kind"]), str(s["ref"])))
+    if view.get("file"):
+        out.add(("file", str(view["file"])))
+    if view.get("symbol"):
+        out.add(("symbol", str(view["symbol"])))
+    return out
+
+
+def here(known: list[dict], scope_items: list[dict]) -> list[dict]:
+    """The outputs this run's scope is about — `subject ∩ scope`.
 
     A run over a pull request into `src/payments/` wants the twelve findings
     that were ever about payments far more than it wants the three hundred
@@ -323,19 +404,22 @@ def here(known: list[dict], ev: Path, files: list[str]) -> list[dict]:
     this is a second, short list rather than a re-sort of the first, and why
     the ranker deleted in Phase 10 stays deleted.
 
+    It used to ask that question in the only vocabulary it had — files and
+    symbols out of `impact.json` — which made it dead code for every pack
+    without a graph, and `po` and `ceo` are two of those. The intersection is
+    the same question asked in a vocabulary a pack can also speak.
+
     Anything already decided comes with its decision, exactly as in the long
     list: "we rejected this here before" is the sentence worth reading twice.
     """
-    impacted_files, symbols = _impact_scope(ev)
-    scope = {str(f) for f in files} | impacted_files
-    if not scope and not symbols:
+    wanted = set(pairs(scope_items))
+    if not wanted:
         return []
-    return [f for f in known
-            if (f.get("file") and str(f["file"]) in scope)
-            or (f.get("symbol") and f["symbol"] in symbols)]
+    return [f for f in known if subjects(f) & wanted]
 
 
-def for_run(project: Project, run, files: list[str] | None = None) -> dict:
+def for_run(project: Project, run, files: list[str] | None = None,
+            pack_scope: list[dict] | None = None) -> dict:
     """What this project already knows — across runs, packs and specialists.
 
     Findings carry their decision with them: "this was already rejected as
@@ -388,10 +472,20 @@ def for_run(project: Project, run, files: list[str] | None = None) -> dict:
         (ev / DO_NOT_REPORT).write_text(brief, encoding="utf-8")
         stats["knownRejections"] = brief.count("\n- ")
 
-    # And the same memory narrowed to the code this run is touching. Written
-    # only when it has something in it: a file that is usually empty teaches
-    # the reader to stop opening it, and then it is empty the once it matters.
-    nearby = here(all_findings, ev, list(files or []))
+    # What this run is about, assembled here because this is the last moment
+    # before the memory that stands on it. `scopeItems` is counted even when
+    # it is zero: an empty `known-here.json` has exactly two explanations —
+    # nothing in memory matched, or the run never said what it was about —
+    # and without this number they look the same.
+    wanted = scope(ev, list(files or []), pack_scope)
+    stats["scopeItems"] = len(wanted)
+    if wanted:
+        write_json(ev / SCOPE, wanted)
+
+    # And the same memory narrowed to what this run is about. Written only
+    # when it has something in it: a file that is usually empty teaches the
+    # reader to stop opening it, and then it is empty the once it matters.
+    nearby = here(all_findings, wanted)
     if nearby:
         write_json(ev / HERE, nearby)
         stats["knownHere"] = len(nearby)

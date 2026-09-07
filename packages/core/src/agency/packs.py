@@ -121,6 +121,27 @@ class Pack:
         return list(self.manifest.get("requires") or [])
 
     @property
+    def scope(self) -> str | None:
+        """The command that says what a run of this pack is ABOUT.
+
+        It prints `[{"kind": …, "ref": …}, …]` and nothing else. The core runs
+        it during preparation and intersects the result with what it already
+        knows, which is how memory gets narrowed for a pack with no code graph:
+        `agency-po` prints its board items, `agency-ceo` its live bets.
+
+        Absent for a pack whose runs are about the code — the changed files and
+        the graph's blast radius are the core's own vocabulary and it needs no
+        help to speak it.
+
+        Never written by the agent (see `docs/plans/outputs.md` §3.2). A scope
+        the agent chose would be memory it could widen for more context and
+        narrow to miss the rejections it dislikes — and it would arrive after
+        the memory was already handed over.
+        """
+        v = str(self.manifest.get("scope") or "").strip()
+        return v or None
+
+    @property
     def sink(self) -> str | None:
         """The command that sends one gated finding to this pack's board.
 

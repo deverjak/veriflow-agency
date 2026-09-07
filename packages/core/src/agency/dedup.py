@@ -10,9 +10,10 @@ Otisk se ZÁMĚRNĚ nepočítá z čísla řádku ani z titulku:
   číslo řádku  se posune při každém commitu nad souborem,
   titulek      se přeformuluje, i když je tvrzení identické.
 
-Počítá se ze SYMBOLU (kde to je) a z podpisu TVRZENÍ (co to říká). Podpis je
-množina nejnosnějších slov — přeformulování spojovacího textu ho nezmění,
-změna obsahu ano.
+Počítá se z MÍSTA (čeho se to týká) a z podpisu TVRZENÍ (co to říká). Místo
+je symbol nebo soubor z kotvy, a u outputu, který kotvu nemá, jeho `subject` —
+sázka sedí na sázce, ne v `footer.tsx`. Podpis je množina nejnosnějších slov —
+přeformulování spojovacího textu ho nezmění, změna obsahu ano.
 
 Nic z toho není LLM volání. Dedup, který by potřeboval model, by stál víc než
 nález, který zahazuje.
@@ -80,18 +81,32 @@ def signature(finding: dict, size: int = 12) -> list[str]:
     return sorted(sorted(t, key=lambda w: (-len(w), w))[:size])
 
 
-def symbol_key(finding: dict) -> str:
-    """Kde nález sedí — symbol, když ho pack zná, jinak soubor.
+def subject_key(finding: dict) -> str:
+    """Where the output sits. Empty string when nowhere.
 
-    Symbol přežije přesun bloku i refaktor uvnitř souboru; soubor je slabší,
-    ale pořád nezávislý na čísle řádku.
+    Three sources, in this order — the first one that answers wins:
 
-    Empty string for an output with no anchor at all — a bet is about a market
-    and has no place in the source. That is NOT the same as `file:?`: a shared
-    `?` would have made every anchorless output share one place, which turns
-    the guard in `is_duplicate` — two claims in different places are two
-    claims — into the opposite of a guard.
+      subject   what the pack says the output is ABOUT (`{kind, ref}`),
+      symbol    from the anchor: survives a moved block and a refactor,
+      file      from the anchor: weaker, but still independent of the line.
+
+    An explicit `subject` wins over the anchor because it is the pack saying
+    it, and the anchor-derived key is what an output written before subjects
+    existed falls back to. No committed finding carries one, so every
+    fingerprint in history keeps its value — that is why the derived shapes
+    stay `sym:` and `file:` rather than becoming `symbol:` and `file:` in one
+    generalising sweep.
+
+    Empty for an output with no anchor and no subject — a bet is about a
+    market and has no place in the source. That is NOT the same as `file:?`:
+    a shared `?` would have made every anchorless output share one place,
+    which turns the guard in `is_duplicate` — two claims in different places
+    are two claims — into the opposite of a guard.
     """
+    subject = finding.get("subject") or {}
+    kind, ref = subject.get("kind"), subject.get("ref")
+    if kind and ref:
+        return f"{kind}:{ref}"
     a = finding.get("anchor") or {}
     sym = a.get("symbol") or {}
     name = sym.get("name")
@@ -107,7 +122,7 @@ def fingerprint(finding: dict) -> str:
         (finding.get("pack") or "").split("@")[0],
         finding.get("type") or "finding",
         finding.get("dimension") or "",
-        symbol_key(finding),
+        subject_key(finding),
         " ".join(signature(finding)),
     ]
     return hashlib.sha256("\x1f".join(parts).encode("utf-8")).hexdigest()[:16]
@@ -152,14 +167,16 @@ def is_duplicate(new: dict, old: dict) -> tuple[bool, str]:
         return False, ""
     # Bez shody místa se neporovnává vůbec. Dva nálezy o téže věci v různých
     # funkcích jsou dva nálezy.
-    place = symbol_key(new)
-    if place != symbol_key(old):
+    place = subject_key(new)
+    if place != subject_key(old):
         return False, ""
-    # And with no place on either side, only an identical claim counts. The
-    # asymmetry decides it, as it does for the threshold above: a false
-    # duplicate throws work away, a missed one only lengthens the queue. Until
-    # `subject` gives an anchorless output a place of its own, similarity
-    # between two of them is a guess with nothing to constrain it.
+    # And with no place on either side, only an identical claim counts. An
+    # output that names neither an anchor nor a subject has said nothing about
+    # where it sits, and similarity between two such is a guess with nothing
+    # to constrain it. The asymmetry decides it, as it does for the threshold
+    # above: a false duplicate throws work away, a missed one only lengthens
+    # the queue. A pack that wants its anchorless outputs deduplicated by
+    # meaning gives them a `subject`; that is what it is for.
     if not place:
         return False, ""
     a, b = claim(new), claim(old)

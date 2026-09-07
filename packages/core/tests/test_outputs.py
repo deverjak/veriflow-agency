@@ -615,7 +615,8 @@ def test_the_real_ceo_manifest_says_all_of_this(project):
 def test_two_anchorless_outputs_do_not_share_one_place(project, make_run):
     """Found by the slice rather than by argument, which is what it is for.
 
-    `symbol_key` fell back to `file:?`, so every output without an anchor
+    `subject_key` (then `symbol_key`) fell back to `file:?`, so every output
+    without an anchor
     shared one place — and the guard that says "two claims in different places
     are two claims" became its opposite: everything was in the same place, so
     everything was comparable, and four differently-worded bets collapsed into
@@ -631,7 +632,128 @@ def test_two_anchorless_outputs_do_not_share_one_place(project, make_run):
     for f in (a, b, same):
         f["fingerprint"] = dedup.fingerprint(f)
 
-    assert dedup.symbol_key(a) == "", "no anchor is no place, not a shared one"
+    assert dedup.subject_key(a) == "", "no anchor and no subject is no place, not a shared one"
     assert dedup.is_duplicate(b, a) == (False, "")
     assert dedup.is_duplicate(same, a) == (True, "fingerprint"), \
         "the same claim word for word is still the same claim"
+
+# ------------------------------------------------------- subject, as a place
+#
+# The vertical slice found that an output with no anchor had no place at all,
+# so only an identical claim counted as a duplicate. `subject` is what gives
+# it one back — and it is the same pair the run's scope is written in, so the
+# thing that decides "we already argued about this" and the thing that decides
+# "here is what was decided about it" are one vocabulary rather than two.
+
+_HERE = ("Informační centra dovedou k produktu instruktory, které vyhledávání mine. "
+         "Do 6 týdnů uvidíme tři centra, která odkaz zveřejní.")
+_SAME_AGAIN = ("Instruktory k produktu dovedou informační centra, ne vyhledávání. "
+               "Do šesti týdnů uvidíme aspoň tři centra, která zveřejní odkaz.")
+
+
+def _on(project, ref: str, title: str, body: str) -> dict:
+    bet = _bet(project, title, body)
+    bet["subject"] = {"kind": "bet", "ref": ref}
+    return bet
+
+
+def test_a_subject_gives_an_anchorless_output_its_place_back(project):
+    """The other half of the slice's finding. Two runs arguing the same bet in
+    different words are one bet argued twice, and until `subject` existed the
+    similarity layer had nothing to hold them against — a reworded bet was a
+    new bet, every run, forever."""
+    from agency import dedup
+
+    first = _on(project, "regional-distribution", "Distribuce přes instituce kraje", _HERE)
+    again = _on(project, "regional-distribution", "Instituce jako kanál distribuce",
+                _SAME_AGAIN)
+
+    duplicate, how = dedup.is_duplicate(again, first)
+    assert duplicate and how.startswith("similarity")
+
+
+def test_two_bets_about_two_different_bets_stay_two(project):
+    """The guard the place exists for. Two claims in different places are two
+    claims, and a bet's place is which bet it is about."""
+    from agency import dedup
+
+    first = _on(project, "regional-distribution", "Distribuce přes instituce kraje", _HERE)
+    other = _on(project, "newsletter-retention", "Newsletter jako retenční kanál",
+                _SAME_AGAIN)
+
+    assert dedup.is_duplicate(other, first) == (False, "")
+
+
+def test_an_anchored_output_keeps_the_place_it_always_had(project):
+    """Every committed finding carries a fingerprint computed from `sym:` or
+    `file:`, and dedup against history compares the stored one against a fresh
+    one. Generalising those two shapes into `symbol:` and `file:` in the same
+    sweep would have silently stopped the second run over a commit from
+    recognising the first."""
+    from agency import dedup
+
+    f = make_finding(project, "x")
+    assert dedup.subject_key(f) == "sym:getUser"
+
+    f["anchor"]["symbol"] = None
+    assert dedup.subject_key(f) == "file:src/auth.ts"
+
+
+def test_what_the_pack_says_wins_over_what_the_anchor_implies(project):
+    """The anchor is where the claim was found; `subject` is what the claim is
+    about, and only the pack knows when those differ. Nothing committed
+    carries one, so no fingerprint in history moves."""
+    from agency import dedup
+
+    f = make_finding(project, "x", subject={"kind": "board_item", "ref": "255"})
+    assert dedup.subject_key(f) == "board_item:255"
+
+
+def test_the_real_ceo_scope_script_reads_the_register_it_documents(project):
+    """`packs/ceo/` is a reference copy of a pack living in another
+    repository, and its scope command is a file next to its manifest. Nothing
+    else in this suite would notice if `references/method.md` prescribed a
+    `Ref:` line the script did not read — and the failure would be an empty
+    memory, not an error."""
+    import subprocess
+    import sys as _sys
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[3]
+    page = project.agency_dir / "knowledge" / "pages" / "ceo" / "strategy.md"
+    page.parent.mkdir(parents=True, exist_ok=True)
+    page.write_text(
+        "Last reviewed: 2026-09-07\n\n# Strategie\n\n"
+        "Kvesteros je regionální discovery vrstva.\n\n"
+        "### Bet 1 — Distribuce přes regionální instituce\n"
+        "Ref: regional-distribution\n"
+        "Status: confirmed (decisions.md, 2026-09-04)\n\n"
+        "### Bet 2 — Newsletter jako retenční kanál\n"
+        "Ref: newsletter-retention\n"
+        "Status: killed (2026-08-20, nikdo se nepřihlásil)\n",
+        encoding="utf-8")
+
+    result = subprocess.run(
+        [_sys.executable, str(root / "packs" / "ceo" / "scripts" / "scope.py")],
+        cwd=project.root, capture_output=True, text=True, encoding="utf-8")
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == [{"kind": "bet", "ref": "regional-distribution"}], \
+        "the live bets, and a killed one is not one"
+
+
+def test_the_ceo_manifest_and_its_scope_script_are_the_same_pack(project):
+    """A manifest naming a script that is not there produces a run with no
+    narrowed memory and no error anywhere — the failure mode this step is
+    least able to notice."""
+    import json as _json
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[3]
+    manifest = _json.loads((root / "packs" / "ceo" / "pack.json").read_text(encoding="utf-8"))
+    command = manifest["scope"]
+
+    assert command.endswith("scripts/scope.py")
+    assert (root / "packs" / "ceo" / "scripts" / "scope.py").is_file()
+    assert command.split()[-1].startswith(".claude/skills/agency-ceo/"), \
+        "the path a run sees is the one inside the project, not this repository"

@@ -9,6 +9,9 @@ the brief does not), and that the run projection did not change even though
 from __future__ import annotations
 
 import json
+import shlex
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -313,3 +316,164 @@ def test_the_blast_radius_counts_as_here_too(project, make_run):
 
     nearby = json.loads((ev / knowledge.HERE).read_text(encoding="utf-8"))
     assert [f["symbol"] for f in nearby] == ["getUser"]
+
+# ------------------------------------------------------ what a run is about
+#
+# `known-here.json` used to be selected by files and symbols out of
+# `impact.json`, which is a code graph — so for `po` and `ceo`, both of which
+# run with `graph: false`, it was dead code. The intersection asks the same
+# question in a vocabulary a pack can also speak. The three tests above are
+# review's answer, and they are the ones that must not change.
+
+
+def _scope_command(script: Path) -> str:
+    """A runnable `scope` command for a test pack.
+
+    The interpreter running the suite rather than a `python` on PATH, as
+    posix-quoted text, because a manifest holds a command line and
+    `shlex.split` eats the backslashes in a Windows one.
+    """
+    return " ".join(shlex.quote(Path(p).as_posix()) for p in (sys.executable, script))
+
+
+def _pack_that_knows_its_own_scope(project, prints: str, name: str = "ceo"):
+    """A pack with no graph whose `scope` command says what its runs are about."""
+    skill = install_pack(project, name, {"target": "workspace", "worktree": False,
+                                         "graph": False})
+    script = skill / "scripts" / "scope.py"
+    script.parent.mkdir(parents=True, exist_ok=True)
+    script.write_text(f"print({prints!r})\n", encoding="utf-8")
+    manifest = json.loads((skill / "pack.json").read_text(encoding="utf-8"))
+    manifest["scope"] = _scope_command(script)
+    (skill / "pack.json").write_text(json.dumps(manifest), encoding="utf-8")
+    return skill
+
+
+def _about(project, run_id, ref, title, *, pack="ceo"):
+    """One output about one bet — no anchor, so `subject` is its only place."""
+    f = make_finding(project, run_id, pack=pack, type="bet", title=title,
+                     subject={"kind": "bet", "ref": ref})
+    del f["anchor"]
+    return f
+
+
+def test_a_pack_with_no_graph_finally_gets_a_here_list(project, make_run):
+    """The acceptance criterion of the step: `known-here.json` non-empty for a
+    pack that has no code graph. Until the intersection existed there was no
+    vocabulary in which such a run could say what it was about, so the one
+    short list a run is meant to read whole was always absent."""
+    _pack_that_knows_its_own_scope(project, '[{"kind": "bet", "ref": "regional-distribution"}]')
+    make_run(findings=[_about(project, "01G0000000000000000000000A",
+                              "regional-distribution", "Distribuce přes instituce kraje")],
+             run_id="01G0000000000000000000000A", pack="ceo")
+    run = make_run(findings=[], run_id="01G0000000000000000000000B", pack="ceo")
+
+    stats = runs.known_memory(project, run, [])
+
+    nearby = json.loads((run.dir / "evidence" / knowledge.HERE).read_text(encoding="utf-8"))
+    assert [f["subject"]["ref"] for f in nearby] == ["regional-distribution"]
+    assert stats["knownHere"] == 1 and stats["scopeItems"] == 1
+
+
+def test_a_run_about_one_bet_is_not_handed_the_others(project, make_run):
+    """The narrowing has to narrow. A second short list that contains
+    everything is the long list with extra steps."""
+    _pack_that_knows_its_own_scope(project, '[{"kind": "bet", "ref": "regional-distribution"}]')
+    make_run(findings=[
+        _about(project, "01H0000000000000000000000A", "regional-distribution",
+               "Distribuce přes instituce kraje"),
+        _about(project, "01H0000000000000000000000A", "newsletter-retention",
+               "Newsletter drží návštěvníky mezi sezónami"),
+    ], run_id="01H0000000000000000000000A", pack="ceo")
+    run = make_run(findings=[], run_id="01H0000000000000000000000B", pack="ceo")
+
+    runs.known_memory(project, run, [])
+
+    nearby = json.loads((run.dir / "evidence" / knowledge.HERE).read_text(encoding="utf-8"))
+    assert [f["subject"]["ref"] for f in nearby] == ["regional-distribution"]
+
+
+def test_the_scope_a_run_was_narrowed_by_is_written_down(project, make_run):
+    """An empty `known-here.json` has two explanations — nothing matched, or
+    the run never said what it was about — and without the scope beside it
+    they look the same."""
+    _pack_that_knows_its_own_scope(project, '[{"kind": "bet", "ref": "regional-distribution"}]')
+    run = make_run(findings=[], pack="ceo")
+
+    stats = runs.known_memory(project, run, ["src/auth.ts"])
+
+    wanted = json.loads((run.dir / "evidence" / knowledge.SCOPE).read_text(encoding="utf-8"))
+    assert {"kind": "file", "ref": "src/auth.ts"} in wanted
+    assert {"kind": "bet", "ref": "regional-distribution"} in wanted
+    assert stats["scopeItems"] == 2, "counted even though nothing matched it"
+
+
+def test_a_scope_command_that_breaks_costs_the_memory_and_not_the_run(project, make_run):
+    """The pack's own script is the least trustworthy thing in the
+    preparation. Failing it costs this run its narrowed memory; killing the
+    run over it costs the whole run — and what went wrong has to be readable
+    afterwards, next to the evidence it did not produce."""
+    skill = _pack_that_knows_its_own_scope(project, "unused")
+    (skill / "scripts" / "scope.py").write_text(
+        "import sys; sys.stderr.write('strategy.md is unreadable'); sys.exit(1)\n",
+        encoding="utf-8")
+    run = make_run(findings=[], pack="ceo")
+
+    stats = runs.known_memory(project, run, [])
+
+    assert stats["scopeItems"] == 0
+    assert "unreadable" in (run.dir / "evidence" / "scope.error.txt").read_text(encoding="utf-8")
+
+
+def test_a_scope_that_is_not_a_scope_is_refused_the_same_way(project, make_run):
+    """A script that prints prose is the same failure as one that exits
+    non-zero, and reading half of it would be worse than reading none."""
+    _pack_that_knows_its_own_scope(project, "the live bets are: distribution")
+    run = make_run(findings=[], pack="ceo")
+
+    assert runs.known_memory(project, run, [])["scopeItems"] == 0
+    assert (run.dir / "evidence" / "scope.error.txt").is_file()
+
+
+def test_a_pack_that_declares_no_scope_runs_no_command(project, make_run):
+    """Every pack in this repository but one declares nothing, and preparation
+    must not start looking for a script that was never promised."""
+    run = make_run(findings=[])
+
+    stats = runs.known_memory(project, run, ["src/auth.ts"])
+
+    assert stats["scopeItems"] == 1, "the changed file, and nothing the pack added"
+    assert not (run.dir / "evidence" / "scope.error.txt").exists()
+
+
+def test_the_run_is_told_where_its_scope_is(project, make_run):
+    """The agent reads it — to write an output's `subject` in the vocabulary
+    the memory it was handed was selected by — and never writes it."""
+    _pack_that_knows_its_own_scope(project, '[{"kind": "bet", "ref": "regional-distribution"}]')
+    pack = packs.load("ceo", project)
+    run = make_run(findings=[], pack="ceo")
+    runs.known_memory(project, run, [])
+
+    runs.write_context(run, pack, {"kind": "workspace"}, project.root, [], 0)
+
+    ctx = json.loads((run.dir / "context.json").read_text(encoding="utf-8"))
+    assert ctx["scope"] == "evidence/scope.json"
+
+
+def test_doctor_says_when_a_declared_scope_script_is_not_there(project, capsys):
+    """The quietest failure this step can produce. A manifest naming a script
+    that is not there costs every run its narrowed memory and reports nothing
+    at the time — the same shape as a missing sink, which is why it is the
+    same check."""
+    from agency import cli
+
+    install_pack(project, "ceo", {"target": "workspace", "worktree": False,
+                                  "scope": "python .claude/skills/agency-ceo/scripts/scope.py"})
+
+    cli.main(["doctor", "--repo", str(project.root), "--json"])
+    checks = json.loads(capsys.readouterr().out)["checks"]
+
+    broken = next(c for c in checks if c["name"] == "pack ceo scope")
+    assert broken["ok"] is False and "scope.py" in broken["detail"]
+    assert broken["fatal"] is False, "a run without narrowed memory is still a run"
+

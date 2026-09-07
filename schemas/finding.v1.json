@@ -28,6 +28,26 @@
       "pattern": "^[a-z][a-z0-9_-]*$",
       "description": "What kind of output this is — `finding` when absent, which is every output written before types existed. The pack declares how each of its types is handled (`pack.json` → `outputs`): whether it deduplicates, what evidence it needs, what feedback it accepts, whether it may act, whether it may become memory. The core reads that policy and never the meaning: it does not know what a `bet` or a `decision` is, and the moment it does, every future specialist has to pretend to be a code reviewer again."
     },
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "ref"],
+      "description": "What this output is ABOUT, as a pair a machine can compare — never interpret. It is what gives an output a PLACE: dedup refuses to compare two outputs in different places, and a run's memory is narrowed to `subject` intersected with the run's own scope. A finding gets its place from the anchor and needs none of this; a type with no anchor has no place at all without it, and four differently worded bets then differ only word by word.",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "description": "The kind of thing this is about. `file` and `symbol` are the core's own, derived from the anchor; the rest are the pack's — `bet`, `board_item` — and the core never learns what they mean. No registry: a pack adds a kind by writing it."
+        },
+        "ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "Which one. It has to name a SINGLE thing and survive the run: `bet:regional-distribution`, never `strategy` and never `bet:1`. The test is whether two outputs could share this ref and still be about different things — if they could, it is too coarse, and a coarse ref turns off the one guard that keeps two claims from being folded into one."
+        }
+      }
+    },
+
     "severity": { "enum": ["low", "medium", "high", "blocker"] },
     "title": { "type": "string", "minLength": 8, "maxLength": 200 },
     "body": {

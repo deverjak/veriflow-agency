@@ -93,6 +93,7 @@ def cmd_packs(args) -> int:
             "requires": p.requires,
             "run": p.run_policy,
             "minScore": p.min_score,
+            "scope": p.scope,
             "sink": p.sink,
         })
 
@@ -107,6 +108,19 @@ def cmd_packs(args) -> int:
 
 
 # ---------------------------------------------------------------- doctor
+
+def _script_of(command: str | None) -> str:
+    """The file a pack's command runs, when it runs one of its own.
+
+    Best effort, and deliberately so: `doctor` is here to catch the typo in a
+    path, not to parse a command line. Anything it cannot recognise is left
+    alone rather than reported as missing.
+    """
+    parts = (command or "").split()
+    if parts and parts[0] == "python" and len(parts) > 1:
+        return parts[1]
+    return parts[0] if parts else ""
+
 
 def _run_hint(pack) -> str:
     """How this pack is launched. Read from the manifest, never from its name."""
@@ -224,12 +238,14 @@ def cmd_doctor(args) -> int:
                 check(f"pack {p.name} graph", True,
                       f"{graph.DRIVER}, without {', '.join(lacks_optional)} — "
                       f"those dimensions run without the graph signal", fatal=False)
-        if p.sink:
-            parts = p.sink.split()
-            token = (parts[1] if parts and parts[0] == "python" and len(parts) > 1
-                    else (parts[0] if parts else ""))
+        # A pack's own scripts, both of them. The failure is identical and it
+        # is quiet in both directions: a missing sink leaves a finding resting
+        # as a candidate, a missing scope leaves a run with memory nobody
+        # narrowed — and neither says a word at the time.
+        for label, command in (("sink", p.sink), ("scope", p.scope)):
+            token = _script_of(command)
             if token and not (project.root / token).is_file():
-                check(f"pack {p.name} sink", False, f"{token} not found", fatal=False)
+                check(f"pack {p.name} {label}", False, f"{token} not found", fatal=False)
 
         # An output policy is data the core acts on, so a typo in it does not
         # fail — it defaults, quietly and wrongly. `dedpu: false` would keep

@@ -3,7 +3,7 @@
 **Datum:** 2026-09-06
 **Navazuje na:** [`agency-v1.md`](agency-v1.md) (pack je skill v projektu, žádná konfigurace), [`harness.md`](harness.md) (provenience tool callů, brána, metriky, revize packu), [`findings-ownership.md`](findings-ownership.md) (board je stav, lokál je brána a stopa), [`teams.md`](teams.md) (řetěz), [`shared-memory.md`](shared-memory.md) (paměť patří projektu)
 **Řeší:** jádro dnes umí evidovat jediný druh výstupu — nález s kotvou na soubor a řádek. PO a CEO produkují rozhodnutí, odpovědi, sázky a drafty, a **oba už jádro kvůli tomu obcházejí**. Plán zobecňuje mechanismy, které v jádru fungují (brána, dedup, sinky, paměť, metriky), tak aby přestaly předpokládat code-review nález — a nedělá z Agency univerzální platformu.
-**Stav k 6. 9. 2026:** Kroky 1–4 hotové a commitnuté (testy 446 zelených). Svislý řez `bet` prošel a **přeskládal zbytek plánu** — co se posunulo a proč, je u Kroku 4. Další na řadě: Krok 5 (`subject` + `run.scope`), který je teď naléhavější, než byl.
+**Stav k 7. 9. 2026:** Kroky 1–5 hotové a commitnuté (testy 459 zelených). Svislý řez `bet` prošel u Kroku 4 a **přeskládal zbytek plánu**; Krok 5 na to navázal — output má `subject`, běh má `scope` a paměť se poprvé zúžila i packu bez grafu. Další na řadě: Krok 6 (`actions` ze `sinks`).
 
 **Nedělá:** nový generický agent framework. Žádný plugin systém metrik, žádný registr typů, žádná doménová znalost v jádru. Přibývají přesně dvě abstrakce — `TypePolicy` a `Run.scope`.
 
@@ -22,16 +22,16 @@ pwsh -NoProfile -File scripts/test.ps1   # jádro + smoke extension; musí říc
 
 Jen jádro, když jde o rychlost: `cd packages/core; uv run --with pytest --with jsonschema python -m pytest -q`
 
-Stav k 6. 9. 2026: Kroky 1–4 hotové, 446 testů. **Další je Krok 5** (`subject` + `run.scope`), a je naléhavější, než plán původně tvrdil — důvod je u Kroku 4.
+Stav k 7. 9. 2026: Kroky 1–5 hotové, 459 testů. **Další je Krok 6** (`actions` ze `sinks`).
 
-### První pohyb v Kroku 5
+### První pohyb v Kroku 6
 
-V tomhle pořadí, protože každý další krok stojí na předchozím:
+V tomhle pořadí:
 
-1. **Dohodnout slovník `subject.kind`** a zapsat ho do §1.4 dřív, než se napíše kód. `bet:regional-distribution` ano, `strategy` ne — hrubý subject vypne pojistku v dedupu (§6, past 3).
-2. `subject` do `finding.v1` jako nepovinné pole, `dedup.symbol_key` → `subject_key` s pořadím *symbol → soubor → subject → nic*.
-3. `run.scope` — vyrábí ho **příprava**, ne agent (§3.2), a doménovou znalost dodá pack svým skriptem (`backlog.py snapshot` u PO, `strategy.md` u CEO, graf u review).
-4. `knowledge.here()` přepnout na průnik `subject ∩ scope`. **Pro review se výsledek nesmí změnit** — to je ta jediná věc, která v tomhle kroku dokáže selhat tiše.
+1. **Přečíst, kdo dnes `sinks` píše a kdo je čte,** dřív než se sáhne na tvar: [`runs.dispatch`](../../packages/core/src/agency/runs.py) zapisuje `sinks.githubProjectItem`, `cli.py:1628` a `knowledge.py:491` z toho čtou. Tvar se mění na jednom místě, čtenáři jsou tři.
+2. `actions[]` do `finding.v1` **vedle** `sinks`, ne místo něj — committed historie se nepřepisuje a `duplicateOf`/`sinks` v ní zůstanou platné. Čtenáři umí obojí, zapisuje se už jen nový tvar. Totéž se osvědčilo u evidence v Kroku 2.
+3. Akci zapisuje jádro v okamžiku, kdy sink odpoví — s `result`, `remoteId` a časem. `actions: "none"` (sázka) nezapisuje nic a **prázdné pole je legitimní stav**, ne chybějící data.
+4. Teprve pak `agency outputs` ukáže, co se na boardu doopravdy stalo. Migrace PO na tuhle cestu je Krok 10, ne tenhle.
 
 ### Konvence, které drží plán a kód pohromadě
 
@@ -51,6 +51,7 @@ V tomhle pořadí, protože každý další krok stojí na předchozím:
 4. **`install_pack(..., {"minScore": 0})` dá 70**, protože `int(m.get("minScore") or 70)` — nula je falsy. Test, který chce prahem neprocházet, musí dát `minScore` skutečné číslo.
 5. **Dva testovací outputy se stejným tělem jsou duplicita**, správně a nečekaně. Když test potřebuje dva různé outputy, musí mít dvě různá *tvrzení*, ne dva různé titulky — otisk se počítá z `body` a nikdy z titulku.
 6. **`agency doctor` a schéma jsou dvě různé vrstvy.** Pattern u `artifact` zastaví `/etc/passwd`, ale `evidence/../../x` mu vyhoví a chytá to až `resolve()`. Když se přidává kontrola cesty, patří obě.
+7. **`shlex.split` sežere zpětná lomítka.** Příkaz v manifestu (`sink`, `scope`) se parsuje POSIXově, takže `C:\Python\python.exe` se rozpadne na nesmysl. Cesty v manifestu proto vždy s lomítky dopředu — a test, který potřebuje spustit interpret téhle sady, si ho musí přepsat přes `Path(sys.executable).as_posix()` a `shlex.quote`.
 
 ### Rozhodnutí, která se nesmějí tiše zvrátit
 
@@ -204,12 +205,29 @@ relevantní paměť = outputs.subject ∩ run.scope
 ]
 ```
 
-To je zobecnění [`knowledge.here`](../../packages/core/src/agency/knowledge.py) (305) — dnes napevno soubory a symboly z grafu — na jeden mechanismus, který obslouží review i PO i CEO.
+To je zobecnění [`knowledge.here`](../../packages/core/src/agency/knowledge.py) — dřív napevno soubory a symboly z grafu — na jeden mechanismus, který obslouží review i PO i CEO. Bydlí v `RUN_DIR/evidence/scope.json`, ne v `run.json`; proč, je u Kroku 5.
 
 Dvě omezení, která z toho plynou a která rozhodují o použitelnosti (§3.2):
 
 * **scope musí existovat před spuštěním agenta**, protože paměť se injektuje do promptu;
 * **scope je hrubý stálý rozsah, ne jemný seznam subjektů**. U CEO to jsou živé sázky ze `strategy.md`, ne stakeholder, kterého se rozhodne prozkoumat ve dvacáté minutě.
+
+**Slovník `subject.kind`** — dohodnutý 7. 9. 2026, než se k tomu psal kód, protože hrubý subject vypne pojistku v dedupu (§6, past 3):
+
+| kind | ref | kdo ho vyrábí |
+|---|---|---|
+| `file` | POSIX cesta od kořene projektu | jádro z kotvy a z diffu |
+| `symbol` | jméno symbolu tak, jak ho zná graf | jádro z kotvy a z `impact.json` |
+| `bet` | slug sázky ze `strategy.md` (řádek `Ref:`) | CEO pack |
+| `board_item` | číslo issue nebo položky boardu | PO pack (Krok 10) |
+
+`kind` je slug, který jádro nikdy nevykládá — porovnává dvojice, nic víc. Nový kind si pack přidá tím, že ho začne psát; registr se nezavádí, protože by byl jediným místem, kde jádro musí vědět, co je `stakeholder`.
+
+Co ale platí pro každý:
+
+* **`ref` pojmenovává jednu věc.** Test zní: *můžou dva různé outputy sdílet tenhle ref a být přitom o něčem jiném?* Když ano, je hrubý. `bet:regional-distribution` ano, `strategy` ne — a `bet:1` taky ne, protože pořadí sázek se mezi běhy přečísluje.
+* **Dvojice musí přežít běh.** Subject, který se příště jmenuje jinak, nespáruje nic — ani v paměti, ani v dedupu.
+* **`subject` je jeden, ale míst může mít víc.** Nález o kódu má svoje místo pojmenované dvakrát — souborem a symbolem — a obojí je v kotvě. Jádro si je odvodí samo; pack je nepíše a průnik se scope počítá přes všechna jména, jinak by běh se scope `file:src/auth.ts` přestal vidět nález ukotvený na `getUser` v tomtéž souboru.
 
 ### 1.5 Kde je hranice
 
@@ -227,8 +245,8 @@ Architektonický test každé další featury: *potřebuje to opravdu každý pa
 | `_exists_at_commit` | `anchor.file` @ commit | `evidence.kind = code` (Krok 9) |
 | `weak-evidence` (`required_evidence`) | dimenze deklaruje druhy důkazů | **předloha celého plánu** — přesune se z dimenze na typ (Krok 3) |
 | `below-score` | `score < minScore` → zahodit | zaniká jako brána, `score` zůstává jako kalibrace (Krok 8) |
-| `dedup` | otisk z `pack`+`dimension`+`symbol_key`+podpis `body` | `symbol_key` → `subject_key`, do otisku přibude `type` (Krok 5) |
-| `knowledge.here` | soubory a symboly z grafu | `subject ∩ run.scope` (Krok 5) |
+| `dedup` | otisk z `pack`+`type`+`dimension`+`subject_key`+podpis `body` | hotovo (Kroky 3 a 5) |
+| `knowledge.here` | `subject ∩ run.scope` | hotovo (Krok 5) |
 | `sinks: {prComment, githubProjectItem}` | dvě zadrátované cesty ven | `actions[]` s výsledkem (Krok 6) |
 | `state` (skalár na nálezu) | jeden verdikt | projekce `fold(feedback_events, policy)` (Krok 7) |
 | `knowledge/pages/<pack>/` | píše je pack sám | beze změny — jádro paměť nepíše (§3.3) |
@@ -393,20 +411,30 @@ Metriky počítají **jeden poměr na lifecycle**, pojmenovaný packem — `byLi
 
 ---
 
-### Krok 5 — `subject` a `run.scope` (~1,5 dne) — *naléhavější, než plán čekal*
+### Krok 5 — `subject` a `run.scope` (~1,5 dne) — **hotovo**
 
-**Co Krok 4 změnil na zadání:** `subject` už není jen vylepšení paměti. Output bez kotvy nemá v dedupu **žádné místo**, takže se u něj dnes uplatní jen otisk; `subject` je to, co mu místo vrátí. Čím víc typů bez kotvy vznikne, tím víc práce se bez něj ztratí ve frontě.
+**Co Krok 4 změnil na zadání:** `subject` už není jen vylepšení paměti. Output bez kotvy nemá v dedupu **žádné místo**, takže se u něj uplatnil jen otisk; `subject` je to, co mu místo vrátí. Čím víc typů bez kotvy vznikne, tím víc práce by se bez něj ztratilo ve frontě.
 
-**Co se mění:**
+**Co se změnilo:**
 
-1. Output dostane `subject: {kind, ref}`. `ref` musí být konkrétní — `bet:regional-distribution`, nikdy `strategy`. Důvod je v dedupu: [`is_duplicate`](../../packages/core/src/agency/dedup.py) (131) odmítne porovnávat cokoliv, co nemá shodné „místo", a to je jediná pojistka proti tomu, aby se dvě různá tvrzení o téže oblasti spárovala. Hrubý subject tu pojistku vypne — a práh je 0.5 překryv při ≥4 sdílených slovech, což u dvou sázek na distribuci padne snadno.
-2. `symbol_key` → `subject_key`, do [`fingerprint`](../../packages/core/src/agency/dedup.py) (97) přibude `type` (jinak se `bet` a `finding` o téže věci označí za duplicitu).
-3. Běh dostane `scope` (§1.4, §3.2), vyrobený přípravou z toho, co deklaruje pack.
-4. [`here`](../../packages/core/src/agency/knowledge.py) (305) přestane číst `impact.json` napřímo a začne počítat průnik `subject ∩ scope`. Pro review se výsledek **nesmí změnit** — graf naplní scope soubory a symboly.
+1. Output dostal `subject: {kind, ref}` (nepovinný, slovník je v §1.4). `ref` musí být konkrétní — `bet:regional-distribution`, nikdy `strategy` a nikdy `bet:1`. Důvod je v dedupu: [`is_duplicate`](../../packages/core/src/agency/dedup.py) odmítne porovnávat cokoliv, co nemá shodné „místo", a to je jediná pojistka proti tomu, aby se dvě různá tvrzení o téže oblasti spárovala. Hrubý subject tu pojistku vypne — práh je 0.5 překryv při ≥4 sdílených slovech, což u dvou sázek na distribuci padne snadno.
+2. `symbol_key` → `subject_key`. `type` v otisku už byl z Kroku 3, takže z bodu 2 zbyl jen ten přejmenovaný klíč.
+3. Běh dostal `scope` (§1.4, §3.2), vyrobený přípravou. Doménovou znalost dodává pack příkazem `scope` v `pack.json` — jádro ho spustí a přečte z něj `{kind, ref}` páry, nic víc. `packs/ceo/scripts/scope.py` je první takový: přečte živé sázky ze `strategy.md`.
+4. [`here`](../../packages/core/src/agency/knowledge.py) přestal číst `impact.json` napřímo a počítá průnik `subject ∩ scope`. Pro review se výsledek nezměnil — graf plní scope soubory a symboly a `subjects()` porovnává obojí.
 
-**Testy:** `test_knowledge.py` — review scope dá tentýž výsledek jako dnes; CEO běh se scope `bet:x` dostane výstupy o `bet:x` a ne o `bet:y`. `test_gate.py` — `bet` a `finding` se stejným tělem nejsou duplicita.
+**Tři věci, které plán tvrdil a kód říká jinak:**
 
-**Hotovo, když:** `known-here.json` je poprvé neprázdný u packu bez grafu.
+1. **Pořadí v `subject_key` je *subject → symbol → soubor → nic*, ne *symbol → soubor → subject*.** Pro committed historii se ty dvě pořadí neliší ani o bit — žádný zapsaný nález `subject` nemá, takže všechny otisky sedí dál (a proto taky odvozené tvary zůstaly `sym:` a `file:`, místo aby se při té příležitosti „zobecnily" na `symbol:`; přejmenování tvaru by tiše rozbilo dedup proti historii). Liší se až u outputu, který má kotvu **i** subject — a tam má vyhrát pack: pole, které jádro ignoruje pokaždé, když existuje kotva, by se skoro nedalo napsat, a „čeho se to týká" je právě to, co kotva říct neumí.
+2. **`scope` se nedostal do `run.json`.** Past §6.9 varovala, že nové pole v záznamu musí zároveň do `run.v1` — místo toho se ukázalo, že tam nepatří vůbec: záznam drží **čísla** a seznamy leží vedle něj (`files[]` je v `context.json`, ne v `target`). Scope je proto `evidence/scope.json` a v záznamu je `evidence.scopeItems`. Ořezaný scope v `run.json` by byl lež o tom, čím se paměť zúžila, a neořezaný by do záznamu, který má u PR se čtyřmi sty soubory zůstat čitelný, nepatřil.
+3. **Přibyla kontrola v `agency doctor`** (a `scope` v `agency packs --json`). Není v plánu, ale je to přesně ten check, který už existuje pro `sink`, a selhání má stejný tvar a stejné ticho: manifest jmenuje skript, který tam není, každý běh přijde o zúženou paměť a nikdo se to nedozví. Doktor to říká jako varování, ne jako fatální chybu — běh bez zúžené paměti je pořád běh.
+
+**Co k tomu musel dostat CEO pack:** sázka v `strategy.md` má nově řádek `Ref: <slug>` ([`references/method.md`](../../packs/ceo/references/method.md)) a to je její identita — totéž, co nese `subject.ref` v `findings.json`, totéž, co čte příprava. Jmenuje **obsah** sázky, ne její pořadí: `bet-1` se přečísluje v den, kdy jedna sázka umře, a všechna paměť o ní jde s tím číslem pryč. Sázka se `Status: killed` do scope nepatří — běh má dostat, co bylo rozhodnuto o sázkách, které pořád běží.
+
+**Testy:** 13 nových, 459 celkem. `test_knowledge.py` — pack bez grafu poprvé dostane neprázdný `known-here.json`; běh se scope `bet:x` nedostane výstupy o `bet:y`; scope, který spadne, stojí paměť a ne běh; scope, který vytiskne prózu, dopadne stejně; pack, který nic nedeklaruje, nespouští nic; `context.json` na scope ukazuje; doktor pozná chybějící skript. `test_outputs.py` — přeformulovaná sázka o téže sázce je duplicita (dřív nebyla), dvě sázky o dvou sázkách ne, ukotvený nález má pořád klíč `sym:`/`file:`, a skutečný `packs/ceo/scripts/scope.py` čte formát, který `method.md` předepisuje. „`bet` a `finding` se stejným tělem nejsou duplicita" už testoval Krok 3.
+
+**Hotovo, když:** ~~`known-here.json` je poprvé neprázdný u packu bez grafu.~~ Splněno — `test_a_pack_with_no_graph_finally_gets_a_here_list`.
+
+**Co zbývá pro ostrý provoz:** přenos `packs/ceo/` (manifest, `SKILL.md`, `references/method.md`, nově `scripts/scope.py`) do repa Kvesteros a doplnění `Ref:` řádků do existující `strategy.md`. Bez nich příkaz doběhne a vrátí prázdný scope — což je správné chování, ale zúžená paměť z toho nebude.
 
 ---
 
@@ -534,7 +562,7 @@ To je jediná ochrana před frameworkem, který půl roku vypadá, že se učí.
 6. **Zrušit `minScore` bez náhrady objemu** (Krok 8). Fronta naroste, rozhodne se míň, precision přestane být signál.
 7. **Postavit `register` jako output type** (§0.1). Zdvojí mechanismus, který v `knowledge/pages/` funguje.
 8. **Ověřovat evidenci proti živému světu** (§3.1). Zabije replay a determinismus.
-9. **Past §0.3 z [`harness.md`](harness.md) znovu:** cokoliv nového v `run.json` musí zároveň do `run.v1` a do statistik, které z něj čtou. Tenhle plán tam přidává `scope` a `outputs` — obojí je nová příležitost napsat záznam neplatný proti vlastnímu schématu.
+9. **Past §0.3 z [`harness.md`](harness.md) znovu:** cokoliv nového v `run.json` musí zároveň do `run.v1` a do statistik, které z něj čtou. `scope` z ní nakonec vyklouzl tím, že do záznamu nešel vůbec (Krok 5, důvod 2) — ale statistika `scopeItems` ano, a ta musela do `MEMORY_STATS`, jinak by ji `collect_evidence` u grafového běhu vložila do bloku `graph`, který má v `run.v1` zavřený seznam klíčů. Přesně ta chyba, kterou tahle past popisuje, jen o patro níž.
 
 ---
 

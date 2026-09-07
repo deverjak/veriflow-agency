@@ -643,7 +643,8 @@ def ingest(project: Project, run: Run, min_score: int | None = None) -> dict:
             "state": "gated-out", "title": d.get("title"),
             "severity": dropped_finding.get("severity"),
             "dimension": dropped_finding.get("dimension"), "fingerprint": None,
-            "anchor": dropped_finding.get("anchor"), "by": None,
+            "anchor": dropped_finding.get("anchor"),
+            "subject": dropped_finding.get("subject"), "by": None,
             "reason": d.get("reason"), "ref": None, "url": None,
         })
 

@@ -19,6 +19,7 @@ At most three are live at once. A bet is written down like this, in `strategy.md
 
 ```
 ### Bet 1 — <one sentence hypothesis>
+Ref: <slug>
 If true, within <N> weeks we will see: <one observable, countable thing>.
 Killed by: <the observation that ends it>.
 Displaces: <what does not get the founder's time while this runs>.
@@ -27,6 +28,8 @@ Status: proposed | confirmed (decisions.md, <date>) | killed (<date>, why)
 ```
 
 A bet without a number is a wish. A bet without a kill condition is a belief. Both are allowed for a week, not for a quarter.
+
+**`Ref:` is the bet's name, and it is the only part of it a machine reads.** Lowercase, hyphens, no diacritics — `regional-distribution`, `german-language-reach`. It is what the bet's `subject.ref` carries into `findings.json`, so what the founder decided about a bet last month comes back on the run that argues about it again; it is what the preparation reads out of this page to work out what the run is about; and it is what keeps two bets about distribution from being folded into one. So it names the bet's CONTENT and never its position — `bet-1` renumbers itself the day a bet is killed, and every memory of it is lost with the number. Rewriting the hypothesis keeps the ref; a genuinely different bet gets a new one.
 
 ## The focus gate
 

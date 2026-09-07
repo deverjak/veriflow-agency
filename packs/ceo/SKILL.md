@@ -87,7 +87,8 @@ Read this section instead of a configuration file — there isn't one. Where a f
 <RUN_DIR>/context.json                 the prompt, the state of the working copy
 <RUN_DIR>/evidence/known-findings.json what this project already found and how it ended
 <RUN_DIR>/evidence/do-not-report.md   what this project already rejected — read it first
-<RUN_DIR>/evidence/known-here.json    what was ever found in the code this run touches
+<RUN_DIR>/evidence/known-here.json    what this project already concluded about the bets this run is about
+<RUN_DIR>/evidence/scope.json          what the preparation worked out this run is about
 <RUN_DIR>/evidence/known-pages.json    your own registers, as they stand
 <RUN_DIR>/evidence/upstream.json       only in a chain: what the members before you found
 <RUN_DIR>/evidence/recent-commits.txt  what has actually been happening
@@ -106,6 +107,7 @@ Read this section instead of a configuration file — there isn't one. Where a f
 | `review.dimensions` / `review.minScore` | which dimensions to run and the score threshold |
 | `target.headRefOid` | the commit findings are anchored to — **all 40 characters** |
 | `files[]` | what changed against the base branch — a hint about what the founder is building right now |
+| `scope` | path to what this run is about — the live bets off `strategy.md`, as `{kind, ref}` pairs. The preparation worked it out and `known-here.json` was selected by it. **You do not write it**; you write a bet's `subject` in the same vocabulary |
 | `worktreeOwned` | `false` — you are running in the founder's working copy |
 
 When `context.json` is missing you are running outside `agency run`. Say so and offer `agency run ceo`. Do not simulate the preparation by hand.
@@ -164,6 +166,7 @@ Kvesteros can hold **at most three live bets** — a bet is a sentence with a hy
 |---|---|
 | `type` | `"bet"` |
 | `anchor` | **omit it.** A claim about a funding call does not live in `footer.tsx`, and pointing it there was a way of satisfying a check rather than of proving anything |
+| `subject` | `{ "kind": "bet", "ref": "<slug>" }` — the `Ref:` line of the bet in `strategy.md`, or a new slug for a bet you are proposing for the first time. This is the bet's place: it is what makes the founder's verdict on it come back to you on the run that argues about it again, and what keeps two bets about distribution from being read as one. Without an anchor it is the only place a bet has |
 | `evidence` | at least one `web_snapshot` or `document`, both with a `locator` (below) |
 | how many | three per run; the fourth is dropped and told why |
 | `dimension` | the one it argues from — usually `distribution`, `positioning` or `stakeholders` |
@@ -180,6 +183,7 @@ Kvesteros can hold **at most three live bets** — a bet is a sentence with a hy
 ```jsonc
 {
   "id": "<ULID>", "runId": "<from run.json>", "pack": "ceo", "type": "bet",
+  "subject": { "kind": "bet", "ref": "regional-distribution" },
   "dimension": "distribution", "severity": "high",
   "title": "Distribuce přes regionální instituce, ne přes vyhledávání",
   "body": "Hypotéza: informační centra a KIC KK dovedou k produktu instruktory, ke kterým se přes SEO nedostaneme.\nDo 6 týdnů uvidíme: aspoň tři centra, která odkaz zveřejní, a 20 příchodů z jejich stránek.\nZabije to: tři centra oslovena, žádné neodpoví do 6 týdnů.\nVytlačuje: newsletter a práci na SEO stránkách.",
@@ -196,7 +200,7 @@ Kvesteros can hold **at most three live bets** — a bet is a sentence with a hy
 
 **The founder answers, not you.** A bet goes out as a proposal and stays one until somebody says otherwise: `agency feedback <id> selected` or `rejected`, and later `successful`, `failed` or `abandoned`. Two questions, two numbers — how many of your bets get chosen, and how many of the chosen ones work.
 
-So in `strategy.md` write the bets that **have been chosen**, and take `Status:` from the feedback rather than from your own judgement. A bet you proposed this run has no status yet; it is in `findings.json`, and writing it into `strategy.md` as though it were live is deciding on the founder's behalf. Bets the founder has rejected come back to you in the next run's `do-not-report` briefing — do not propose them again unless something in the world changed, and say what.
+So in `strategy.md` write the bets that **have been chosen**, each with the `Ref:` line it carried in `findings.json` — that line is what the next run's preparation reads to work out which bets are live, and a chosen bet missing from the page is a bet the next run has no memory of. Take `Status:` from the feedback rather than from your own judgement. A bet you proposed this run has no status yet; it is in `findings.json`, and writing it into `strategy.md` as though it were live is deciding on the founder's behalf. Bets the founder has rejected come back to you in the next run's `do-not-report` briefing — do not propose them again unless something in the world changed, and say what.
 
 Every "what should we build next" question is answered by naming the bet it serves. Use the same dispositions the product owner pack uses, so a decision reads the same across the agency:
 
@@ -297,7 +301,7 @@ Write findings in Czech.
 
 Into `.agency/knowledge/pages/ceo/` — plain markdown, one convention: a leading `Last reviewed: <date>` line, then a `# Title` heading (the knowledge index takes the page's name from it). No frontmatter, nothing to parse. Create only the pages you have content for.
 
-- **`strategy.md`** — positioning in one paragraph, the live bets (at most three, in the format from `references/method.md`), what the product says no to, the stage statement. Rewrite when it stops holding.
+- **`strategy.md`** — positioning in one paragraph, the live bets (at most three, in the format from `references/method.md`, each keeping its `Ref:` line and its `Status:`), what the product says no to, the stage statement. Rewrite when it stops holding. This is the one register the core reads: the preparation takes the live bets off it to work out what the next run is about.
 - **`competitors.md`** — the register, one row per competitor or substitute: who, model, overlap, where they win, where we win, consequence for a bet, sources, last checked.
 - **`stakeholders.md`** — one row per institution: role, what they need, our one ask, threat to them, status, next step, last checked. Contact names only when public, with the URL.
 - **`opportunities.md`** — programs, calls, events, listings with a deadline and a qualification note. Past deadlines move to a "closed" section with what happened, they are not deleted.

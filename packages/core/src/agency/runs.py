@@ -650,14 +650,70 @@ def prepare_graph(project: Project, wt: Path) -> dict:
 #: `finding.v1`. `test_graph_evidence.py` now checks this list against what
 #: `for_run` actually returns, which is the only version of this rule that
 #: cannot drift again.
+#:
+#: `scopeItems` is one of them even though it is not memory itself: it is what
+#: the memory was narrowed by, and the reason an empty `known-here.json` can be
+#: explained afterwards. It is certainly not graph signal — a pack with no
+#: graph has a scope too, which is the whole point of the generalisation.
 MEMORY_STATS = ("knownFindings", "knownPages", "knownSpecs", "knownRejections",
-                "knownHere")
+                "knownHere", "scopeItems")
 
 
 def known_memory(project: Project, run: Run, files: list[str] | None = None) -> dict:
     """The project's memory for this run. Assembled by `knowledge.for_run`."""
     from . import knowledge
-    return knowledge.for_run(project, run, files)
+    return knowledge.for_run(project, run, files, pack_scope(project, run))
+
+
+def pack_scope(project: Project, run: Run) -> list[dict]:
+    """What the PACK says this run is about — `[]` when it declares nothing.
+
+    The core has one vocabulary of its own, and it is the code: changed files
+    and the graph's blast radius. That is enough for a reviewer and nothing at
+    all for a product owner or a founder, whose runs are about board items and
+    bets. The domain knowledge stays where it belongs — `scope` in `pack.json`
+    is a command the pack owns, and all the core does is run it and read
+    `{kind, ref}` pairs out of what it printed.
+
+    Deliberately not fatal. A scope that fails to be gathered costs this run
+    its narrowed memory; killing the run over it would cost the whole run, and
+    the pack's own script is the least trustworthy thing in the preparation.
+    What went wrong is written next to the evidence it did not produce, the
+    way a graph driver's failure is.
+    """
+    try:
+        pack = packs.load(run.record().get("pack") or "", project)
+    except SystemExit:
+        return []
+    command = pack.scope if pack else None
+    if not command:
+        return []
+
+    ev = run.dir / "evidence"
+    ev.mkdir(parents=True, exist_ok=True)
+
+    def failed(why: str) -> list[dict]:
+        (ev / "scope.error.txt").write_text(why[:2000], encoding="utf-8")
+        return []
+
+    try:
+        result = subprocess.run(
+            shlex.split(command.format(runDir=posix(run.dir))),
+            cwd=project.root, env={**os.environ, RUN_ENV: run.id},
+            capture_output=True, text=True, encoding="utf-8", timeout=60)
+    except (OSError, subprocess.SubprocessError, KeyError, ValueError) as e:
+        return failed(f"{command}: {e}")
+    if result.returncode != 0:
+        return failed((result.stderr or result.stdout or "").strip()
+                      or f"{command}: exit {result.returncode}")
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return failed(f"{command}: printed no readable JSON")
+    if not isinstance(data, list):
+        return failed(f"{command}: printed {type(data).__name__}, "
+                      f"and a scope is a list of {{kind, ref}}")
+    return [item for item in data if isinstance(item, dict)]
 
 
 def _graph_evidence(ev: Path, name: str, answer: graph.Answer) -> None:
@@ -1297,6 +1353,11 @@ def write_context(run: Run, pack, target: dict, wt: Path,
         "doNotReport": (posix(Path("evidence") / knowledge.DO_NOT_REPORT)
                         if (run.dir / "evidence" / knowledge.DO_NOT_REPORT).is_file()
                         else None),
+        # What this run is about, as the preparation worked it out. The agent
+        # READS it — to write an output's `subject` in the same vocabulary the
+        # memory it was handed was selected by — and never writes it.
+        "scope": (posix(Path("evidence") / knowledge.SCOPE)
+                  if (run.dir / "evidence" / knowledge.SCOPE).is_file() else None),
         "schemas": {"finding": "finding.v1", "run": "run.v1"},
     })
 
@@ -1551,7 +1612,8 @@ def dispatch(project: Project, run: Run, finding: dict, by: str) -> dict:
         "state": "sent", "lifecycle": "triage", "polarity": "positive",
         "title": finding.get("title"), "severity": finding.get("severity"),
         "dimension": finding.get("dimension"), "fingerprint": finding.get("fingerprint"),
-        "anchor": finding.get("anchor"), "by": by, "ref": ref, "url": url, "reason": None,
+        "anchor": finding.get("anchor"), "subject": finding.get("subject"),
+        "by": by, "ref": ref, "url": url, "reason": None,
     })
     return {"id": fid, "ok": True, "noSink": False, "ref": ref, "url": url, "error": None}
 
@@ -1568,7 +1630,8 @@ def reject(project: Project, run: Run, finding_id: str, reason: str,
         "state": "rejected", "lifecycle": ev.get("lifecycle"), "polarity": ev.get("polarity"),
         "title": finding.get("title"), "severity": finding.get("severity"),
         "dimension": finding.get("dimension"), "fingerprint": finding.get("fingerprint"),
-        "anchor": finding.get("anchor"), "by": ev["by"], "reason": reason, "ref": None, "url": None,
+        "anchor": finding.get("anchor"), "subject": finding.get("subject"),
+        "by": ev["by"], "reason": reason, "ref": None, "url": None,
     })
     return ev
 
@@ -1597,8 +1660,8 @@ def record_feedback(project: Project, run: Run, finding_id: str, kind: str,
         "state": kind, "lifecycle": ev.get("lifecycle"), "polarity": ev.get("polarity"),
         "title": finding.get("title"), "severity": finding.get("severity"),
         "dimension": finding.get("dimension"), "fingerprint": finding.get("fingerprint"),
-        "anchor": finding.get("anchor"), "by": ev["by"], "reason": reason,
-        "ref": None, "url": None,
+        "anchor": finding.get("anchor"), "subject": finding.get("subject"),
+        "by": ev["by"], "reason": reason, "ref": None, "url": None,
     })
     return ev
 
