@@ -3,7 +3,7 @@
 **Datum:** 2026-09-06
 **Navazuje na:** [`agency-v1.md`](agency-v1.md) (pack je skill v projektu, žádná konfigurace), [`harness.md`](harness.md) (provenience tool callů, brána, metriky, revize packu), [`findings-ownership.md`](findings-ownership.md) (board je stav, lokál je brána a stopa), [`teams.md`](teams.md) (řetěz), [`shared-memory.md`](shared-memory.md) (paměť patří projektu)
 **Řeší:** jádro dnes umí evidovat jediný druh výstupu — nález s kotvou na soubor a řádek. PO a CEO produkují rozhodnutí, odpovědi, sázky a drafty, a **oba už jádro kvůli tomu obcházejí**. Plán zobecňuje mechanismy, které v jádru fungují (brána, dedup, sinky, paměť, metriky), tak aby přestaly předpokládat code-review nález — a nedělá z Agency univerzální platformu.
-**Stav k 7. 9. 2026:** Kroky 1–6 hotové a commitnuté (testy 469 zelených). Svislý řez `bet` prošel u Kroku 4 a **přeskládal zbytek plánu**; Krok 5 dal outputu `subject` a běhu `scope`, Krok 6 nahradil `sinks` akcemi a cestou opravil dvě místa, kde `agency ingest` nebyl idempotentní. Další na řadě: Krok 7 (feedback jako události a projekce `state`).
+**Stav k 7. 9. 2026:** Kroky 1–6 hotové a commitnuté (testy 469 zelených). Svislý řez `bet` prošel u Kroku 4 a **přeskládal zbytek plánu**; Krok 5 dal outputu `subject` a běhu `scope`, Krok 6 nahradil `sinks` akcemi a cestou opravil dvě místa, kde `agency ingest` nebyl idempotentní. CEO pack je **přenesený do repa Kvesteros** včetně `Ref:` řádků ve `strategy.md` — čeká na první ostrý běh. Další na řadě: Krok 7 (feedback jako události a projekce `state`).
 
 **Nedělá:** nový generický agent framework. Žádný plugin systém metrik, žádný registr typů, žádná doménová znalost v jádru. Přibývají přesně dvě abstrakce — `TypePolicy` a `Run.scope`.
 
@@ -11,7 +11,7 @@
 
 ## Pro další session — než začneš
 
-Tahle sekce je pro agenta (nebo pro mě za měsíc), který v plánu pokračuje. Číslované sekce níž jsou plán; tohle je způsob práce, který se u Kroků 1–4 osvědčil, a pasti, na které se cestou došláplo.
+Tahle sekce je pro agenta (nebo pro mě za měsíc), který v plánu pokračuje. Číslované sekce níž jsou plán; tohle je způsob práce, který se u Kroků 1–6 osvědčil, pasti, na které se cestou došláplo, a inventura toho, co ještě chybí.
 
 ### Kde to stojí, ověřitelně
 
@@ -22,7 +22,15 @@ pwsh -NoProfile -File scripts/test.ps1   # jádro + smoke extension; musí říc
 
 Jen jádro, když jde o rychlost: `cd packages/core; uv run --with pytest --with jsonschema python -m pytest -q`
 
-Stav k 7. 9. 2026: Kroky 1–6 hotové, 469 testů. **Další je Krok 7** (feedback jako události a projekce `state`).
+A že sedí i to, co bydlí jinde:
+
+```powershell
+cd ..\kvesteros-platform
+python .claude\skills\agency-ceo\scripts\scope.py   # tři živé sázky, ne prázdné pole
+agency doctor --json                                # žádné „pack ceo scope" ani „pack ceo outputs"
+```
+
+Stav k 7. 9. 2026: Kroky 1–6 hotové, 469 testů, CEO pack přenesený. **Další je Krok 7** (feedback jako události a projekce `state`).
 
 ### První pohyb v Kroku 7
 
@@ -33,6 +41,41 @@ V tomhle pořadí:
 3. **Projekce** `state = fold(events, policy)` na jednom místě. Nikdo jiný historii neskládá — to je celý smysl kroku, ne ten seznam událostí.
 4. `decisions()` skládá dnes události na **jedno** rozhodnutí na output (poslední zápis vyhrává), takže sázka označená `selected` a později `successful` se v metrikách objeví jen pod `outcome`. Otevřeno vědomě od Kroku 3; teprve tady se to dá dokončit.
 5. CLI zůstává pro uživatele stejné: `agency accept` / `agency reject` jsou zkratky, obecný tvar je `agency feedback <id> <kind>`. **CLI nemusí odhalovat vnitřní generalizaci všude.**
+
+### Co chybí — inventura k 7. 9. 2026
+
+**Zbývající kroky**, s tím, co je na každém z nich to podstatné:
+
+| krok | odhad | co je na tom podstatné |
+|---|---|---|
+| **7** — feedback jako události, projekce `state` | ~1,5 dne | ne ten seznam událostí, ale **jedna funkce**, která z něj skládá stav. Bez ní si ho deset míst začne skládat samo (§6, past 5) |
+| **8** — `score` přestane být branou | ~0,5 dne | `minScore` je dnes **jediná pojistka na objem**. Náhrada (`cardinality`) v jádru od Kroku 3 je, takže krok je hlavně o tom nezrušit bránu dřív, než se ta náhrada u packů skutečně nastaví — `ceo` má 80, `po` 75 |
+| **9** — kotva jako `evidence.kind = code` | ~2 dny | **nejdražší krok seznamu.** Politika kotvy je hotová z Kroku 4, ale samotné pole má 58 výskytů v sedmi souborech; `anchor.py` (čtyřvrstvé kotvení, drift) zůstává a jen se volá nad code evidencí |
+| **10** — migrace PO a CEO na jádro | ~1,5 dne | **přejímka celého plánu.** Ne „umí to jádro", ale „přestaly ho packy obcházet?" Mechanismus pro PO stojí od Kroku 6, chybí `decision` a `ticket_draft` jako typy a `backlog.py` v roli vykonavatele, ne obchvatu |
+| **11** — rename `finding` → `output` | ~0,5 dne | úplně nakonec, a při tom uklidit `dispatchErrors` (od Kroku 6 odvoditelné z `actions`) |
+
+**Vědomě otevřené věci, které nepatří k žádnému kroku** — každá byla rozhodnutá, ne zapomenutá:
+
+* **`stop_errors()` nekontroluje locatory** (Krok 2). Agent dostane zpět chybějící `locator` (to je schéma), ale o neuloženém artefaktu se dozví až brána po jeho konci. Odloženo za Krok 4, aby bylo vidět, jak často to nastává — **a to je teď: první ostrý běh CEO to ukáže.** Do té doby nic neměnit.
+* **`decisions()` drží jedno rozhodnutí na output** (Krok 3, poslední zápis vyhrává). Sázka označená `selected` a později `successful` se v metrikách objeví jen pod `outcome`. Řeší Krok 7.
+* **`sinks` v `finding.v1` zůstává** jako superseded (Krok 6). Nemaže se — committed historie ho má a čtenáři z něj padají zpátky. To platí i po Kroku 11.
+
+**Co může říct jen ostrý provoz, ne test:**
+
+1. **První běh CEO packu nad Kvesterosem.** Jestli sázky vzniknou jako outputy se `subject`, jestli scope ze `strategy.md` sedí, a hlavně jestli brána nezahodí poctivou sázku na `unverified-evidence` — kontrola „URL bylo otevřené v tomhle běhu" je nejmladší a jediná, která stojí na hooku.
+2. **`known-here.json` bude na prvním běhu prázdný, a je to správně.** V Kvesterosu není ani jedna sázka jako output (pack tam byl starý), takže průnik nemá co potkat. Naplní se od druhého běhu. Kdyby byl prázdný i potom, hledej `evidence/scope.json` a `scopeItems` — to je ta dvojice, kvůli které se ten stat počítá i v nule.
+3. **Zakladatelův verdikt.** Dokud nikdo neřekne `agency feedback <id> selected|rejected`, nemá `selection_rate` jmenovatele a §5 „explicit" je zatím jen tvrzení. Celý lifecycle sázky zatím prošel testem, ne člověkem.
+4. **`success_rate` nemá zdroj feedbacku vůbec** (§5, „unknown"). To není chybějící práce — je to hranice, za kterou se lifecycle **nevymýšlí** (§3.5).
+
+**Stav přejímky (§7)** — dva body chybí, jeden je poloviční:
+
+| | |
+|---|---|
+| 1. `--type bet` funguje, sázka code evidenci nemá ani nepředstírá | platí (test, ne ostrý běh) |
+| 2. brána zahodí sázku s neotevřeným URL, offline | platí |
+| 3. `selection_rate` a `success_rate` jako dvě nezávislá čísla | **poloviční** — obě metriky existují, ale současně je jeden output pod obě nedostane, dokud nebude Krok 7 |
+| 4. review se chová identicky jako před refactorem | platí — 469 testů, klíč dedupu u ukotvených nálezů beze změny, drift netknutý |
+| 5. `packs/po/SKILL.md` už neobsahuje větu o obcházení jádra | **neplatí** — Krok 10 |
 
 ### Konvence, které drží plán a kód pohromadě
 
@@ -70,7 +113,11 @@ Pokud se některé z nich příště ukáže jako špatné, ať se zvrátí **na
 
 ### Co se odsud udělat nedá
 
-Ostrý běh CEO packu nad repem Kvesteros a přenos `packs/ceo/pack.json` + `SKILL.md` tam. `packs/` jsou referenční kopie packů, které živě bydlí v cizích repozitářích — proto poslední test v `test_outputs.py` čte skutečný `packs/ceo/pack.json`, aby si někdo všiml, kdyby se manifest a `SKILL.md` rozešly. Totéž bude platit pro PO v Kroku 10.
+`packs/` jsou **referenční kopie** packů, které živě bydlí v cizích repozitářích. Proto poslední testy v `test_outputs.py` čtou skutečný `packs/ceo/pack.json` a `packs/ceo/scripts/scope.py` — aby si někdo všiml, kdyby se manifest, `SKILL.md` a skript rozešly. Totéž bude platit pro PO v Kroku 10.
+
+**Přenos sám hotový je** (7. 9. 2026): `pack.json`, `SKILL.md`, obě `references/` a nově `scripts/scope.py` jsou v `kvesteros-platform/.claude/skills/agency-ceo/`, a `strategy.md` tam má tři `Ref:` řádky — `event-supply-baseline`, `showable-product`, `legitimacy-outreach`. Nekomitovalo se: ta složka je v tom repu netrackovaná a `strategy.md` měl rozpracované změny zakladatele.
+
+**Co odsud pořád nejde:** ostrý běh (`agency run ceo`) a zakladatelovy verdikty nad tím, co z něj vypadne. Viz „Co může říct jen ostrý provoz" výš.
 
 ---
 
@@ -409,7 +456,7 @@ Metriky počítají **jeden poměr na lifecycle**, pojmenovaný packem — `byLi
 
 **Hotovo, když:** ~~`agency outputs --type bet` ukáže tři návrhy…~~ Splněno v `test_outputs.py` (řez má vlastní sekci, 10 testů): sázka bez kotvy projde, sázka s nestaženou stránkou ne, nález téhož packu kotvu pořád mít musí, `selection_rate 0.5` ze dvou zodpovězených, `precision` u toho nevznikne, zamítnutá sázka dojde do `do-not-report` dalšího běhu, a čtvrtá sázka v běhu padne na packův vlastní strop. Poslední test čte **skutečný `packs/ceo/pack.json`**, protože je to referenční kopie packu z jiného repa a nic jiného v sadě by si nevšimlo, že se obě poloviny rozešly.
 
-**Co zbývá pro ostrý provoz:** reálný běh CEO packu nad repem Kvesteros a přenos `pack.json` + `SKILL.md` tam. To se odsud udělat nedá.
+**Co zbývá pro ostrý provoz:** ~~přenos `pack.json` + `SKILL.md` do repa Kvesteros~~ hotovo 7. 9. Zbývá reálný běh, a ten se odsud udělat nedá.
 
 ---
 
@@ -436,7 +483,9 @@ Metriky počítají **jeden poměr na lifecycle**, pojmenovaný packem — `byLi
 
 **Hotovo, když:** ~~`known-here.json` je poprvé neprázdný u packu bez grafu.~~ Splněno — `test_a_pack_with_no_graph_finally_gets_a_here_list`.
 
-**Co zbývá pro ostrý provoz:** přenos `packs/ceo/` (manifest, `SKILL.md`, `references/method.md`, nově `scripts/scope.py`) do repa Kvesteros a doplnění `Ref:` řádků do existující `strategy.md`. Bez nich příkaz doběhne a vrátí prázdný scope — což je správné chování, ale zúžená paměť z toho nebude.
+**Co zbývá pro ostrý provoz:** ~~přenos `packs/ceo/` do repa Kvesteros a doplnění `Ref:` řádků do `strategy.md`.~~ Hotovo 7. 9.: skript tam vrací `event-supply-baseline`, `showable-product`, `legitimacy-outreach` a `agency doctor` na packu mlčí. Živá kopie byla ještě pre-Krok-4 a nic v ní nebylo rozdivergované, takže se nic zakladatelova nepřepsalo.
+
+**Na co si dát pozor při prvním běhu:** `known-here.json` bude prázdný, protože v tom repu není ani jedna sázka jako output — šest tamních běhů je z doby, kdy `bet` jako typ neexistoval. Průnik nemá co potkat a naplní se až od druhého běhu. Prázdný `known-here` proto zatím **není příznak chyby**; tím je až `scopeItems: 0`.
 
 ---
 
