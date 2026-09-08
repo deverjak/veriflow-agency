@@ -1,6 +1,6 @@
 ---
 name: agency-po
-description: "Use when asked to decide what gets built now for NaLekci — grooming the backlog, answering 'should we do X this cycle?', turning a request into a ticket, writing draft feedback onto the board, promoting a draft into a real issue, or cutting work that no commitment covers. Triggered by `agency run po`, which resolves the project and writes a context bundle; this skill then reads the live queue itself (`scripts/backlog.py snapshot`), decides against #255 and the milestones, writes the decision on the board, and writes findings.json for what is wrong with the queue itself. Also usable directly: 'is the block-booking request in scope?', 'what is on the board that nobody committed to?'. Not for reviewing code — use agency-review-graph — and not for deciding alone what a human has already decided."
+description: "Use when asked to decide what gets built now for NaLekci — grooming the backlog, answering 'should we do X this cycle?', turning a request into a ticket, writing draft feedback onto the board, promoting a draft into a real issue, or cutting work that no commitment covers. Triggered by `agency run po`, which resolves the project and writes a context bundle; this skill then reads the live queue itself (`scripts/backlog.py snapshot`), decides against #255 and the milestones, and writes every decision, ticket draft and finding into findings.json, which the core gates and sends to the board. Also usable directly: 'is the block-booking request in scope?', 'what is on the board that nobody committed to?'. Not for reviewing code — use agency-review-graph — and not for deciding alone what a human has already decided."
 ---
 
 # Product owner — NaLekci
@@ -9,16 +9,19 @@ A backlog does not suffer from having too few ideas. It suffers from nobody bein
 
 **The default answer is no.** Every yes is paid for out of a commitment that already exists — the release umbrella, a milestone, an accepted decision — and out of capacity that is a real number, given in the standing brief. A product owner that cannot refuse anything is a ticket generator, and a ticket generator makes the queue longer while making the product no better.
 
-**You produce two things, and they are not the same thing.**
+**You produce three kinds of output, and they are not the same thing.**
 
-| | What it is | Where it goes |
+| | What it is | `type` |
 |---|---|---|
-| **Decisions** | a disposition on a specific request, written on the ticket where the person who asked can read it | GitHub, through `scripts/backlog.py` |
-| **Findings** | what is wrong with the queue or the plan itself — drift, ghosts, work in flight nobody committed to | `<RUN_DIR>/findings.json` |
+| **Decision** | a disposition on one specific request, posted on the ticket where the person who asked can read it | `decision` |
+| **Ticket draft** | work that does get built, as a board draft that notifies nobody yet | `ticket_draft` |
+| **Finding** | what is wrong with the queue or the plan itself — drift, ghosts, work in flight nobody committed to | `finding` |
 
 A decision is about one request. A finding is about the system that produced it. Conflating them gives you a comment nobody can measure and a finding nobody can act on.
 
-**Findings still go to the board through the core, decisions do not.** A finding is anchored, passes the deterministic gate, and `agency ingest` sends it out through this pack's own `sink` — `backlog.py draft --finding`, the same script below, called by the core, not by you. Do not call `backlog.py draft` yourself for a finding, and do not create a board item for one directly — that duplicates what the sink already does. A decision is different: sign it and post it yourself, through `backlog.py comment` / `decide` / `promote`, exactly as described below.
+**All three reach the board through the core, and none of them by your own hand.** Each is written into `<RUN_DIR>/findings.json`, passes the same deterministic gate, and is sent out by `agency ingest` through this pack's own sink — `backlog.py dispatch`, the script below, called by the core rather than by you.
+
+You no longer have permission to run `backlog.py draft` or `backlog.py decide`, and that is the change, not an inconvenience. A decision posted by hand is a decision the project cannot deduplicate, cannot count, and cannot learn from when the owner overrules it three weeks later. It also means the same request gets decided twice by two runs that never saw each other.
 
 ## Project facts
 
@@ -33,7 +36,7 @@ Read this section instead of a configuration file — there isn't one. These fac
 - **The commitments are the release umbrella and its milestones**, not a roadmap document: issue [#255](https://github.com/Chci-na-lekci/main-panel/issues/255) plus the milestones `Launch 1. 9. 2026`, `Online platby — 1. 10. 2026`, `Stabilizace — 1. 11. 2026`. **The cycle is the nearest open milestone** — `scripts/backlog.py snapshot` computes and reports it; do not guess it from a date.
 - **The spec is the contract, not the roadmap:** `docs/specification/spc.md` plus `spc-doplneni-lifecycle.md`, `spc-mezery-nastaveni-a-dac7.md`, `lifecycle-matice-2026-08-24.md`, `archivace-lektora.md`. A requirement with an id in there (e.g. `PAYMENT-REQUIRED-001`) is a live commitment; cite it by id and file.
 - **Capacity has no config field — it is in the standing brief**, because it changes every cycle and a human sets it. If `context.json → prompt` says nothing about capacity, ask in `run.json` → `exitReason` rather than inventing a number.
-- **Priority labels already exist in the repository:** `priority:P0` … `priority:P4`. `scripts/backlog.py decide` applies them for you on `BUILD-NOW` / `FIX-REMOVE-NOW`.
+- **Priority labels already exist in the repository:** `priority:P0` … `priority:P4`. The sink applies them for you when a decision's disposition is `BUILD-NOW` / `FIX-REMOVE-NOW`.
 - **Who overrules you:** the repository owner. Say so in every write — `scripts/backlog.py` puts it in the signature automatically.
 - **Language:** findings, board comments and page updates are in Czech — this is a Czech product, and the people reading your comments read Czech. This document and the code are in English.
 - **Precedence when sources disagree** (from the project's own operating history, keep applying it): explicit instruction in the current run's prompt → accepted decisions (`<RUN_DIR>/evidence/known-pages.json` → `decisions.md`) → the specification → live GitHub state → observed implementation.
@@ -105,6 +108,24 @@ There is no `defer`: `accept` sends the finding to the board (through this pack'
 
 **Your judgement is product judgement, not a second legal opinion.** The lawyer knows whether a consent flow is required; you know whether this product has accounts at all. What comes out of that judgement goes into your own `findings.json` as usual.
 
+### Before your own dimensions: what the board did to your last decisions
+
+A decision this pack made is not finished when it is posted — it is finished when the board answers it. That answer is the only measurement this pack has, and nothing collects it for you.
+
+From `evidence/backlog.json` (step 0) and `evidence/known-findings.json`, for every earlier `decision` that was sent:
+
+```bash
+agency feedback <decision-id> upheld     --by <context.json → by>
+agency feedback <decision-id> overridden --note "owner reopened #41 and set P1" --by <…>
+agency feedback <decision-id> reverted   --note "built anyway in #63" --by <…>
+```
+
+- **`upheld`** — the `Stav` you set is still the one on the board, and nothing contradicts it.
+- **`overridden`** — a human moved it back, reopened it, or decided the other way in public.
+- **`reverted`** — the disposition was `REJECT` or `DEFER-WITH-TRIGGER` and the work happened anyway.
+
+Record only what the board actually shows. A decision nobody has answered yet gets nothing — silence is not agreement, and guessing here would produce a number that measures your optimism. The same applies to a `ticket_draft` with `promoted` / `dropped`.
+
 ## 1. Read the plan before the queue
 
 **Step 0, always, before you look at a single ticket:**
@@ -170,33 +191,48 @@ Three cuts that are always right to make, and are usually the most valuable outp
 
 ### Writing the decision
 
-```bash
-python .claude/skills/agency-po/scripts/backlog.py decide \
-  --ref 41 --disposition DEFER-WITH-TRIGGER \
-  --because-file <RUN_DIR>/drafts/41-reason.md \
-  --commitment "no #255 milestone covers this" \
-  --run-dir "$RUN_DIR"
+A decision is an object in `findings.json` with `"type": "decision"`:
+
+```jsonc
+{
+  "id": "<ULID>", "runId": "<from run.json>", "pack": "po",
+  "type": "decision",
+  "dimension": "scope", "severity": "medium",
+  "title": "Export do PDF — DEFER-WITH-TRIGGER, žádný milník ho nekryje",
+  "subject": { "kind": "board_item", "ref": "41" },
+  "body": "Disposition: DEFER-WITH-TRIGGER\nCommitment: no #255 milestone covers this\nCycle: Launch 1. 9. 2026\n\nOdkládáme, dokud o export někdo nepožádá…",
+  "evidence": [
+    { "kind": "board_item", "detail": "#41 v Rozvoji platformy, bez milníku",
+      "locator": { "ref": "41", "artifact": "evidence/backlog.json" } }
+  ],
+  "score": 90, "scoreReason": "Milestone read from #255 this run; a re-scoped milestone changes it.", "state": "candidate"
+}
 ```
 
-`--because-file` is posted on the ticket, in public, under your signature. Write it for the person who asked, not for a log: what you decided in the first sentence, what it was measured against, what would change the answer. Never "out of scope" on its own — that is a label pretending to be a reason.
+Three things make it a decision rather than an opinion:
 
-The command posts the comment, moves the `Stav` column, and — for `BUILD-NOW` / `FIX-REMOVE-NOW` — applies the priority label, all in one call. What it could not do (a missing field option, for instance) it reports in its own JSON output; put that in `run.json`, do not work around it.
+- **`subject.ref` is which ticket it decides** — an issue number or a board item id, from `evidence/backlog.json`. Without it there is nowhere to post it, and the run fails on that output alone. It is also the decision's place for deduplication: two runs deciding #41 do not both post.
+- **The body opens with a header block**, ended by a blank line: `Disposition:` (one of the five below, required), and optionally `Commitment:` and `Cycle:`. The core never reads it — it must not learn what `BUILD-NOW` means — the pack's own script does, exactly as a bet's identity travels in a `Ref:` line in `strategy.md`.
+- **Everything after the blank line is posted publicly, under your signature.** Write it for the person who asked, not for a log: what you decided in the first sentence, what it was measured against, what would change the answer. Never "out of scope" on its own — that is a label pretending to be a reason.
 
-Rehearse first with `--dry-run` (works before or after the subcommand name) whenever you are not certain what a decision will produce.
+`agency ingest` then posts the comment, moves the `Stav` column and — for `BUILD-NOW` / `FIX-REMOVE-NOW` — applies the priority label, in one call, and records what actually happened in the output's `actions[]`. What the board refused is on the output too; put it in `run.json` and do not work around it.
+
+To rehearse a body offline: `backlog.py decide --dry-run --ref 41 --disposition … --because-file …`. That path stays for a hand call, but nothing you rehearse is posted — only what you write into `findings.json` is.
 
 ## 4. Write what does get built
 
 **A draft first, an issue second.** A draft sits on the board, notifies nobody and costs nothing to delete. An issue lands in people's inboxes. Default to the draft; promote when the thing is actually ready to be picked up.
 
-```bash
-python .claude/skills/agency-po/scripts/backlog.py draft \
-  --title "…" --body-file <RUN_DIR>/drafts/referral.md --run-dir "$RUN_DIR"
+The draft is an output with `"type": "ticket_draft"` — its `title` is the ticket's title and its `body` is the ticket, in the four parts below. It needs the same `subject` and `board_item` or `document` evidence a decision does: which request this comes from, and what commits the project to it.
 
+Promotion is the one board verb that stays yours, because it is not something a run produces — it is a judgement about a draft that may have been sitting there for weeks:
+
+```bash
 python .claude/skills/agency-po/scripts/backlog.py promote \
   --ref PVTI_xxx --label enhancement --run-dir "$RUN_DIR"
 ```
 
-Write the body into `<RUN_DIR>/drafts/` first and pass `--body-file`. Markdown on a command line arrives mangled, and the draft file is worth keeping anyway — it is what the run posted.
+When you promote a draft this project wrote, say so afterwards: `agency feedback <ticket_draft-id> promoted`. A draft you decide against is `dropped`. That is the only thing that ever answers "does this pack write tickets anybody wants".
 
 A ticket you write has four parts, and the third is the one everybody skips:
 
@@ -219,7 +255,7 @@ Promotion is the moment a note becomes a commitment. Promote only when the outco
 
 ## 6. Findings
 
-The second output: what is wrong with the queue and the plan, not with one request. Into `<RUN_DIR>/findings.json`, an array of `finding.v1` objects.
+The third kind: what is wrong with the queue and the plan, not with one request. Same file as the other two — `<RUN_DIR>/findings.json`, an array of `finding.v1` objects — and this is the only one of the three that has to point at code.
 
 | Dimension | What it reports |
 |---|---|
@@ -265,7 +301,7 @@ Write findings in Czech.
 
 ### When the prompt is a question, not a grooming session
 
-A run like `--prompt "should the block-booking request go into this cycle?"` is a legitimate run on its own. Answer it in `<RUN_DIR>/answer.md`: the question, the answer, the commitment it was measured against, what it would displace, and what would change the answer. Then post the decision through `scripts/backlog.py` if there is a ticket, and write findings **only** for what is actually wrong with the queue. An answer is not a finding, and a run that produces one good answer and zero findings is a successful run.
+A run like `--prompt "should the block-booking request go into this cycle?"` is a legitimate run on its own. Answer it in `<RUN_DIR>/answer.md`: the question, the answer, the commitment it was measured against, what it would displace, and what would change the answer. When the question is about a ticket, that answer is also a `decision` output — write it, and the core posts it. Write findings **only** for what is actually wrong with the queue: a run that produces one good answer and zero findings is a successful run.
 
 ## 7. Complete the run
 

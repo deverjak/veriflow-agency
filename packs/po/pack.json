@@ -8,17 +8,54 @@
   "graph": false,
   "prompt": "required",
   "needs": [
-    "agency triage", "agency note", "agency findings",
+    "agency triage", "agency note", "agency findings", "agency feedback",
     "git", "gh issue view",
     "python .claude/skills/agency-po/scripts/backlog.py snapshot",
-    "python .claude/skills/agency-po/scripts/backlog.py comment",
-    "python .claude/skills/agency-po/scripts/backlog.py draft"
+    "python .claude/skills/agency-po/scripts/backlog.py comment"
   ],
   "needsUnattended": [
-    "python .claude/skills/agency-po/scripts/backlog.py promote",
-    "python .claude/skills/agency-po/scripts/backlog.py decide"
+    "python .claude/skills/agency-po/scripts/backlog.py promote"
   ],
-  "sink": "python .claude/skills/agency-po/scripts/backlog.py draft --finding {id} --run-dir {runDir}",
+  "sink": "python .claude/skills/agency-po/scripts/backlog.py dispatch --output {id} --run-dir {runDir}",
+  "outputs": {
+    "decision": {
+      "cardinality": "many",
+      "anchor": "none",
+      "dedup": true,
+      "evidence": { "required": ["board_item", "document"], "min": 1 },
+      "actions": "sink",
+      "memory": "proposes",
+      "feedback": {
+        "delivery": {
+          "kinds": { "sent": "positive", "rejected": "negative" }
+        },
+        "outcome": {
+          "metric": "upheld_rate",
+          "requires": "delivery.sent",
+          "kinds": { "upheld": "positive", "overridden": "negative", "reverted": "negative" }
+        }
+      }
+    },
+    "ticket_draft": {
+      "cardinality": "many",
+      "limit": 10,
+      "anchor": "none",
+      "dedup": true,
+      "evidence": { "required": ["board_item", "document"], "min": 1 },
+      "actions": "sink",
+      "memory": "proposes",
+      "feedback": {
+        "delivery": {
+          "kinds": { "sent": "positive", "rejected": "negative" }
+        },
+        "outcome": {
+          "metric": "promotion_rate",
+          "requires": "delivery.sent",
+          "kinds": { "promoted": "positive", "dropped": "negative" }
+        }
+      }
+    }
+  },
   "budget": { "turns": 60, "minutes": 25 },
   "dimensions": [
     { "id": "scope", "title": "Work in flight that no commitment covers" },

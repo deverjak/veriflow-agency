@@ -14,6 +14,23 @@
   ],
   "scope": "python .claude/skills/agency-ceo/scripts/scope.py",
   "outputs": {
+    "answer": {
+      "cardinality": "one",
+      "anchor": "none",
+      "dedup": false,
+      "evidence": { "required": ["web_snapshot", "document", "rule"], "min": 1 },
+      "actions": "none",
+      "memory": "proposes"
+    },
+    "draft": {
+      "cardinality": "many",
+      "limit": 3,
+      "anchor": "none",
+      "dedup": true,
+      "evidence": { "required": ["web_snapshot", "document"], "min": 1 },
+      "actions": "none",
+      "memory": "proposes"
+    },
     "bet": {
       "cardinality": "many",
       "limit": 3,

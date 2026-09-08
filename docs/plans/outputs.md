@@ -3,7 +3,7 @@
 **Datum:** 2026-09-06
 **Navazuje na:** [`agency-v1.md`](agency-v1.md) (pack je skill v projektu, žádná konfigurace), [`harness.md`](harness.md) (provenience tool callů, brána, metriky, revize packu), [`findings-ownership.md`](findings-ownership.md) (board je stav, lokál je brána a stopa), [`teams.md`](teams.md) (řetěz), [`shared-memory.md`](shared-memory.md) (paměť patří projektu)
 **Řeší:** jádro dnes umí evidovat jediný druh výstupu — nález s kotvou na soubor a řádek. PO a CEO produkují rozhodnutí, odpovědi, sázky a drafty, a **oba už jádro kvůli tomu obcházejí**. Plán zobecňuje mechanismy, které v jádru fungují (brána, dedup, sinky, paměť, metriky), tak aby přestaly předpokládat code-review nález — a nedělá z Agency univerzální platformu.
-**Stav k 8. 9. 2026:** Kroky 1–9 hotové a commitnuté (testy 488 zelených). Svislý řez `bet` prošel u Kroku 4 a **přeskládal zbytek plánu**; Krok 5 dal outputu `subject` a běhu `scope`, Krok 6 nahradil `sinks` akcemi a cestou opravil dvě místa, kde `agency ingest` nebyl idempotentní, Krok 7 zúžil fold událostí na jeden na lifecycle a oživil `requires`, Krok 8 vyndal `score` z brány a nahradil ho stropem, Krok 9 přestěhoval kotvu do `evidence.kind = code`. CEO pack je **přenesený do repa Kvesteros** včetně `Ref:` řádků ve `strategy.md` — čeká na první ostrý běh. Další na řadě: Krok 10 (migrace PO a CEO na jádro) — přejímka celého plánu.
+**Stav k 8. 9. 2026:** Kroky 1–10 hotové a commitnuté (testy 499 zelených). Svislý řez `bet` prošel u Kroku 4 a **přeskládal zbytek plánu**; Krok 5 dal outputu `subject` a běhu `scope`, Krok 6 nahradil `sinks` akcemi a cestou opravil dvě místa, kde `agency ingest` nebyl idempotentní, Krok 7 zúžil fold událostí na jeden na lifecycle a oživil `requires`, Krok 8 vyndal `score` z brány a nahradil ho stropem, Krok 9 přestěhoval kotvu do `evidence.kind = code` a Krok 10 provedl přejímku: PO a CEO přestaly jádro obcházet. Živé packy v obou cizích repozitářích jsou dorovnané a `agency doctor` je v nich čistý — čeká se na první ostrý běh. Zbývá Krok 11 (rename `finding` → `output`).
 
 **Nedělá:** nový generický agent framework. Žádný plugin systém metrik, žádný registr typů, žádná doménová znalost v jádru. Přibývají přesně dvě abstrakce — `TypePolicy` a `Run.scope`.
 
@@ -30,16 +30,16 @@ python .claude\skills\agency-ceo\scripts\scope.py   # tři živé sázky, ne pr�
 agency doctor --json                                # žádné „pack ceo scope" ani „pack ceo outputs"
 ```
 
-Stav k 8. 9. 2026: Kroky 1–9 hotové, 488 testů, CEO pack přenesený. **Další je Krok 10** (migrace PO a CEO na jádro).
+Stav k 8. 9. 2026: Kroky 1–10 hotové, 499 testů, živé packy dorovnané. **Zbývá Krok 11** (rename `finding` → `output`).
 
-### První pohyb v Kroku 10
+### První pohyb v Kroku 11
 
-Krok 10 **není funkce, je to přejímka.** Jádro devíti kroky získalo všechno, co PO a CEO potřebují; otázka teď zní, jestli ho packy přestaly obcházet. Test je jednověta v [`packs/po/SKILL.md:21`](../../packs/po/SKILL.md): *„Findings still go to the board through the core, decisions do not."* Dokud tam stojí, plán není hotový.
+Krok 11 je poslední a je to **přejmenování, ne změna chování**. Přesně proto stojí až tady: rename na začátku by vyrobil generický název nad review sémantikou a vypadal by jako pokrok.
 
-1. **PO první, je jednodušší.** `decision` a `ticket_draft` jako typy v `outputs`, `backlog.py` jako vykonavatel přes `actions` — ten mechanismus stojí od Kroku 6 a nic nového nepotřebuje. Pět dispozic (`BUILD-NOW`, `FIX-REMOVE-NOW`, `VALIDATE-CHEAPLY`, `DEFER-WITH-TRIGGER`, `REJECT`) jsou **`kinds` v lifecyclu**, ne stavy v jádru. Kdyby jádro začalo vědět, co `BUILD-NOW` znamená, je celý plán k ničemu (§3.5).
-2. **CEO druhý:** `answer` s `cardinality: one`. Registry (`strategy.md`, `competitors.md`, …) **zůstávají paměťové stránky** a output typem se nestávají — §0.1 a §3.3 to zdůvodňují a past 7 na to čeká.
-3. **Živé packy jsou součástí kroku, ne jeho následkem.** CEO v repu Kvesteros nese `minScore: 80` (Krok 8), větu o prahu ve `SKILL.md` a kotvy jako pole `anchor` (Krok 9). Nic z toho není chyba — jádro obojí čte — ale je to poslední místo, kde plán ještě neplatí. `agency doctor --json` v tom repu je seznam úkolů.
-4. **Past §6.9 potřetí:** cokoliv, co se u packu mění v manifestu, se musí projevit i v `SKILL.md`, jinak si model přečte starší polovinu. U Kroku 8 to bylo dvanáct vět v sedmi souborech, u Kroku 9 sedm sekcí — počítej s tím i tady.
+1. **Co se přejmenovává je slovník, ne data.** `findings.json`, `finding.v1`, klíč `findingId` v událostech a `anchor`/`sinks` jako superseded pole **zůstávají** — je v nich committed historie tří repozitářů a přepsat ji nejde. Mění se povrch, který čte člověk: `agency outputs` jako hlavní příkaz, `agency findings` jako alias, a jazyk v nápovědě.
+2. **Alias není dočasnost.** Uživatel review packu má dál vidět „nálezy"; `agency findings` a `agency triage accept` zůstávají napořád, ne do příště.
+3. **A při té příležitosti `dispatchErrors`** — od Kroku 6 je odvoditelné z `actions[]` a je to poslední zdvojený zápis téhož faktu.
+4. **Past, kterou tenhle krok má:** přejmenovat i tam, kde slovo `finding` znamená review nález a ne obecný output. `FINDING_POLICY`, `FINDING_REASONS`, `DEFAULT_TYPE = "finding"` jsou správně pojmenované a zůstávají — typ se doopravdy jmenuje `finding`.
 
 ### Co chybí — inventura k 8. 9. 2026
 
@@ -50,7 +50,7 @@ Krok 10 **není funkce, je to přejímka.** Jádro devíti kroky získalo všech
 | ~~**7** — feedback jako události, projekce `state`~~ | ~~1,5 dne~~ · **hotovo za půl** | past 5 nenastala — fold byl jeden, jen moc hrubý. Události v plném tvaru dodal už Krok 4 |
 | ~~**8** — `score` přestane být branou~~ | ~~0,5 dne~~ · **hotovo** | náhrada existovala, ale platila jen packu, který si ji vyžádal — a to byl jeden ze sedmi. Strop dostal backstop (25, změřený z `baseline.md`) a score se z brány přesunulo do řazení nad stropem |
 | ~~**9** — kotva jako `evidence.kind = code`~~ | ~~2 dny~~ · **hotovo** | 58 výskytů byla špatná míra: většina je slovo „anchor" jako jméno mechanismu. Čtenářů pole bylo jedenáct a schovali se za `anchor.of()`. Drahá byla dokumentace packů, ne jádro |
-| **10** — migrace PO a CEO na jádro | ~1,5 dne | **přejímka celého plánu.** Ne „umí to jádro", ale „přestaly ho packy obcházet?" Mechanismus pro PO stojí od Kroku 6, chybí `decision` a `ticket_draft` jako typy a `backlog.py` v roli vykonavatele, ne obchvatu |
+| ~~**10** — migrace PO a CEO na jádro~~ | ~~1,5 dne~~ · **hotovo** | přejímka prošla, a otevřela dvě mezery, které mohl najít jen ostrý typ se sinkem: typ, který smí jednat, neměl kam zapsat, že jednal, a `agency feedback` odmítal každý typ se sinkem. Stará cesta je zavřená přes `needs`, ne přes prosbu v SKILL.md |
 | **11** — rename `finding` → `output` | ~0,5 dne | úplně nakonec, a při tom uklidit `dispatchErrors` (od Kroku 6 odvoditelné z `actions`) |
 
 **Vědomě otevřené věci, které nepatří k žádnému kroku** — každá byla rozhodnutá, ne zapomenutá:
@@ -69,7 +69,7 @@ Krok 10 **není funkce, je to přejímka.** Jádro devíti kroky získalo všech
 3. **Zakladatelův verdikt.** Dokud nikdo neřekne `agency feedback <id> selected|rejected`, nemá `selection_rate` jmenovatele a §5 „explicit" je zatím jen tvrzení. Celý lifecycle sázky zatím prošel testem, ne člověkem.
 4. **`success_rate` nemá zdroj feedbacku vůbec** (§5, „unknown"). To není chybějící práce — je to hranice, za kterou se lifecycle **nevymýšlí** (§3.5).
 
-**Stav přejímky (§7)** — dva body chybí, jeden je poloviční:
+**Stav přejímky (§7)** — všech pět platí; co zbývá, je ostrý běh, ne kód:
 
 | | |
 |---|---|
@@ -77,7 +77,7 @@ Krok 10 **není funkce, je to přejímka.** Jádro devíti kroky získalo všech
 | 2. brána zahodí sázku s neotevřeným URL, offline | platí |
 | 3. `selection_rate` a `success_rate` jako dvě nezávislá čísla | platí od Kroku 7 — jedna sázka může být `selected` i `successful` a počítá se do obou, a nevybraná sázka už `success_rate` neředí |
 | 4. review se chová identicky jako před refactorem | platí — 488 testů, klíč dedupu u ukotvených nálezů beze změny, drift netknutý, a od Kroku 9 i přes migraci tvaru: nález řečený code evidencí má týž otisk jako týž nález s polem |
-| 5. `packs/po/SKILL.md` už neobsahuje větu o obcházení jádra | **neplatí** — Krok 10 |
+| 5. `packs/po/SKILL.md` už neobsahuje větu o obcházení jádra | platí od Kroku 10 — a starou cestu zavírá `needs`, ne prosba v textu |
 
 ### Konvence, které drží plán a kód pohromadě
 
@@ -132,6 +132,8 @@ Pokud se některé z nich příště ukáže jako špatné, ať se zvrátí **na
 CEO obchází jádro na dvou osách. Výstupní: [`packs/ceo/SKILL.md`](../../packs/ceo/SKILL.md) má čtyři produkty jednoho běhu — answer, drafts, registers, findings — a jádro eviduje jediný z nich. Paměťovou: registry (`strategy.md`, `competitors.md`, `stakeholders.md`, `opportunities.md`, `decisions.md`) si pack zapisuje přímo do `.agency/knowledge/pages/ceo/`, včetně `decisions.md`, což je fakticky feedback log v markdownové tabulce, kterou podepisuje zakladatel.
 
 A tam, kde CEO jádro neobchází, platí za to deformací: [`packs/ceo/SKILL.md:229`](../../packs/ceo/SKILL.md) kotví strategický nález na `footer.tsx` řádky 1–12, protože `anchor` je v `finding.v1` povinný.
+
+> **Vyřešeno Krokem 10.** Obě osy obchvatu jsou zavřené: PO píše `decision` a `ticket_draft` jako outputy a na starou cestu nemá oprávnění, CEO přidal `answer` a `draft`. Paměťová osa zůstala schválně — registry jsou stránky, ne outputy (§3.3, past 7). Deformace s `footer.tsx` zanikla už Krokem 4 politikou kotvy.
 
 ### 0.2 Brána stojí na kotvě, ne na evidenci
 
@@ -604,13 +606,28 @@ Vedle ní `read_events()` (jediné místo, které log čte) a `decisions()` pře
 
 ---
 
-### Krok 10 — migrace PO a CEO na jádro (~1,5 dne)
+### Krok 10 — migrace PO a CEO na jádro (~1,5 dne) — **hotovo**
 
-**Proč:** tohle je přejímka celého plánu. Ne „umí to jádro", ale **„přestaly ho packy obcházet?"**
+**Co se změnilo:** PO píše rozhodnutí a návrhy ticketů do `findings.json` jako outputy typu `decision` a `ticket_draft`; CEO přidal `answer` (`cardinality: one`) a `draft`. Registry zůstaly paměťovými stránkami a output typem se nestaly (§0.1, §3.3). Věta, na které stála přejímka, ze `packs/po/SKILL.md` zmizela — přestala být pravdivá.
 
-PO: `decision` a `ticket_draft` přes jádro, `backlog.py` zůstává jako vykonavatel akcí, ne jako obchvat. CEO: `answer` (`cardinality: one`), `bet`, `draft` — registry **zůstávají paměťové stránky** a output typem se nestávají (§0.1, §3.3).
+**Dvě mezery v jádru, které otevřela až migrace.** Obě byly neviditelné, dokud byl `finding` jediný typ, který jedná:
 
-**Hotovo, když:** v `packs/po/SKILL.md` zmizí věta *„Findings still go to the board through the core, decisions do not."* — protože přestane být pravdivá.
+1. **Typ, který smí jednat, musí mít kam zapsat, že jednal.** `runs.dispatch()` zapisuje `sent` sám a `append_decision` odmítne slovo, které žádný lifecycle nezná. Typ s `actions: sink` a bez `sent` v `kinds` proto nespadne u doktora — spadne až v běhu, potom, co už na board napsal. `finding` to nikdy neukázal, protože `triage` lifecycle dědí, ať si ho pack vyžádá nebo ne. Teď to `outputs.errors()` odmítne dopředu.
+2. **`agency feedback` odmítal každý typ se sinkem.** Argument („`agency triage accept` navíc odesílá, pouhý zápis by to neudělal") platí pro verdikt, který odesílá — a o rozhodnutí, které vlastník po třech týdnech přehlasoval, není co odesílat. Ten verdikt jiné sloveso nemá, a bez něj nemá `upheld_rate` čitatel. Odmítnutí se zúžilo z celého typu na kindy toho jednoho lifecyclu.
+
+**Kde bydlí dispozice — a proč ne ve schématu.** `finding.v1` má `additionalProperties: false` a jádro nesmí vědět, co znamená `BUILD-NOW` (§3.5). Dispozice proto jede v **hlavičce těla** rozhodnutí — `Disposition:`, volitelně `Commitment:` a `Cycle:`, blok končí prázdným řádkem — a čte ji packův vlastní skript. Je to týž vzorec, jaký plán zavedl v Kroku 5 řádkem `Ref:` ve `strategy.md`: pack-specific struktura patří do textu, který pack sám píše i sám čte. *(Poznámka pro pořádek: „pět dispozic jsou `kinds` v lifecyclu" v dřívější verzi téhle sekce byla chyba. Dispozice je **obsah** rozhodnutí; `kinds` jsou verdikty **o** rozhodnutí — upheld / overridden / reverted, přesně jak to §5 vždycky měla.)*
+
+**Jeden sink, ne jeden na typ.** `pack.sink` zůstal jediným příkazem a `backlog.py` dostal sloveso `dispatch`, které si typ přečte z outputu a zaroutuje ho samo. Jádro se tak nemuselo naučit rozdíl mezi `draft` a `decide`, a mechanismus z Kroku 6 — pack hlásí zpátky `kind` akce — do toho zapadl beze změny. Na `dispatch` přešly i legal, qa a review-graph, takže na board vede **jedna** cesta místo dvou.
+
+**A hlavně: stará cesta je zavřená.** `backlog.py decide` a `draft` zmizely z `needs` i `needsUnattended` PO packu — agent na ně nemá oprávnění a nemůže rozhodnutí poslat sám. Migrace, která nechá starou cestu otevřenou, se vrátí prvním nepohodlným během; je na to test.
+
+**Odvozený feedback (§5) nedostal nový mechanismus a nepotřeboval ho.** Board čte `backlog.py snapshot`, verdikt zapisuje `agency feedback`, a dělá to **příští běh PO packu** — `SKILL.md` má na to krok ještě před vlastními dimenzemi. Zdroj je tím reálný, ne aspirační, a `by` už dnes odliší, že to zapsal pack a ne člověk. Co se **nezapisuje**, je stejně důležité: rozhodnutí, na které board zatím neodpověděl, nedostane nic. Ticho není souhlas a odhad by změřil jen vlastní optimismus.
+
+**Živé packy dorovnané.** Šest packů ve dvou repozitářích (`kvesteros-platform/agency-ceo`, `main-panel/agency-{po,legal,qa,review-graph,author}`) běželo na verzi před Krokem 8 — `minScore` v manifestu, kotva jako pole, u autora chyběly celé sekce. `agency doctor --json` je v obou repech čistý.
+
+**Testy:** 11 nových, 499 celkem. Rozhodnutí dojde přes jádro na board a nese packovo vlastní sloveso v `actions`; rozhodnutí bez `subject` neprojde; dva běhy nerozhodnou týž ticket dvakrát a dvě rozhodnutí o dvou ticketech nejsou duplicita; přehlasování se zapíše a `sent` pořád patří triage; typ, co smí jednat a nemá kam zapsat `sent`, doktor odmítne; skutečný `packs/po/pack.json` říká všechno výše a **negrantuje agentovi starou cestu**; sink jmenuje sloveso, které skript má; a hlavička s dispozicí se čte z obou stran.
+
+**Hotovo, když:** ~~v `packs/po/SKILL.md` zmizí věta *„Findings still go to the board through the core, decisions do not."*~~ Zmizela.
 
 ---
 
@@ -629,13 +646,13 @@ PO: `decision` a `ticket_draft` přes jádro, `backlog.py` zůstává jako vykon
 | output | feedback | zdroj | kategorie |
 |---|---|---|---|
 | review `finding` | accepted / rejected / duplicate / intentional | `agency triage`, člen řetězu `verify` | **explicit** |
-| PO `decision` | upheld / overridden / reverted | stav boardu | **derived** |
-| PO `ticket_draft` | promoted / dropped | stav boardu | **derived** |
+| PO `decision` | upheld / overridden / reverted | stav boardu, zapisuje příští běh PO (Krok 10) | **derived** — živé |
+| PO `ticket_draft` | promoted / dropped | stav boardu, zapisuje příští běh PO (Krok 10) | **derived** — živé |
 | CEO `bet` (selection) | selected / rejected | zakladatel vybírá ze tří | **explicit** |
 | CEO `bet` (outcome) | successful / failed / abandoned | — | **unknown** |
 | CEO `draft` | sent / not-sent | — | **unknown** |
 | CEO `draft` | got response | — | **unknown** |
-| CEO `answer` | — | — | write-only |
+| CEO `answer` | — | — | write-only — a v `pack.json` opravdu bez `feedback` (Krok 10) |
 | QA `bug` | confirmed / not-reproducible / fixed | triage, opakovaný běh | explicit / derived |
 
 **explicit** — člověk ten feedback stejně přirozeně vysloví. Ideál.

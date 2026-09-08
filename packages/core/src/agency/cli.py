@@ -1816,9 +1816,20 @@ def cmd_feedback(args) -> int:
     finding = next((f for f in run.findings() if f.get("id") == args.finding), {})
     policy = outputs.policy_for(_pack_of(project, run), finding.get("type"))
 
-    if policy.actions == "sink":
+    # `agency triage` implements exactly ONE of a type's questions — the one
+    # that owns `sent`, because there `accept` dispatches and `reject`
+    # remembers, and recording alone would do neither. Every other question a
+    # type is asked has no verb but this one.
+    #
+    # Refusing the whole type for having a sink was right while only findings
+    # acted; it stopped being right with PO's `decision`, which goes to the
+    # board AND is later upheld or overridden there. That verdict has nothing
+    # to dispatch and nowhere else to go.
+    dispatched = policy.lifecycle_of("sent")
+    asked = policy.lifecycle_of(args.kind)
+    if policy.actions == "sink" and dispatched and asked and asked.name == dispatched.name:
         raise SystemExit(
-            f"“{policy.name}” goes out through this pack's sink, so its verdict is "
+            f"“{args.kind}” is how “{policy.name}” reaches this pack's sink, so it is "
             f"`agency triage accept` / `agency triage reject` — those dispatch and "
             f"remember, which recording alone would not do.")
 

@@ -19,10 +19,13 @@ import json
 
 import pytest
 
-from agency import ingest, outputs, runs
+from agency import cli, ingest, outputs, runs
 from agency.util import write_json
 
 from conftest import install_pack, make_finding
+
+RUN_A = "01AAAAAAAAAAAAAAAAAAAAAAAA"
+RUN_B = "01BBBBBBBBBBBBBBBBBBBBBBBB"
 
 BET = {
     "cardinality": "many",
@@ -854,3 +857,270 @@ def test_the_ceo_manifest_and_its_scope_script_are_the_same_pack(project):
     assert (root / "packs" / "ceo" / "scripts" / "scope.py").is_file()
     assert command.split()[-1].startswith(".claude/skills/agency-ceo/"), \
         "the path a run sees is the one inside the project, not this repository"
+
+
+# ------------------------------------------------------------ the PO migration
+#
+# Step 10 is the plan's own acceptance, and this is where it is answered. Not
+# "can the core hold a decision" — Steps 1-9 answered that — but "has the pack
+# stopped going round it". Until now a product owner's main product was posted
+# by the agent itself through `backlog.py decide`: the core never learned it
+# existed, could not deduplicate it, had nothing to count, and got no feedback
+# when the owner overruled it a fortnight later.
+
+REAL_DECISION = {
+    "cardinality": "many", "anchor": "none", "dedup": True,
+    "evidence": {"required": ["board_item", "document"], "min": 1},
+    "actions": "sink", "memory": "proposes",
+    "feedback": {
+        "delivery": {"kinds": {"sent": "positive", "rejected": "negative"}},
+        "outcome": {"metric": "upheld_rate", "requires": "delivery.sent",
+                    "kinds": {"upheld": "positive", "overridden": "negative",
+                              "reverted": "negative"}},
+    },
+}
+
+PO_SINK = "python sink.py --output {id} --run-dir {runDir}"
+
+DECISION_BODY = ("Disposition: DEFER-WITH-TRIGGER\n"
+                 "Commitment: no #255 milestone covers this\n\n"
+                 "Odkládáme, dokud o export někdo nepožádá. Trigger: první "
+                 "zákaznický požadavek na PDF, pak se to vrací do fronty.")
+
+
+def _decision(project, ref: str = "41", title: str | None = None,
+              body: str = DECISION_BODY) -> dict:
+    """A decision as the PO pack is now told to write one: no place in the
+    code, proved by the board snapshot this run took, and pointing at the one
+    ticket it decides."""
+    f = make_finding(project, "x", pack="po", type="decision", dimension="scope",
+                     title=title or "Export do PDF — DEFER-WITH-TRIGGER, nekryje ho žádný milník",
+                     body=body)
+    del f["anchor"]
+    f["subject"] = {"kind": "board_item", "ref": ref}
+    f["evidence"] = [{"kind": "board_item",
+                      "detail": "#41 sedí v Rozvoji platformy bez milníku",
+                      "locator": {"ref": ref, "artifact": "evidence/backlog.json"}}]
+    return f
+
+
+def _po_run(project, make_run, findings, sink: str | None = None, run_id=None):
+    manifest = {"outputs": {"decision": REAL_DECISION}}
+    if sink:
+        manifest["sink"] = sink
+    install_pack(project, "po", manifest)
+    run = make_run(findings=findings, pack="po", run_id=run_id)
+    snapshot = run.dir / "evidence" / "backlog.json"
+    snapshot.parent.mkdir(parents=True, exist_ok=True)
+    snapshot.write_text(json.dumps({"issues": [{"number": 41, "title": "Export do PDF"},
+                                               {"number": 63, "title": "Hromadné rezervace"}]}),
+                        encoding="utf-8")
+    return run
+
+
+def _po_sink(project, body: str) -> None:
+    (project.root / "sink.py").write_text(body, encoding="utf-8")
+
+
+def test_a_decision_reaches_the_board_through_the_core(project, make_run):
+    """The sentence the whole plan is measured by.
+
+    A decision is now an output like any other: it passes the same gate, the
+    core dispatches it through the pack's own sink, and what the board did
+    with it is on the output and in the committed trail. Nothing about that is
+    new machinery — it is Step 6's, finally used by the pack it was for."""
+    run = _po_run(project, make_run, [_decision(project)], sink=PO_SINK)
+    _po_sink(project, 'print(\'{"kind": "decide", "item": "PVTI_D41"}\')\n')
+    fid = run.findings()[0]["id"]
+
+    result = ingest.ingest(project, run)
+
+    assert result["counts"]["kept"] == 1 and result["sent"] == 1
+    saved = run.findings()[0]
+    assert saved["state"] == "sent"
+    assert saved["actions"][0]["kind"] == "decide", \
+        "the pack's own verb, not a word the core guessed"
+    assert runs.read_trail(project)[fid]["state"] == "sent"
+
+
+def test_a_decision_with_no_ticket_to_decide_does_not_pass(project, make_run):
+    """`subject` is which request this decides. Without it the sink has
+    nowhere to post and the project has no place to deduplicate on — and an
+    unplaced decision would be compared against every other decision by its
+    words alone."""
+    f = _decision(project)
+    del f["subject"]
+    f["evidence"] = [{"kind": "doc", "detail": "#255 nemá závazek na export"}]
+    run = _po_run(project, make_run, [f])
+
+    result = ingest.ingest(project, run)
+
+    assert result["counts"]["kept"] == 0
+    assert result["dropped"][0]["reason"] == "weak-evidence"
+
+
+def test_two_runs_do_not_decide_the_same_ticket_twice(project, make_run):
+    """Two runs a week apart, the same ticket, the same conclusion. Posting it
+    twice is the exact manual work this pack exists to remove, and before the
+    migration nothing could see it: the board comment was the agent's own."""
+    first = _po_run(project, make_run, [_decision(project)], run_id=RUN_A)
+    ingest.ingest(project, first)
+
+    second = _po_run(project, make_run, [_decision(project)], run_id=RUN_B)
+    result = ingest.ingest(project, second)
+
+    assert len(result["duplicates"]) == 1
+    assert result["counts"]["kept"] == 0
+
+
+def test_two_decisions_about_two_tickets_are_two_decisions(project, make_run):
+    """The other half of the same guard. Two tickets are two requests, however
+    similarly the reason reads — and a product owner's reasons read alike on
+    purpose, because they are measured against the same commitments."""
+    a = _decision(project, ref="41")
+    b = _decision(project, ref="63",
+                  title="Hromadné rezervace — DEFER-WITH-TRIGGER, nekryje je žádný milník")
+    run = _po_run(project, make_run, [a, b])
+
+    result = ingest.ingest(project, run)
+
+    assert result["counts"]["kept"] == 2
+    assert result["duplicates"] == []
+
+
+def test_a_decision_the_board_later_overruled_is_recorded(project, make_run):
+    """`agency feedback` refused every type with a sink, on the grounds that
+    `agency triage` does more than record. That is true of the verdict which
+    dispatches — and there is nothing to dispatch about a decision the owner
+    overruled three weeks later. That verdict has no other verb, and without
+    it `upheld_rate` has no numerator."""
+    run = _po_run(project, make_run, [_decision(project)])
+    fid = run.findings()[0]["id"]
+
+    assert cli.main(["feedback", fid, "overridden", "--repo", str(project.root),
+                     "--note", "owner reopened #41"]) == 0
+
+    answered = runs.verdicts(run)[fid]
+    assert answered["outcome"]["state"] == "overridden"
+    assert answered["outcome"]["polarity"] == "negative"
+
+
+def test_the_verdict_that_dispatches_still_belongs_to_triage(project, make_run):
+    """The narrowing must not swallow the rule it narrowed. `sent` is how a
+    decision reaches the board; recording it without dispatching would leave
+    the board without the comment and the project believing it had one."""
+    run = _po_run(project, make_run, [_decision(project)])
+    fid = run.findings()[0]["id"]
+
+    with pytest.raises(SystemExit) as e:
+        cli.main(["feedback", fid, "sent", "--repo", str(project.root)])
+
+    assert "triage" in str(e.value)
+
+
+def test_a_type_that_may_act_needs_somewhere_to_record_that_it_did(project):
+    """The core writes `sent` itself the moment a sink answers, and
+    `append_decision` refuses a word no lifecycle knows. A type that may act
+    and has nowhere to put that verdict therefore does not fail here — it
+    fails in a run, after the board has already been written to. Invisible
+    while `finding` was the only type that acted: `finding` inherits a
+    `triage` lifecycle whether a pack asks for one or not."""
+    from agency import packs
+
+    install_pack(project, "po", {"outputs": {"decision": dict(REAL_DECISION, feedback={
+        "outcome": {"kinds": {"upheld": "positive", "overridden": "negative"}}})}})
+
+    problems = outputs.errors(packs.load("po", project))
+
+    assert len(problems) == 1
+    assert "`sent`" in problems[0]
+
+
+def test_the_real_po_manifest_says_all_of_this(project):
+    """`packs/po/` is a reference copy of a pack that lives in main-panel, so
+    nothing else in this suite would notice if the two halves disagreed."""
+    import json as _json
+    from pathlib import Path
+
+    from agency import packs
+
+    root = Path(__file__).resolve().parents[3]
+    manifest = _json.loads((root / "packs" / "po" / "pack.json").read_text(encoding="utf-8"))
+    install_pack(project, "po", manifest)
+    pack = packs.load("po", project)
+
+    assert outputs.errors(pack) == []
+    for name in ("decision", "ticket_draft"):
+        policy = outputs.policy_for(pack, name)
+        assert policy.anchor == "none", f"{name} is not about a place in the code"
+        assert policy.actions == "sink", f"{name} has to reach the board"
+        assert policy.lifecycle_of("sent") is not None
+
+    assert outputs.policy_for(pack, "decision").lifecycle_of("upheld").metric == "upheld_rate"
+    assert outputs.policy_for(pack, "ticket_draft").lifecycle_of("promoted").requires \
+        == "delivery.sent"
+
+
+def test_the_po_agent_can_no_longer_post_a_decision_by_hand(project):
+    """The migration is only real if the old road is closed. `needs` is what
+    the agent's session is actually granted, so a `decide` or a `draft` left
+    in it would mean the pack could still go round the core — and it would,
+    the first time a run found the sink inconvenient."""
+    import json as _json
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[3]
+    manifest = _json.loads((root / "packs" / "po" / "pack.json").read_text(encoding="utf-8"))
+    granted = " ".join(manifest["needs"] + manifest.get("needsUnattended", []))
+
+    assert "backlog.py decide" not in granted
+    assert "backlog.py draft" not in granted
+    assert "backlog.py dispatch" in manifest["sink"]
+    assert "agency feedback" in manifest["needs"], \
+        "and the verdict the board hands back has to be recordable"
+
+
+def test_the_po_manifest_and_its_sink_script_are_the_same_pack(project):
+    """A sink naming a verb the script does not have fails once, in a run,
+    after the gate has already passed the output — the failure this suite is
+    least able to notice from the core alone."""
+    import json as _json
+    import subprocess
+    import sys as _sys
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[3]
+    manifest = _json.loads((root / "packs" / "po" / "pack.json").read_text(encoding="utf-8"))
+    script = root / "packs" / "po" / "scripts" / "backlog.py"
+
+    assert manifest["sink"].startswith("python .claude/skills/agency-po/scripts/backlog.py dispatch")
+    assert "{id}" in manifest["sink"] and "{runDir}" in manifest["sink"]
+    assert script.is_file()
+
+    listed = subprocess.run([_sys.executable, str(script), "--help"],
+                            capture_output=True, text=True, encoding="utf-8")
+    assert "dispatch" in listed.stdout
+
+
+def test_the_disposition_travels_in_the_packs_own_text(project):
+    """The core's schema is closed and knows nothing about `BUILD-NOW` — on
+    purpose, because the day it does, every future specialist has to pretend
+    to be a product owner. So the disposition rides in the body, and the
+    pack's own script reads it back. This is that contract, from both ends."""
+    import importlib.util
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[3]
+    spec = importlib.util.spec_from_file_location(
+        "po_backlog", root / "packs" / "po" / "scripts" / "backlog.py")
+    backlog = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(backlog)
+
+    head, prose = backlog.decision_header(DECISION_BODY)
+
+    assert head["disposition"] == "DEFER-WITH-TRIGGER"
+    assert head["commitment"] == "no #255 milestone covers this"
+    assert prose.startswith("Odkládáme")
+    assert "Trigger: první" in prose, \
+        "the block ends at the blank line — a colon in the prose is not a header"
+    assert head["disposition"] in backlog.DISPOSITIONS

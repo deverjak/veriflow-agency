@@ -15,13 +15,15 @@ A one-person company does not fail for lack of ideas. It fails because the found
 
 | | What it is | Where it goes |
 |---|---|---|
-| **Answer** | the question, the answer, the bet it serves, what it displaces, what would change it, the next step | `<RUN_DIR>/answer.md` |
-| **Bets** | a hypothesis with a number, a deadline, a kill condition and what it displaces — proposed, for the founder to choose | `<RUN_DIR>/findings.json`, `"type": "bet"` |
-| **Drafts** | an e-mail to an institution, a one-pager outline, a call agenda, an application skeleton | `<RUN_DIR>/drafts/` |
+| **Answer** | the question, the answer, the bet it serves, what it displaces, what would change it, the next step | `findings.json`, `"type": "answer"` — and `<RUN_DIR>/answer.md` |
+| **Bets** | a hypothesis with a number, a deadline, a kill condition and what it displaces — proposed, for the founder to choose | `findings.json`, `"type": "bet"` |
+| **Drafts** | an e-mail to an institution, a one-pager outline, a call agenda, an application skeleton | `findings.json`, `"type": "draft"` — the text itself in `<RUN_DIR>/drafts/` |
 | **Registers** | strategy, competitors, stakeholders, opportunities, decisions — the memory that makes the next run cheap | `.agency/knowledge/pages/ceo/` |
-| **Findings** | what is wrong with the strategy itself — a claim that does not hold, work no bet covers, a gap that blocks a conversation | `<RUN_DIR>/findings.json` |
+| **Findings** | what is wrong with the strategy itself — a claim that does not hold, work no bet covers, a gap that blocks a conversation | `findings.json` |
 
 An answer is about one question. A bet is a proposal about the next months. A finding is about the system that produced it. A run that yields one good answer, two drafts and zero findings is a successful run.
+
+**Four of the five go into one file.** `findings.json` is not the findings file — it is this run's outputs, and the type says which kind each one is. That is what lets the project deduplicate an answer it already gave, hold a draft against the bet it serves, and tell you next month that two of your three bets were never chosen. The registers stay markdown on purpose (§7): they are memory the founder edits, not outputs of a run.
 
 **Findings rest in the project's own memory.** This pack has no `sink` — Kvesteros has no board (`deverjak/kvesteros-platform` has no open issues and no project), so what passes the gate stays `candidate` in `.agency/knowledge/`, committed, readable by any session in the repository. Do not create issues or a board yourself; if the project should have one, that is a finding on `readiness`, and the founder's call.
 
@@ -234,7 +236,28 @@ Every "what should we build next" question is answered by naming the bet it serv
 
 The order is always: **readiness → who → ask → draft**. When readiness fails — no legal entity, no public URL that works, no one-pager, no answer to "where do you take the data from" — the draft is not written; the finding is, on `readiness`, and `answer.md` says what to do first.
 
-Drafts go to `<RUN_DIR>/drafts/<slug>.md` — `outreach-kickk.md`, `one-pager-outline.md`, `call-agenda-zivykraj.md`. Czech, short, one ask. Never sent by you.
+The text of a draft goes to `<RUN_DIR>/drafts/<slug>.md` — `outreach-kickk.md`, `one-pager-outline.md`, `call-agenda-zivykraj.md`. Czech, short, one ask. Never sent by you.
+
+**And the draft is an output**, `"type": "draft"`, so the project knows it was written and does not write it twice:
+
+```jsonc
+{
+  "id": "<ULID>", "runId": "<from run.json>", "pack": "ceo", "type": "draft",
+  "dimension": "stakeholders", "severity": "medium",
+  "title": "První e-mail na KIC KK — žádost o 30minutový hovor",
+  "subject": { "kind": "draft", "ref": "outreach-kickk" },
+  "body": "Komu: inovační agentura Karlovarského kraje, kontakt z jejich webu. Jeden ask: 30 minut o datech z regionu. Předpokládá tiráž na webu a funkční veřejnou URL — obojí zatím není, viz nález readiness. Text: drafts/outreach-kickk.md.",
+  "evidence": [
+    { "kind": "web_snapshot", "detail": "kontaktní stránka KIC KK, načtená v tomto běhu",
+      "locator": { "url": "https://…", "artifact": "evidence/web/kickk-kontakt.html" } }
+  ],
+  "score": 80, "scoreReason": "The contact page was read this run; a reorganised agency changes the addressee.", "state": "candidate"
+}
+```
+
+`subject.ref` is the draft's slug — the same one as the file — and it is what stops the next run drafting the same e-mail again. The **body says what the draft does**, not what it says: who it goes to, the one ask, what readiness it assumes. The prose the founder sends lives in the file, and duplicating it here would give the project two copies that drift apart.
+
+Nothing dispatches a draft: `outputs.draft.actions` is `none`, because the founder sends it or nobody does.
 
 ## 5. Findings
 
@@ -286,7 +309,7 @@ Write findings in Czech.
 
 ## 6. When the prompt is a question — and when there is none
 
-`--prompt "should the newsletter really be the next thing?"` is the ordinary run. Answer it in `<RUN_DIR>/answer.md`, in this shape:
+`--prompt "should the newsletter really be the next thing?"` is the ordinary run. Answer it **once**, in this shape:
 
 1. the question, in one line;
 2. the answer, in the first three sentences — a disposition where one applies;
@@ -295,6 +318,10 @@ Write findings in Czech.
 5. what it rests on — the documents and the URLs read this run;
 6. what would change the answer;
 7. **the next concrete step**, one, with the draft in `drafts/` when the step is outward-facing.
+
+That text is the body of one output with `"type": "answer"` — at most one per run, which is what `cardinality: one` in `pack.json` says: a run that answers a question twice has not answered it. Its evidence is what the answer rests on, the same documents and pages a bet stands on; an answer with nothing behind it does not pass the gate.
+
+Write the same text to `<RUN_DIR>/answer.md` as well. Not a second version of it — the same words: the founder reads a file, and `agency status` and the chain report point at it. Write the output first and copy it out, never the other way round.
 
 **Without a prompt, run the standing review**: refresh the registers (every row older than 60 days gets re-read or marked stale), read the roadmap against the commit log, and report drift, stale claims and readiness gaps as findings. Say in `summary.md` what you refreshed and what you could not reach.
 

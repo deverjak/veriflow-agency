@@ -9,7 +9,7 @@ A pull request review with **evidence-backed** findings. The structural signal a
 
 **The output is not a comment. The output is `findings.json`.** A GitHub Project item is derived from it and optional, produced later through the pack's `sink`, not by this skill. When the sink fails or the project has none, the finding is not lost — it stays `candidate` in the committed knowledge, and that is the whole reason this pack exists.
 
-**Findings go to the board through the core.** Write findings to `RUN_DIR/findings.json`. Do not create board items, PR comments or issues for a finding yourself — `agency ingest` sends what passes the gate through `backlog.py draft --finding`. In a chain, judge the upstream findings with `agency triage accept <id>` (it goes to the board) or `agency triage reject <id> --reason <r>` (it is remembered, never reported again). There is no `defer`: what you do not reject goes to the board when the chain ends.
+**Findings go to the board through the core.** Write findings to `RUN_DIR/findings.json`. Do not create board items, PR comments or issues for a finding yourself — `agency ingest` sends what passes the gate through `backlog.py dispatch`. In a chain, judge the upstream findings with `agency triage accept <id>` (it goes to the board) or `agency triage reject <id> --reason <r>` (it is remembered, never reported again). There is no `defer`: what you do not reject goes to the board when the chain ends.
 
 ## Project facts
 
@@ -165,7 +165,7 @@ Do not repeat the findings — they arrive as data (`evidence/upstream.json`). W
 
 ## 6. What gets published, and how
 
-Findings reach the board on their own. `agency ingest` runs the gate right after this run finishes, and a finding that passes it goes out through the pack's `sink` (`backlog.py draft --finding`) automatically — nothing here has to trigger that, and nothing here should. Do not call `gh api` yourself, and do not create a GitHub Project item or an issue for a finding — that would duplicate what the sink already does and confuse its idempotence marker.
+Findings reach the board on their own. `agency ingest` runs the gate right after this run finishes, and a finding that passes it goes out through the pack's `sink` (`backlog.py dispatch`) automatically — nothing here has to trigger that, and nothing here should. Do not call `gh api` yourself, and do not create a GitHub Project item or an issue for a finding — that would duplicate what the sink already does and confuse its idempotence marker.
 
 A summary PR comment stays yours to post (`gh pr comment`, already in `needs`): write it about the review as a whole, referencing finding ids from `findings.json` — not one comment per finding.
 

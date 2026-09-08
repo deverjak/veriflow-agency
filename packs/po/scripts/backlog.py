@@ -18,14 +18,25 @@ cannot enforce —
 Subcommands:
 
     snapshot   [--run-dir DIR]                    the queue, frozen, to evidence/backlog.json
+    dispatch   --output ID                        [--run-dir DIR] [--dry-run]
+                   THE CORE'S SINK, and the only way an output reaches the
+                   board. `agency ingest` calls it once per gated output; the
+                   output's own `type` decides what happens — a finding and a
+                   ticket_draft become board drafts, a decision becomes a
+                   comment plus a `Stav` move. The core never learns which is
+                   which, and that is the point: it would have to know what
+                   `BUILD-NOW` means.
     comment    --ref REF --key KEY --body-file F [--run-dir DIR] [--dry-run]
     draft      --title T --key KEY --body-file F [--run-dir DIR] [--dry-run]
                --finding ID                        [--run-dir DIR] [--dry-run]
-                   this is the core's sink — `agency ingest` calls it with a
-                   gated finding's id, never a title/body an agent composed
     promote    --ref PVTI_xxx [--label L ...] [--run-dir DIR] [--dry-run]
     decide     --ref REF --disposition D --because-file F [--commitment TEXT]
                [--label L ...] [--status NAME] [--run-dir DIR] [--dry-run]
+
+`draft` and `decide` remain callable by hand — for a one-off outside a run,
+and because `--dry-run` on them is how a body gets rehearsed. Inside a run
+they are the sink's business: an agent that calls them itself produces a board
+item the core has no record of, which is the whole thing this step removed.
 
 REF is an issue number (`41`, `#41`), an issue URL, or a board item id
 (`PVTI_…`). All writes carry a stable key so a second run recognises what the
@@ -412,11 +423,29 @@ def _load_finding(finding_id: str, run_dir: str | None) -> dict:
     raise BacklogError(f"Finding “{finding_id}” was not found in any run or in the trail.")
 
 
+def _place_of(f: dict) -> dict:
+    """Where in the source the output points, in either shape.
+
+    Since 2026-09-08 the four anchor layers travel in a `code` evidence
+    item's `locator`; before that they were a field of their own, and every
+    output in the trail still has one. `agency`'s own `anchor.of()` does the
+    same thing — this is the pack-side copy, because the script has to run
+    with nothing but Python.
+    """
+    for item in f.get("evidence") or []:
+        if (item or {}).get("kind") == "code":
+            loc = item.get("locator") or {}
+            if loc.get("file"):
+                return loc
+    a = f.get("anchor")
+    return a if isinstance(a, dict) else {}
+
+
 def _finding_body(f: dict) -> tuple[str, str]:
     """Title and body for a finding's draft. The core gate already verified
     the anchor and the evidence — this only lays the agent's own words out,
     it does not add a claim of its own."""
-    a = f.get("anchor") or {}
+    a = _place_of(f)
     where = f"{a.get('file')}:{a.get('line')}" if a.get("file") else None
     sym = a.get("symbol")
     sym = sym.get("name") if isinstance(sym, dict) else None
@@ -440,30 +469,35 @@ def _finding_body(f: dict) -> tuple[str, str]:
     return f.get("title") or f.get("id"), "\n".join(lines).rstrip() + "\n"
 
 
+def _create_draft(key: str, title: str, text: str, args, extra: dict | None = None) -> dict:
+    """One board draft, idempotent on `key`. Shared by the sink and by a hand
+    call, so the two cannot post differently shaped items."""
+    extra = extra or {}
+    if args.dry_run:
+        # No `gh` call at all here — the whole point of --dry-run is to see
+        # the body that would be posted, offline.
+        return {"action": "would-create", "key": key, "title": title, "body": text, **extra}
+
+    board = Board()
+    existing = board.by_key(key)
+    if existing:
+        return append(args.run_dir, {"kind": "draft", "action": "exists", "key": key,
+                                     **extra, **existing})
+    data = gh_json("project", "item-create", str(PROJECT_NUMBER), "--owner", OWNER,
+                   "--title", title[:250], "--body", text)
+    item_id = data.get("id")
+    return append(args.run_dir, {"action": "created", "kind": "draft", "key": key,
+                                 "item": item_id, "title": title, **extra,
+                                 "status": _set_status(board, item_id, "New", False)})
+
+
 def cmd_draft(args) -> dict:
     if args.finding:
         f = _load_finding(args.finding, args.run_dir)
         key = f"finding:{args.finding.lower()}"
-        title, extra = _finding_body(f)
-        text = compose(extra, key, run_id_of(args.run_dir))
-        if args.dry_run:
-            # No `gh` call at all here — the whole point of --dry-run is to
-            # see the body a gated finding would post, offline.
-            return {"action": "would-create", "key": key, "title": title,
-                    "finding": args.finding, "body": text}
-
-        board = Board()
-        existing = board.by_key(key)
-        if existing:
-            return append(args.run_dir, {"kind": "draft", "action": "exists", "key": key,
-                                         "finding": args.finding, **existing})
-        data = gh_json("project", "item-create", str(PROJECT_NUMBER), "--owner", OWNER,
-                       "--title", title[:250], "--body", text)
-        item_id = data.get("id")
-        res = {"action": "created", "kind": "draft", "key": key, "item": item_id,
-              "title": title, "finding": args.finding,
-              "status": _set_status(board, item_id, "New", False)}
-        return append(args.run_dir, res)
+        title, body = _finding_body(f)
+        text = compose(body, key, run_id_of(args.run_dir))
+        return _create_draft(key, title, text, args, {"finding": args.finding})
 
     if not args.title or not args.body_file:
         raise BacklogError("draft needs either --finding, or both --title and --body-file.")
@@ -508,21 +542,28 @@ def cmd_promote(args) -> dict:
     return append(args.run_dir, res)
 
 
-def cmd_decide(args) -> dict:
-    if args.disposition not in DISPOSITIONS:
-        raise BacklogError(f"--disposition must be one of {', '.join(DISPOSITIONS)}")
-    board = Board()
-    ref = resolve_ref(board, args.ref)
-    because = _body_file(args.because_file)
+def _decide(ref_arg: str, disposition: str, because: str, commitment: str | None,
+            cycle: str | None, key: str | None, args) -> dict:
+    """One decision, posted where the person who asked can read it.
 
-    lines = [f"### {DISPOSITION_HEADING[args.disposition]}", "", because.strip(), ""]
-    lines.append(f"- **Commitment:** {args.commitment or 'none named'}")
-    lines.append(f"- **Cycle:** {args.cycle or 'not set — see the standing brief'}")
+    Shared by `decide` and by the sink, so a decision the core dispatched and
+    one written by hand land in the same shape — same heading, same signature,
+    same `Stav` move. Two code paths here would mean the board could not be
+    read back as one history.
+    """
+    if disposition not in DISPOSITIONS:
+        raise BacklogError(f"disposition must be one of {', '.join(DISPOSITIONS)}")
+    board = Board()
+    ref = resolve_ref(board, ref_arg)
+
+    lines = [f"### {DISPOSITION_HEADING[disposition]}", "", because.strip(), ""]
+    lines.append(f"- **Commitment:** {commitment or 'none named'}")
+    lines.append(f"- **Cycle:** {cycle or 'not set — see the standing brief'}")
     body = "\n".join(lines)
-    key = args.key or f"decision-{args.disposition.lower()}-{key_for(ref.get('title') or args.ref)}"
+    key = key or f"decision-{disposition.lower()}-{key_for(ref.get('title') or ref_arg)}"
     text = compose(body, key, run_id_of(args.run_dir))
 
-    result: dict = {"disposition": args.disposition, "ref": args.ref,
+    result: dict = {"disposition": disposition, "ref": ref_arg,
                     "number": ref.get("number"), "item": ref.get("item")}
 
     if args.dry_run:
@@ -537,17 +578,94 @@ def cmd_decide(args) -> dict:
 
     # Move `Stav` to match the disposition, for a draft or an issue alike —
     # both are board items and both carry the field.
-    status_name = DISPOSITION_STATUS[args.disposition]
+    status_name = DISPOSITION_STATUS[disposition]
     result["status"] = _set_status(board, ref.get("item"), status_name, args.dry_run)
 
     # BUILD-NOW / FIX-REMOVE-NOW get a priority label once they are (or become) an issue.
-    priority = DISPOSITION_PRIORITY.get(args.disposition)
+    priority = DISPOSITION_PRIORITY.get(disposition)
     number = result.get("number") or ref.get("number")
     if priority and number and not args.dry_run:
         gh("issue", "edit", str(number), "--repo", SLUG, "--add-label", PRIORITY_LABELS[priority])
         result["label"] = PRIORITY_LABELS[priority]
 
     return append(args.run_dir, {"kind": "decide", "key": key, **result})
+
+
+def cmd_decide(args) -> dict:
+    return _decide(args.ref, args.disposition, _body_file(args.because_file),
+                   args.commitment, args.cycle, args.key, args)
+
+
+# ------------------------------------------------------------- the sink
+
+#: The `Key: value` block a `decision` output opens its body with. The core's
+#: schema is closed and knows nothing about dispositions — deliberately, since
+#: the day it learns what `BUILD-NOW` means every future specialist has to
+#: pretend to be a product owner. So the disposition travels in the pack's own
+#: text, the same way a bet's identity travels in a `Ref:` line in
+#: `strategy.md`, and the pack's own script is what reads it back.
+HEADER_LINE = re.compile(r"^([A-Za-z][A-Za-z -]{0,30}):[ \t]*(.*)$")
+
+
+def decision_header(body: str) -> tuple[dict, str]:
+    """The header block at the top of a decision, and the prose under it.
+
+    The block ends at the first blank line or the first line that is not
+    `Key: value`. Everything after it is what gets posted on the ticket — the
+    header is addressed to this script, the prose to the person who asked.
+    """
+    head: dict[str, str] = {}
+    lines = (body or "").splitlines()
+    cut = 0
+    for i, line in enumerate(lines):
+        m = HEADER_LINE.match(line) if line.strip() else None
+        if m is None:
+            cut = i + 1 if not line.strip() else i
+            break
+        head[m.group(1).strip().lower()] = m.group(2).strip()
+        cut = i + 1
+    return head, "\n".join(lines[cut:]).strip()
+
+
+def cmd_dispatch(args) -> dict:
+    """The core's sink: one output, whatever kind it is, onto the board.
+
+    A pack has ONE sink command and the core keeps it that way on purpose —
+    routing by type here rather than in the core is what keeps `BUILD-NOW`,
+    `Stav` and the five dispositions out of a tool that reviews code for a
+    living. What the core does get back is the verb this ran (`kind`) and
+    where it landed, which is what an action is made of.
+    """
+    f = _load_finding(args.output, args.run_dir)
+    kind = f.get("type") or "finding"
+
+    if kind in ("finding", "ticket_draft"):
+        key = f"{kind}:{args.output.lower()}"
+        if kind == "finding":
+            title, body = _finding_body(f)
+        else:
+            title, body = f.get("title") or args.output, f.get("body") or ""
+        return _create_draft(key, title, compose(body, key, run_id_of(args.run_dir)),
+                             args, {"output": args.output})
+
+    if kind == "decision":
+        head, because = decision_header(f.get("body") or "")
+        disposition = (head.get("disposition") or "").upper()
+        if disposition not in DISPOSITIONS:
+            raise BacklogError(
+                f"The decision's body must open with `Disposition: <one of "
+                f"{', '.join(DISPOSITIONS)}>`; this one opens with "
+                f"“{head.get('disposition') or (f.get('body') or '')[:40]}”.")
+        ref = str((f.get("subject") or {}).get("ref") or "").strip()
+        if not ref:
+            raise BacklogError(
+                "A decision needs `subject: {\"kind\": \"board_item\", \"ref\": \"<issue "
+                "or item>\"}` — that is which ticket it decides, and without it there "
+                "is nowhere to post it.")
+        return _decide(ref, disposition, because, head.get("commitment"),
+                       head.get("cycle"), f"decision:{args.output.lower()}", args)
+
+    raise BacklogError(f"“{kind}” is not a kind of output this board receives.")
 
 
 # ---------------------------------------------------------------- CLI
@@ -567,6 +685,11 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("snapshot", parents=[common]).set_defaults(fn=cmd_snapshot)
+
+    s = sub.add_parser("dispatch", parents=[common])
+    s.add_argument("--output", required=True,
+                   help="the id of a gated output in findings.json — the core passes it")
+    s.set_defaults(fn=cmd_dispatch)
 
     s = sub.add_parser("comment", parents=[common])
     s.add_argument("--ref", required=True)

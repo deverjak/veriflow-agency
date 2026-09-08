@@ -284,6 +284,14 @@ def declares(pack, type_name: str | None) -> bool:
     return str(type_name or DEFAULT_TYPE) in policies(pack)
 
 
+def _records_dispatch(body: dict) -> bool:
+    """Whether this policy has somewhere to put a `sent` verdict."""
+    for cycle in (body.get("feedback") or {}).values():
+        if isinstance(cycle, dict) and "sent" in (cycle.get("kinds") or {}):
+            return True
+    return False
+
+
 def own_types(pack) -> set[str]:
     """The types this pack WROTE DOWN, as opposed to the one it inherits.
 
@@ -317,8 +325,20 @@ def errors(pack) -> list[str]:
         card = body.get("cardinality", "many")
         if card not in CARDINALITIES:
             found.append(f"{where}.cardinality: “{card}” — one of {', '.join(CARDINALITIES)}")
-        if body.get("actions", "sink") not in ACTIONS:
+        actions = body.get("actions", "sink")
+        if actions not in ACTIONS:
             found.append(f"{where}.actions: one of {', '.join(ACTIONS)}")
+        elif actions == "sink" and not _records_dispatch(body):
+            # The core writes this verdict itself, the moment a sink answers
+            # (`runs.dispatch`), and `append_decision` refuses a word no
+            # lifecycle knows. So a type that may act and has nowhere to put
+            # `sent` does not fail here — it fails on its first successful
+            # dispatch, in a run, having already posted to the board. That was
+            # invisible while `finding` was the only type that acted, because
+            # `finding` inherits a `triage` lifecycle whether a pack asks or not.
+            found.append(f"{where}: `actions: sink` needs a lifecycle whose "
+                         f"`kinds` include `sent` — the core records that "
+                         f"verdict itself as soon as the sink answers")
         if body.get("memory", "proposes") not in MEMORY:
             found.append(f"{where}.memory: one of {', '.join(MEMORY)}")
         anchor = body.get("anchor", "required")
