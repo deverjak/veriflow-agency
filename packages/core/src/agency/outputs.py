@@ -111,6 +111,25 @@ class Lifecycle:
     def polarity(self, kind: str) -> str | None:
         return self.kinds.get(kind)
 
+    @property
+    def requirement(self) -> tuple[str, str] | None:
+        """Which answer has to be in before this question is asked at all.
+
+        `requires: "selection.selected"` reads as *ask how the bet turned out
+        only for the bet the founder actually chose*. Without it a rejected bet
+        would sit in `success_rate`'s denominator for ever, undecided, and the
+        ratio would fall with every bet nobody took — the opposite of what it
+        measures. A lifecycle that requires nothing is always asked.
+
+        Naming the lifecycle alone (`requires: "selection"`) means *any* answer
+        opens this question, which is the honest reading of a condition that
+        did not name a kind.
+        """
+        if not self.requires:
+            return None
+        name, _, kind = self.requires.partition(".")
+        return name, kind
+
 
 @dataclass(frozen=True)
 class TypePolicy:

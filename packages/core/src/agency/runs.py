@@ -1756,11 +1756,15 @@ def record_feedback(project: Project, run: Run, finding_id: str, kind: str,
     return ev
 
 
-def history(run: Run) -> dict[str, list[dict]]:
-    """All events by finding, in write order — decisions and notes alike."""
-    out: dict[str, list[dict]] = {}
+def read_events(run: Run):
+    """Every event in the log, in write order.
+
+    The one place the log is read. A broken line is skipped rather than fatal:
+    a half-written last line — the shape a killed process leaves — must not
+    cost a run every verdict it collected before that.
+    """
     if not run.decisions_path.is_file():
-        return out
+        return
     with open(run.decisions_path, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
@@ -1770,24 +1774,77 @@ def history(run: Run) -> dict[str, list[dict]]:
                 ev = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            out.setdefault(ev.get("findingId"), []).append(ev)
+            if isinstance(ev, dict):
+                yield ev
+
+
+def history(run: Run) -> dict[str, list[dict]]:
+    """All events by finding, in write order — decisions and notes alike."""
+    out: dict[str, list[dict]] = {}
+    for ev in read_events(run):
+        out.setdefault(ev.get("findingId"), []).append(ev)
+    return out
+
+
+def verdicts(run: Run) -> dict[str, dict[str | None, dict]]:
+    """`state = fold(events, policy)`: one answer per LIFECYCLE, per output.
+
+    A bet is asked two questions — was it chosen, and did it work — and one
+    verdict per output cannot hold both. Marking a bet `successful` used to
+    erase its `selected`, so `selection_rate` lost a bet for every bet that
+    got as far as an outcome, and the two ratios were only independent as
+    long as nobody answered the second one.
+
+    The policy is what says which question an answer belongs to. Events have
+    carried `lifecycle` since types existed; an older one is read back through
+    the pack's policy, which is where those words were always defined anyway.
+    An answer whose lifecycle cannot be resolved at all — a state from a
+    vocabulary nobody declares any more, `deferred` being the one in the wild
+    — folds under `None`: still last-write-wins, still not an answer to a
+    question anybody asked.
+    """
+    out: dict[str, dict[str | None, dict]] = {}
+    lazy: dict = {}
+
+    def cycle_of(ev: dict) -> str | None:
+        named = ev.get("lifecycle")
+        if named:
+            return str(named)
+        # Only an event from before lifecycles existed gets this far, so the
+        # run's findings and its pack are loaded once, and only then.
+        if "types" not in lazy:
+            try:
+                lazy["types"] = {f.get("id"): f.get("type") for f in run.findings()}
+            except Exception:
+                lazy["types"] = {}
+            try:
+                lazy["pack"] = packs.load((run.record().get("pack") or ""), run.project)
+            except (SystemExit, Exception):
+                lazy["pack"] = None
+        policy = outputs.policy_for(lazy["pack"], lazy["types"].get(ev.get("findingId")))
+        cycle = policy.lifecycle_of(str(ev.get("state") or ""))
+        return cycle.name if cycle else None
+
+    for ev in read_events(run):
+        fid = ev.get("findingId")
+        if not fid or ev.get("kind", "decision") != "decision":
+            continue
+        out.setdefault(fid, {})[cycle_of(ev)] = ev
     return out
 
 
 def decisions(run: Run) -> dict[str, dict]:
-    """Current state = replaying the events. The last write to an id wins."""
+    """The last verdict on each output, whatever question it answered.
+
+    What nearly every caller wants — *has anybody judged this at all* — for a
+    listing, the ledger, a replay. `metrics` is the one that needs to know
+    WHICH question each answer belongs to, and that is `verdicts()` above.
+    Both fold the same log through `read_events`; nobody replays it a third
+    way.
+    """
     cur: dict[str, dict] = {}
-    if not run.decisions_path.is_file():
-        return cur
-    with open(run.decisions_path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                ev = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if ev.get("kind", "decision") == "decision":
-                cur[ev["findingId"]] = ev
+    for ev in read_events(run):
+        fid = ev.get("findingId")
+        if fid and ev.get("kind", "decision") == "decision":
+            cur[fid] = ev
     return cur

@@ -1,4 +1,4 @@
-# Obě sady testů, jedním během.
+# Both suites, in one run.
 #
 #   pwsh scripts/test.ps1
 
@@ -6,7 +6,7 @@ $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
 $failed = 0
 
-Write-Host "`n  jádro (pytest)" -ForegroundColor Cyan
+Write-Host "`n  core (pytest)" -ForegroundColor Cyan
 Push-Location "$repo/packages/core"
 try {
     & uv run --with pytest --with jsonschema python -m pytest
@@ -18,7 +18,7 @@ Write-Host "`n  extension (smoke)" -ForegroundColor Cyan
 if ($LASTEXITCODE -ne 0) { $failed++ }
 
 if ($failed) {
-    Write-Host "`n  $failed sada selhala`n" -ForegroundColor Red
+    Write-Host "`n  $failed suite(s) failed`n" -ForegroundColor Red
     exit 1
 }
-Write-Host "`n  obojí prošlo`n" -ForegroundColor Green
+Write-Host "`n  both passed`n" -ForegroundColor Green

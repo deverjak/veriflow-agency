@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 
 from . import outputs, packs
 from .config import Project
-from .runs import Run, decisions, load_runs, normalize_by
+from .runs import Run, decisions, load_runs, normalize_by, verdicts
 
 DAY = 86400.0
 
@@ -434,22 +434,28 @@ def collect(project: Project, runs: list[Run] | None = None) -> dict:
                 packs_seen[name] = None
         return packs_seen[name]
 
-    def count_cycle(pack_name: str, finding: dict, decision: dict | None) -> None:
-        """One output's answer, filed under the question it answered.
+    def count_cycle(pack_name: str, finding: dict, answers: dict) -> None:
+        """Every answer an output got, each under the question it answered.
 
-        One answer per output, because that is all `decisions()` can hand over
-        today — it folds the event log to the last write per id. A bet marked
-        `selected` and later `successful` therefore shows up under `outcome`
-        alone, and its earlier selection is not double-counted anywhere. The
-        per-lifecycle fold that would keep both is the feedback step, and
-        until it lands this number is honest rather than complete.
+        A bet marked `selected` and later `successful` answers two questions,
+        and both count: that is what makes `selection_rate` and `success_rate`
+        two independent numbers rather than a mixture. `answers` comes from
+        `runs.verdicts()`, which is the one place the event log is folded.
+
+        `requires` decides which questions are still OPEN, never which answers
+        count. A bet nobody chose is not pending an outcome — it has no outcome
+        to have, and counting it as undecided would drag `success_rate`'s
+        denominator down with every bet the founder turned down. But an answer
+        that was actually given is evidence the question was asked, whatever
+        the ledger says about the step before it: dropping a recorded verdict
+        because its precondition was never written down would throw away the
+        one thing here nobody can reconstruct.
         """
         pack = pack_of(pack_name)
         kind = str(finding.get("type") or outputs.DEFAULT_TYPE)
         if not pack or kind not in outputs.own_types(pack):
             return
         policy = outputs.policy_for(pack, kind)
-        state = (decision or {}).get("state")
 
         def cell(cycle) -> Cycle:
             key = (pack_name, kind, cycle.name)
@@ -457,17 +463,26 @@ def collect(project: Project, runs: list[Run] | None = None) -> dict:
                 by_cycle[key] = Cycle(cycle.metric)
             return by_cycle[key]
 
-        # `lifecycle`/`polarity` are on events written since types existed;
-        # older ones are read through the policy, which is where the words
-        # were always going to be defined anyway.
-        answered = policy.lifecycle_of(state) if state else None
-        if answered is not None:
-            cell(answered).add(answered.polarity(state))
-        elif policy.lifecycles:
-            # Nobody answered. It counts once, against the first question that
-            # could have been asked — never against every lifecycle, or one
-            # unanswered bet would read as two.
-            cell(policy.lifecycles[0]).add(None)
+        def still_open(cycle) -> bool:
+            """Whether an unanswered question is pending, or was never asked."""
+            need = cycle.requirement
+            if need is None:
+                return True
+            name, required_kind = need
+            answered = answers.get(name)
+            if answered is None:
+                return False
+            return not required_kind or answered.get("state") == required_kind
+
+        for cycle in policy.lifecycles:
+            # An output can also carry an answer whose lifecycle nothing could
+            # resolve (`verdicts()` files those under `None`). It answers no
+            # question here, so every question stays as it was.
+            ev = answers.get(cycle.name)
+            if ev is not None:
+                cell(cycle).add(cycle.polarity(str(ev.get("state") or "")))
+            elif still_open(cycle):
+                cell(cycle).add(None)
 
     raw = kept = duplicates = sent = 0
     ages: list[float] = []
@@ -498,7 +513,7 @@ def collect(project: Project, runs: list[Run] | None = None) -> dict:
     # overall precision it stays excluded: counting one finding twice would
     # inflate the number the whole tool is judged by.
     index: dict[str, dict] = {}
-    verdicts: dict[str, str | None] = {}
+    verdict_of: dict[str, str | None] = {}
     verdict_by: dict[str, str | None] = {}
     for run in selected:
         dec = decisions(run)
@@ -508,7 +523,7 @@ def collect(project: Project, runs: list[Run] | None = None) -> dict:
                 continue
             index[fid] = f
             d = dec.get(fid)
-            verdicts[fid] = d.get("state") if d else None
+            verdict_of[fid] = d.get("state") if d else None
             verdict_by[fid] = normalize_by(d.get("by")) if d else None
 
     def origin_state(f: dict) -> tuple[str | None, str | None]:
@@ -523,7 +538,7 @@ def collect(project: Project, runs: list[Run] | None = None) -> dict:
             cur = index[nxt]
             if cur.get("state") != "duplicate":
                 fid = cur.get("id")
-                return verdicts.get(fid), verdict_by.get(fid)
+                return verdict_of.get(fid), verdict_by.get(fid)
         return None, None
 
     def origin_hire(f: dict) -> str | None:
@@ -546,6 +561,7 @@ def collect(project: Project, runs: list[Run] | None = None) -> dict:
     for run in selected:
         rec = run.record()
         dec = decisions(run)
+        answered = verdicts(run)
         counts = rec.get("counts") or {}
         raw += counts.get("raw") or 0
         kept += counts.get("kept") or 0
@@ -612,7 +628,7 @@ def collect(project: Project, runs: list[Run] | None = None) -> dict:
             by_provider[provider].add(state, by)
             by_hire[hire].add(state, by)
             by_pack[(rec.get("pack") or "—")].add(state, by)
-            count_cycle(rec.get("pack") or "—", f, d)
+            count_cycle(rec.get("pack") or "—", f, answered.get(f.get("id")) or {})
             if method:
                 by_skill[method].add(state, by)
             if state == "rejected" and d.get("reason"):

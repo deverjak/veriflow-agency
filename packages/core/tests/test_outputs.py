@@ -370,6 +370,54 @@ def test_the_two_questions_stay_two_numbers(project, make_run):
     assert rows["ceo/bet/outcome"]["positive"] == 1
 
 
+def test_one_bet_answers_both_questions(project, make_run):
+    """Acceptance point 3, and the half of it that was open since Step 3: with
+    one verdict per output, a bet marked `selected` and later `successful`
+    appeared under `outcome` alone. `selection_rate` therefore lost a bet for
+    every bet that got as far as an outcome — the two numbers were independent
+    only while nobody answered the second one."""
+    from agency import metrics
+
+    run = _decided(project, make_run, "bet", "selected")
+    runs.append_decision(run, run.findings()[0]["id"], "successful", by="human")
+
+    rows = metrics.collect(project, [run])["byLifecycle"]
+
+    assert rows["ceo/bet/selection"]["positive"] == 1
+    assert rows["ceo/bet/selection"]["undecided"] == 0
+    assert rows["ceo/bet/outcome"]["positive"] == 1
+
+
+def test_a_bet_nobody_chose_is_not_pending_an_outcome(project, make_run):
+    """`requires` finally does something. It was declared, validated by the
+    doctor and read by nothing, so a rejected bet sat in `success_rate`'s
+    denominator as undecided — and the ratio fell with every bet the founder
+    turned down, which is the opposite of what it measures."""
+    from agency import metrics
+
+    run = _decided(project, make_run, "bet", "rejected")
+
+    rows = metrics.collect(project, [run])["byLifecycle"]
+
+    assert rows["ceo/bet/selection"]["negative"] == 1
+    assert "ceo/bet/outcome" not in rows
+
+
+def test_a_chosen_bet_is_pending_its_outcome(project, make_run):
+    """The other side of the same rule: for a bet the founder did choose, *did
+    it work* is a question now open and unanswered. §5 calls that `unknown` —
+    no source of feedback exists for it yet — and this is where that shows up
+    as a number instead of as a sentence in a plan."""
+    from agency import metrics
+
+    run = _decided(project, make_run, "bet", "selected")
+
+    rows = metrics.collect(project, [run])["byLifecycle"]
+
+    assert rows["ceo/bet/outcome"]["undecided"] == 1
+    assert rows["ceo/bet/outcome"]["value"] is None
+
+
 def test_an_unanswered_output_counts_once(project, make_run):
     """Against the first question that could have been asked. Counting it
     against every lifecycle would read one unanswered bet as two."""

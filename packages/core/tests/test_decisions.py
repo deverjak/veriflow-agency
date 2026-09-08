@@ -89,6 +89,120 @@ def test_the_same_finding_in_two_runs_has_its_own_decision(project, make_run):
     assert runs.decisions(newer) == {}
 
 
+# -------------------------------------------------------------- projection
+#
+# `state = fold(events, policy)`. One place folds the log; everybody else asks
+# it. The trap this guards against is not the event list — it is ten readers
+# each replaying history their own way and quietly disagreeing about what the
+# current state is.
+
+
+def test_two_answers_to_two_questions_are_two_states(project, make_run):
+    """The whole reason the projection exists. Folding to one verdict per
+    output meant the second answer erased the first, so a bet that was chosen
+    and then worked had no record of having been chosen."""
+    run = make_run()
+    fid = run.findings()[0]["id"]
+
+    with open(run.decisions_path, "a", encoding="utf-8", newline="\n") as f:
+        for state, cycle in (("selected", "selection"), ("successful", "outcome")):
+            f.write(json.dumps({"kind": "decision", "findingId": fid, "state": state,
+                                "lifecycle": cycle, "polarity": "positive",
+                                "by": "human", "at": runs.now()}) + "\n")
+
+    answers = runs.verdicts(run)[fid]
+
+    assert answers["selection"]["state"] == "selected"
+    assert answers["outcome"]["state"] == "successful"
+    # And the older fold is unchanged for everyone who only asks whether
+    # anybody judged this at all.
+    assert runs.decisions(run)[fid]["state"] == "successful"
+
+
+def test_the_last_answer_to_ONE_question_still_wins(project, make_run):
+    """Two answers to the same question are a correction, not two facts. A
+    fold that kept both would count one bet twice in its own ratio."""
+    run = make_run()
+    fid = run.findings()[0]["id"]
+
+    runs.append_decision(run, fid, "sent", by="human")
+    runs.append_decision(run, fid, "rejected", reason="by-design", by="human")
+
+    assert list(runs.verdicts(run)[fid]) == ["triage"]
+    assert runs.verdicts(run)[fid]["triage"]["state"] == "rejected"
+
+
+def test_an_event_from_before_lifecycles_is_read_through_the_policy(project, make_run):
+    """Committed history has no `lifecycle` on its events — the field is
+    younger than the log. The words were always the policy's, so that is where
+    an old event is read from, rather than being filed under nothing."""
+    run = make_run()
+    fid = run.findings()[0]["id"]
+    with open(run.decisions_path, "a", encoding="utf-8", newline="\n") as f:
+        f.write(json.dumps({"kind": "decision", "findingId": fid, "state": "sent",
+                            "by": "human", "at": runs.now()}) + "\n")
+
+    assert runs.verdicts(run)[fid]["triage"]["state"] == "sent"
+
+
+def test_a_state_no_policy_knows_is_not_an_answer_to_anything(project, make_run):
+    """`deferred` is the one in the wild — `runs.py` says outright that nothing
+    writes them any more. It must not become a lifecycle of its own, and it
+    must not pass for an answer to a question somebody did ask."""
+    run = make_run()
+    fid = run.findings()[0]["id"]
+    with open(run.decisions_path, "a", encoding="utf-8", newline="\n") as f:
+        f.write(json.dumps({"kind": "decision", "findingId": fid, "state": "deferred",
+                            "by": "human", "at": runs.now()}) + "\n")
+
+    answers = runs.verdicts(run)[fid]
+
+    assert list(answers) == [None]
+    assert "triage" not in answers
+
+
+def test_a_note_is_not_folded_into_the_state(project, make_run):
+    """The same rule `decisions()` has always had, kept in the projection —
+    otherwise a note would silently become the output's current verdict."""
+    run = make_run()
+    fid = run.findings()[0]["id"]
+
+    runs.append_note(run, fid, "checked on production", by="human")
+
+    assert runs.verdicts(run) == {}
+
+
+def test_a_duplicate_is_a_place_in_the_pipeline_not_a_verdict(project, make_run):
+    """`dedup` writes `state: duplicate` on the output and no event at all, and
+    that is the point: `state` is where an output stands, a verdict is what
+    somebody said about it. Were the core to file its own bookkeeping as
+    feedback, precision would start counting decisions nobody made."""
+    from agency import ingest
+
+    older = make_run(run_id="01AAAAAAAAAAAAAAAAAAAAAAAA")
+    ingest.ingest(project, older)
+    newer = make_run(run_id="01BBBBBBBBBBBBBBBBBBBBBBBB")
+    ingest.ingest(project, newer)
+
+    assert newer.findings()[0]["state"] == "duplicate"
+    assert runs.verdicts(newer) == {}
+    assert runs.decisions(newer) == {}
+
+
+def test_a_half_written_last_line_does_not_cost_the_verdicts_before_it(project, make_run):
+    """The shape a killed process leaves. Reading the log is one function now,
+    so this holds for every caller at once rather than for whichever one
+    happened to guard against it."""
+    run = make_run()
+    fid = run.findings()[0]["id"]
+    runs.append_decision(run, fid, "sent", by="human")
+    with open(run.decisions_path, "a", encoding="utf-8", newline="\n") as f:
+        f.write('{"kind": "decision", "findingId": "01X", "sta')
+
+    assert runs.verdicts(run)[fid]["triage"]["state"] == "sent"
+    assert runs.decisions(run)[fid]["state"] == "sent"
+
+
 # ------------------------------------------------------------------ agency triage (CLI)
 
 def test_triage_accept_is_dispatch(project, make_run):

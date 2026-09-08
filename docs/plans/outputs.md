@@ -3,7 +3,7 @@
 **Datum:** 2026-09-06
 **Navazuje na:** [`agency-v1.md`](agency-v1.md) (pack je skill v projektu, žádná konfigurace), [`harness.md`](harness.md) (provenience tool callů, brána, metriky, revize packu), [`findings-ownership.md`](findings-ownership.md) (board je stav, lokál je brána a stopa), [`teams.md`](teams.md) (řetěz), [`shared-memory.md`](shared-memory.md) (paměť patří projektu)
 **Řeší:** jádro dnes umí evidovat jediný druh výstupu — nález s kotvou na soubor a řádek. PO a CEO produkují rozhodnutí, odpovědi, sázky a drafty, a **oba už jádro kvůli tomu obcházejí**. Plán zobecňuje mechanismy, které v jádru fungují (brána, dedup, sinky, paměť, metriky), tak aby přestaly předpokládat code-review nález — a nedělá z Agency univerzální platformu.
-**Stav k 7. 9. 2026:** Kroky 1–6 hotové a commitnuté (testy 469 zelených). Svislý řez `bet` prošel u Kroku 4 a **přeskládal zbytek plánu**; Krok 5 dal outputu `subject` a běhu `scope`, Krok 6 nahradil `sinks` akcemi a cestou opravil dvě místa, kde `agency ingest` nebyl idempotentní. CEO pack je **přenesený do repa Kvesteros** včetně `Ref:` řádků ve `strategy.md` — čeká na první ostrý běh. Další na řadě: Krok 7 (feedback jako události a projekce `state`).
+**Stav k 8. 9. 2026:** Kroky 1–7 hotové a commitnuté (testy 479 zelených). Svislý řez `bet` prošel u Kroku 4 a **přeskládal zbytek plánu**; Krok 5 dal outputu `subject` a běhu `scope`, Krok 6 nahradil `sinks` akcemi a cestou opravil dvě místa, kde `agency ingest` nebyl idempotentní, Krok 7 zúžil fold událostí na jeden na lifecycle a oživil `requires`. CEO pack je **přenesený do repa Kvesteros** včetně `Ref:` řádků ve `strategy.md` — čeká na první ostrý běh. Další na řadě: Krok 8 (`score` přestane být branou).
 
 **Nedělá:** nový generický agent framework. Žádný plugin systém metrik, žádný registr typů, žádná doménová znalost v jádru. Přibývají přesně dvě abstrakce — `TypePolicy` a `Run.scope`.
 
@@ -17,7 +17,7 @@ Tahle sekce je pro agenta (nebo pro mě za měsíc), který v plánu pokračuje.
 
 ```powershell
 git log --oneline 31cbea3^..HEAD     # commity tohohle plánu, jeden na krok
-pwsh -NoProfile -File scripts/test.ps1   # jádro + smoke extension; musí říct „obojí prošlo“
+pwsh -NoProfile -File scripts/test.ps1   # jádro + smoke extension; musí říct „both passed“
 ```
 
 Jen jádro, když jde o rychlost: `cd packages/core; uv run --with pytest --with jsonschema python -m pytest -q`
@@ -30,25 +30,24 @@ python .claude\skills\agency-ceo\scripts\scope.py   # tři živé sázky, ne pr�
 agency doctor --json                                # žádné „pack ceo scope" ani „pack ceo outputs"
 ```
 
-Stav k 7. 9. 2026: Kroky 1–6 hotové, 469 testů, CEO pack přenesený. **Další je Krok 7** (feedback jako události a projekce `state`).
+Stav k 8. 9. 2026: Kroky 1–7 hotové, 479 testů, CEO pack přenesený. **Další je Krok 8** (`score` přestane být branou).
 
-### První pohyb v Kroku 7
+### První pohyb v Kroku 8
 
-V tomhle pořadí:
+Krok 8 je **jediný krok plánu, který ruší kontrolu**, a proto se dělá v tomhle pořadí, ne opačném:
 
-1. **Vypsat, kdo dnes `state` čte a kdo ho píše** — `metrics` na deseti místech, `dedup.mark_duplicates` ho zapisuje, `serve.py` i `cli.py` na něm staví výpis. Krok je datová změna **plus jedna funkce**, a ta funkce v seznamu kroků snadno chybí (§6, past 5).
-2. Události feedbacku do `decisions.jsonl` v plném tvaru `{outputId, kind, lifecycle, source, at, note}`. `source` (`core` / `human` / `chain:<pack>`) se **nevymýšlí** — `metrics` už dnes počítá rozhodnutí člena řetězu jinak než rozhodnutí člověka, jen se to nepřenáší (§3.4).
-3. **Projekce** `state = fold(events, policy)` na jednom místě. Nikdo jiný historii neskládá — to je celý smysl kroku, ne ten seznam událostí.
-4. `decisions()` skládá dnes události na **jedno** rozhodnutí na output (poslední zápis vyhrává), takže sázka označená `selected` a později `successful` se v metrikách objeví jen pod `outcome`. Otevřeno vědomě od Kroku 3; teprve tady se to dá dokončit.
-5. CLI zůstává pro uživatele stejné: `agency accept` / `agency reject` jsou zkratky, obecný tvar je `agency feedback <id> <kind>`. **CLI nemusí odhalovat vnitřní generalizaci všude.**
+1. **Nejdřív náhrada, pak zrušení.** `cardinality` a `limit` v `TypePolicy` existují od Kroku 3 a `ingest` je čte — ověř to (`grep -n "max_per_run" packages/core/src/agency/ingest.py`), protože bez fungujícího stropu je zrušení `below-score` čistá regrese. `minScore` je dnes jediná pojistka na objem: `ceo` má 80, `po` 75, `review-graph` v testech 70.
+2. **Teprve pak vyndat `below-score` z brány.** Zmizí z `GATE_REASONS` a s ním `counts.belowScore` v `run.v1` — a to je přesně past §6.9: cokoliv, co mizí ze `run.json`, musí zmizet i ze schématu a ze statistik, které z něj čtou. `test_run_record.py` na to má hlídače.
+3. **`score` se dál zaznamenává** a `metrics` (`Tally.score`) z něj počítá `scoreAccepted` / `scoreRejected`. To se nesmí odstranit spolu s branou — je to jediné místo, kde se pozná pack, který dává všemu 90 a má precision 0.4.
+4. Otázka, kterou krok musí zodpovědět nahlas: **strop na typ a běh, nebo řazení podle score?** Plán připouští obojí (`cardinality` jako strop, „pošli N nejlepších" jako řazení). Strop je brána, řazení není — a `bet` už dnes má `limit: 3`, takže odpověď nejspíš existuje a jen se nepoužívá u ostatních typů.
 
-### Co chybí — inventura k 7. 9. 2026
+### Co chybí — inventura k 8. 9. 2026
 
 **Zbývající kroky**, s tím, co je na každém z nich to podstatné:
 
 | krok | odhad | co je na tom podstatné |
 |---|---|---|
-| **7** — feedback jako události, projekce `state` | ~1,5 dne | ne ten seznam událostí, ale **jedna funkce**, která z něj skládá stav. Bez ní si ho deset míst začne skládat samo (§6, past 5) |
+| ~~**7** — feedback jako události, projekce `state`~~ | ~~1,5 dne~~ · **hotovo za půl** | past 5 nenastala — fold byl jeden, jen moc hrubý. Události v plném tvaru dodal už Krok 4 |
 | **8** — `score` přestane být branou | ~0,5 dne | `minScore` je dnes **jediná pojistka na objem**. Náhrada (`cardinality`) v jádru od Kroku 3 je, takže krok je hlavně o tom nezrušit bránu dřív, než se ta náhrada u packů skutečně nastaví — `ceo` má 80, `po` 75 |
 | **9** — kotva jako `evidence.kind = code` | ~2 dny | **nejdražší krok seznamu.** Politika kotvy je hotová z Kroku 4, ale samotné pole má 58 výskytů v sedmi souborech; `anchor.py` (čtyřvrstvé kotvení, drift) zůstává a jen se volá nad code evidencí |
 | **10** — migrace PO a CEO na jádro | ~1,5 dne | **přejímka celého plánu.** Ne „umí to jádro", ale „přestaly ho packy obcházet?" Mechanismus pro PO stojí od Kroku 6, chybí `decision` a `ticket_draft` jako typy a `backlog.py` v roli vykonavatele, ne obchvatu |
@@ -57,7 +56,8 @@ V tomhle pořadí:
 **Vědomě otevřené věci, které nepatří k žádnému kroku** — každá byla rozhodnutá, ne zapomenutá:
 
 * **`stop_errors()` nekontroluje locatory** (Krok 2). Agent dostane zpět chybějící `locator` (to je schéma), ale o neuloženém artefaktu se dozví až brána po jeho konci. Odloženo za Krok 4, aby bylo vidět, jak často to nastává — **a to je teď: první ostrý běh CEO to ukáže.** Do té doby nic neměnit.
-* **`decisions()` drží jedno rozhodnutí na output** (Krok 3, poslední zápis vyhrává). Sázka označená `selected` a později `successful` se v metrikách objeví jen pod `outcome`. Řeší Krok 7.
+* ~~**`decisions()` drží jedno rozhodnutí na output**~~ — vyřešeno Krokem 7. `verdicts()` drží jednu odpověď **na lifecycle**; `decisions()` zůstal vedle ní schválně, protože „rozhodl o tom vůbec někdo?" je jiná otázka než „jak dopadla otázka X".
+* **`by` nese to, co plán chtěl po `source`** (Krok 7). Druhé pole s touž informací by znamenalo dvě místa, která si můžou odporovat. Kdyby se `source` někdy přidával, ať je to proto, že `by` na něco nestačí — ne proto, že to plán kdysi napsal.
 * **`sinks` v `finding.v1` zůstává** jako superseded (Krok 6). Nemaže se — committed historie ho má a čtenáři z něj padají zpátky. To platí i po Kroku 11.
 
 **Co může říct jen ostrý provoz, ne test:**
@@ -73,7 +73,7 @@ V tomhle pořadí:
 |---|---|
 | 1. `--type bet` funguje, sázka code evidenci nemá ani nepředstírá | platí (test, ne ostrý běh) |
 | 2. brána zahodí sázku s neotevřeným URL, offline | platí |
-| 3. `selection_rate` a `success_rate` jako dvě nezávislá čísla | **poloviční** — obě metriky existují, ale současně je jeden output pod obě nedostane, dokud nebude Krok 7 |
+| 3. `selection_rate` a `success_rate` jako dvě nezávislá čísla | platí od Kroku 7 — jedna sázka může být `selected` i `successful` a počítá se do obou, a nevybraná sázka už `success_rate` neředí |
 | 4. review se chová identicky jako před refactorem | platí — 469 testů, klíč dedupu u ukotvených nálezů beze změny, drift netknutý |
 | 5. `packs/po/SKILL.md` už neobsahuje větu o obcházení jádra | **neplatí** — Krok 10 |
 
@@ -297,7 +297,7 @@ Architektonický test každé další featury: *potřebuje to opravdu každý pa
 | `dedup` | otisk z `pack`+`type`+`dimension`+`subject_key`+podpis `body` | hotovo (Kroky 3 a 5) |
 | `knowledge.here` | `subject ∩ run.scope` | hotovo (Krok 5) |
 | `sinks: {prComment, githubProjectItem}` | `actions[]` s výsledkem, časem a jménem od packu | hotovo (Krok 6) |
-| `state` (skalár na nálezu) | jeden verdikt | projekce `fold(feedback_events, policy)` (Krok 7) |
+| `state` (skalár na nálezu) | jeden verdikt | hotovo (Krok 7) — `state` zůstal místem v potrubí, verdikty jsou `verdicts()` |
 | `knowledge/pages/<pack>/` | píše je pack sám | beze změny — jádro paměť nepíše (§3.3) |
 | `do-not-report.md` | automaticky z trailu rejections | beze změny, jen zobecněná na negativní polaritu |
 | `metrics.precision` | `accepted / decided` | jeden poměr **na lifecycle**, jméno dodá pack (Krok 3) |
@@ -519,24 +519,34 @@ Metriky počítají **jeden poměr na lifecycle**, pojmenovaný packem — `byLi
 
 ---
 
-### Krok 7 — feedback jako události a projekce `state` (~1,5 dne) — *část předsunuta do Kroku 4*
+### Krok 7 — feedback jako události a projekce `state` (~1,5 dne) — **hotovo**, a byl menší, než plán čekal
 
 **Proč:** dnešní `state` je skalár, který [`metrics`](../../packages/core/src/agency/metrics.py) čte na deseti místech, [`dedup`](../../packages/core/src/agency/dedup.py) ho zapisuje a `serve.py` i `cli.py` na něm staví výpis. Seznam událostí je datová změna **plus** jedna funkce, která v seznamu kroků snadno chybí.
 
-**Co se mění:**
+**Co se změnilo:** [`runs.verdicts()`](../../packages/core/src/agency/runs.py) — `state = fold(events, policy)`, jedna odpověď **na lifecycle** místo jedné na output:
 
-```json
-{ "outputId": "…", "kind": "selected", "lifecycle": "selection",
-  "source": "human", "at": "…", "note": "…" }
+```python
+verdicts(run)[fid] == {"selection": {…"state": "selected"…},
+                       "outcome":   {…"state": "successful"…}}
 ```
 
-a k tomu **projekce** `state = fold(events, policy)` — jedno místo, které z historie a politiky spočítá aktuální stav. Nikdo jiný historii neskládá.
+Vedle ní `read_events()` (jediné místo, které log čte) a `decisions()` přepsané na ni — pořád vrací poslední verdikt bez ohledu na otázku, protože to je to, co chce devět z deseti volajících („rozhodl o tom vůbec někdo?"). `metrics.count_cycle` je ten desátý a bere teď všechny odpovědi.
 
-CLI zůstává pro uživatele beze změny tam, kde to dává smysl: `agency accept` / `agency reject` zůstávají jako zkratky pro packy, které takový feedback mají. Obecný tvar je `agency feedback <id> <kind>`. **CLI nemusí odhalovat vnitřní generalizaci všude.**
+**Pět věcí, které vyšly jinak, než plán čekal:**
 
-**Testy:** `test_decisions.py` — dvě události ve dvou lifecyclech dají dva nezávislé stavy; `duplicate` od jádra se do precision nepočítá jako lidské rozhodnutí.
+1. **Past 5 nenastala.** Plán se bál, že si deset míst začne skládat historii samo. Nezačalo: `decisions()` byl jediný fold a čte ho 11 volání v šesti souborech. Krok tedy nebyl „přidat události a k tomu funkci" — události v plném tvaru (`lifecycle`, `polarity`, `by`, `at`) existují od Kroků 3–4 a `agency feedback <id> <kind>` je v CLI taky. Zbývalo jediné: **fold byl moc hrubý.** Odhad 1,5 dne byl na práci, kterou předsunul Krok 4.
+2. **`source` se nepřidal, protože už existuje pod jménem `by`.** Plán chtěl `source: core | human | chain:<pack>`; kód má `by: human | chain | hire:<pack>@<provider>` a `metrics` na něm **už dnes** rozlišuje rozhodnutí řetězu od lidského (`Tally.add` počítá do precision jen `hire:`). Druhé pole s touž informací by znamenalo dvě místa, která si můžou odporovat. Zůstává `by`.
+3. **`core` jako zdroj feedbacku nevznikl — a nemá.** `duplicate` píše [`dedup.mark_duplicates`](../../packages/core/src/agency/dedup.py) přímo na output a **žádnou událost nezakládá**. To není mezera: `state` je místo v potrubí (candidate, held, sent, duplicate), verdikt je událost, a [`runs.py`](../../packages/core/src/agency/runs.py) to říká výslovně už od Kroku 4 (*„The output's `state` is deliberately NOT touched"*). Kdyby jádro svoje účetnictví zapisovalo jako feedback, precision by začala počítat rozhodnutí, která nikdo neudělal. Zamčeno testem.
+4. **`requires` bylo mrtvé pole a teprve tady ožilo.** `outputs.errors()` ho validovalo, `agency doctor` ho hlídal a **nečetlo ho nic** — takže zamítnutá sázka seděla ve jmenovateli `success_rate` jako nerozhodnutá a ten poměr klesal s každou sázkou, kterou zakladatel odmítl. Teď `Lifecycle.requirement` říká, které otázky jsou **otevřené**.
+5. **A jedna chyba, kterou našel test, ne úvaha.** První verze `requires` zahazovala i odpověď, která existovala: sázka označená `successful` bez zapsaného `selected` by se nezapočítala vůbec. `test_the_two_questions_stay_two_numbers` spadl hned. Správné pravidlo: **`requires` rozhoduje o tom, které otázky jsou otevřené, nikdy o tom, které odpovědi se počítají.** Odpověď, kterou někdo dal, je důkaz, že otázka padla — zahodit ji kvůli nezapsané předchozí je ztráta jediné věci, kterou nikdo nedopočítá.
 
-**Hotovo, když:** `agency findings` ukazuje totéž co dnes, ale čte to z projekce.
+**Co zůstalo jako druhý fold, vědomě:** [`knowledge.py`](../../packages/core/src/agency/knowledge.py) (578) skládá `events[-1]` **napříč rodinou duplicit**, ne uvnitř běhu — je to jiná otázka („kdo o tomhle tvrzení řekl něco naposled, ať už v kterémkoliv běhu") a projekce na ni odpovědět neumí. Není to past 5; ta mluví o deseti místech, která skládají **týž** stav.
+
+**CLI se nezměnilo**: `agency findings` ukazuje totéž co dřív, `agency accept` / `agency reject` jsou pořád zkratky a obecný `agency feedback <id> <kind>` byl v CLI už od Kroku 4.
+
+**Testy:** 10 nových, 479 celkem. `test_decisions.py` — dvě odpovědi na dvě otázky dají dva stavy, zatímco dvě odpovědi na **jednu** otázku jsou oprava a poslední vyhrává; událost bez `lifecycle` (committed historie) se čte přes politiku; `deferred`, který nezná žádná politika, se složí pod `None` a neprojde za odpověď; poznámka není verdikt; duplicita nemá událost; nedopsaný poslední řádek nestojí běh o verdikty před ním. `test_outputs.py` — jedna sázka odpoví na obě otázky a obě se počítají; nevybraná sázka nečeká na výsledek; vybraná ano.
+
+**Hotovo, když:** ~~`agency findings` ukazuje totéž co dnes, ale čte to z projekce.~~ Platí — a přejímka §7 bodu 3 s tím taky: `selection_rate` a `success_rate` jsou dvě nezávislá čísla i pro jednu sázku, která prošla oběma fázemi.
 
 ---
 
@@ -618,7 +628,7 @@ To je jediná ochrana před frameworkem, který půl roku vypadá, že se učí.
 2. **Plochá feedback mapa** (§1.3). Vyrobí číslo, které vypadá jako metrika a není žádná.
 3. **Hrubý `subject`** (Krok 5). Vypne pojistku v dedupu a začne slučovat různá tvrzení.
 4. **Nechat `scope` psát agenta** (§3.2). Nekontrolovatelné, gameable, a stejně pozdě.
-5. **Zapomenout na projekci `state`** (Krok 7). Deset míst si začne skládat historii samo.
+5. ~~**Zapomenout na projekci `state`**~~ (Krok 7) — nenastalo, fold byl od začátku jeden. Past, která nastala místo toho: **podmínka, která zahodí odpověď.** `requires` říká, které otázky jsou otevřené; kdyby rozhodovalo i o tom, které odpovědi se počítají, sázka označená `successful` bez zapsaného `selected` by zmizela z metrik úplně. Chytil to test, ne úvaha.
 6. **Zrušit `minScore` bez náhrady objemu** (Krok 8). Fronta naroste, rozhodne se míň, precision přestane být signál.
 7. **Postavit `register` jako output type** (§0.1). Zdvojí mechanismus, který v `knowledge/pages/` funguje.
 8. **Ověřovat evidenci proti živému světu** (§3.1). Zabije replay a determinismus.
