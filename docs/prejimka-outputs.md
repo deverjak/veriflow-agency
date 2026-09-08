@@ -101,6 +101,7 @@ Každá z těchhle věcí byla rozhodnutá, ne zapomenutá.
 ## 6. Co může říct jen ostrý provoz
 
 Tohle je jediná otevřená položka celé přejímky. **Kód je hotový; co se nikdy nespustilo, není hotové — jen otestované.**
+Odškrtávací seznam pro první ostré běhy je v [`overeni-v-provozu.md`](overeni-v-provozu.md).
 
 1. **První běh CEO nad Kvesterosem.** Vzniknou sázky jako outputy se `subject`? Sedí scope ze `strategy.md`? A hlavně: nezahodí brána poctivou sázku na `unverified-evidence`? Kontrola „URL bylo otevřené v tomhle běhu" je nejmladší a jediná, která stojí na hooku.
 2. **První běh PO nad main-panelem je ten důležitější**, protože poprvé posílá rozhodnutí na board **přes jádro**. Sleduj `actions[]` na outputu: úspěch nese packovo vlastní sloveso (`decide`, `draft`), neúspěch nese `error` a output zůstane `candidate` na další pokus.
