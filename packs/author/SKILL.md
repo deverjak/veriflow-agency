@@ -137,7 +137,7 @@ Everything here is read by the core. Anything the *agent* acts on belongs in `SK
 | `prompt` | `"required"` (it cannot work without an assignment), `"optional"` (a prompt narrows it), `"none"`. |
 | `needs` | The commands the agent is allowed to run, as **prefixes**: `"git"`, `"gh issue list"`, `"npx playwright test"`. Web access is a tool rule, not a command: `"WebSearch"`, `"WebFetch"`. Write and Edit are granted already — do not list them. |
 | `needsUnattended` | Consequential commands granted **only** when nobody could answer a prompt (a chain member, or `--unattended`). A command here keeps asking on a normal attended run. This is where `promote`, `decide`, anything hard to undo belongs. |
-| `minScore` | The gate's threshold, default 70. Raise it for a domain where a weak finding costs more than a missed one. |
+| `outputs.<type>.limit` | How many of this type one run may write. Left out, the core's backstop applies — high enough that it only catches a runaway. Name one where a person can only act on a few: the CEO pack allows three bets, because the founder can hold three. |
 | `budget` | `{"turns": 60, "minutes": 25}` — what a NORMAL run of this pack costs. Both optional. It is a declaration, not a limit: over it the run is flagged and carries on, and only at three times over is it stopped as a runaway. Guess from what the method actually does — a pack that reads one diff is not a pack that drives a browser — and expect to correct it once real runs exist. |
 | `sink` | The command that puts one gated finding on the board, with `{id}` and `{runDir}`. **Omit it entirely when there is no board.** |
 | `dimensions` | `[{"id": …, "title": …}]` from step 3. |
@@ -209,7 +209,7 @@ The brief is what this run is for. It carries precision per dimension **with cou
 |---|---|
 | dimensions — rephrase, split, merge, delete | `sink`, `needs`, `name` |
 | `evidence` on a dimension (which kinds of proof it stands on) | anything outside `.claude/skills/agency-<pack>/` |
-| `minScore`, `budget` | facts this run did not read in the repository or hear from the founder |
+| `budget` | facts this run did not read in the repository or hear from the founder |
 | *Project facts* — only facts you verified this run | any other pack |
 | the method's steps, its filters, its examples | the pack's subject: a reviewer does not become a QA engineer |
 

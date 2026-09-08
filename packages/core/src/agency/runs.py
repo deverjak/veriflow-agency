@@ -1335,8 +1335,14 @@ def write_context(run: Run, pack, target: dict, wt: Path,
                       if k in chain},
                    "upstreamFile": "evidence/upstream.json",
                    "handoffFile": "handoff.md"} if chain else None),
+        # `minScore` used to sit here and the gate enforced it. What replaced
+        # it is a fact rather than a bar: how many of each type this run may
+        # produce. Telling the agent beforehand is the difference between a
+        # pack writing eleven bets and having eight trimmed, and a pack
+        # writing the three it was asked for.
         "review": {"dimensions": [d.get("id") for d in pack.dimensions],
-                   "minScore": pack.min_score},
+                   "limits": {name: policy.max_per_run
+                              for name, policy in outputs.policies(pack).items()}},
         # The weaker delivery of the same thing. A runner whose launch line can
         # carry standing text (`claude`) gets this in front of the session and
         # never has to be told to open it; a runner that cannot (`codex`) gets

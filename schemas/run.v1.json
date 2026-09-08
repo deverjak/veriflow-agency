@@ -382,10 +382,6 @@
           "minimum": 0,
           "description": "dropped by the deterministic gate (no evidence, or no file:line)"
         },
-        "belowScore": {
-          "type": "integer",
-          "minimum": 0
-        },
         "duplicates": {
           "type": "integer",
           "minimum": 0
@@ -589,7 +585,7 @@
         "object",
         "null"
       ],
-      "description": "How many findings the gate dropped and why — schema, phantom-file, phantom-line, below-score. Written by ingest; without a breakdown by reason you cannot tell what a pack most often wastes on.",
+      "description": "How many findings the gate dropped and why — schema, phantom-file, phantom-line, unverified-evidence, over-cardinality. Written by ingest; without a breakdown by reason you cannot tell what a pack most often wastes on.",
       "additionalProperties": {
         "type": "integer",
         "minimum": 0

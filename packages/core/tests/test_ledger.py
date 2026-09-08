@@ -298,7 +298,7 @@ def test_a_verifier_accepting_produces_a_confirmed_finding(project, make_run):
         "import json; print(json.dumps({'item': 'PVTI_1'}))", encoding="utf-8")
     from conftest import install_pack
     install_pack(project, "review-graph",
-                 {"minScore": 80, "sink": "python sink.py --finding {id}"})
+                 {"sink": "python sink.py --finding {id}"})
 
     run = make_run(run_id=RUN_A, agent=CODEX)
     ingest.ingest(project, run)

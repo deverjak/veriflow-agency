@@ -18,7 +18,6 @@
     "python .claude/skills/agency-po/scripts/backlog.py promote",
     "python .claude/skills/agency-po/scripts/backlog.py decide"
   ],
-  "minScore": 75,
   "sink": "python .claude/skills/agency-po/scripts/backlog.py draft --finding {id} --run-dir {runDir}",
   "budget": { "turns": 60, "minutes": 25 },
   "dimensions": [

@@ -61,7 +61,7 @@ Read this section instead of a configuration file — there isn't one. These fac
 | `by` | how to sign a decision (`agency triage … --by <by>`, and pass to `scripts/backlog.py` implicitly through `--run-dir`) |
 | `knowledge` | path to the project's committed memory (`.agency/knowledge/`) — findings across runs and packs as markdown; start at `index.md` |
 | `pages` | the directory you write your own conclusions into (`.agency/knowledge/pages/po`) |
-| `review.dimensions` / `review.minScore` | which dimensions to run and the score threshold findings must clear |
+| `review.dimensions` / `review.limits` | which dimensions to run, and how many of each output type this run may write |
 | `target.headRefOid` | the commit findings are anchored to — **all 40 characters** |
 | `files[]` | what changed against the base branch. This is the work in flight |
 | `worktreeOwned` | `false` — you are running in the user's working copy |
@@ -242,7 +242,7 @@ The second output: what is wrong with the queue and the plan, not with one reque
 
 **Severity:** `blocker` — a committed deliverable will not land this milestone and nobody knows yet. `high` — effort is going into work no commitment covers, right now. `medium` — the queue is misleading. `low` — wording, tidiness, a duplicate nobody has hit yet.
 
-**Score** 0–100, must clear `review.minScore` (75).
+**Score** 0–100 — your own confidence. Nothing is dropped for being low; it is read as calibration, and it breaks the tie if you write more than `review.limits` allows.
 
 ```jsonc
 {

@@ -84,6 +84,20 @@ FINDING_POLICY = {
     },
 }
 
+#: The backstop ceiling on one type in one run, for a pack that names none.
+#:
+#: Not a working limit — a number a normal run never comes near. `baseline.md`
+#: measured the real thing: 51 findings across the whole period, 36 of them
+#: from the busiest pack, and the last structured run — four personas over one
+#: pull request — produced **three** new findings, dedup suppressing 80% of
+#: the rest. The fear of overproduction was refuted by that data; the
+#: bottleneck was, and is, human triage.
+#:
+#: So this catches a pack having a bad day, not a pack doing its job. A pack
+#: that genuinely needs a tighter bound says so itself — `bet` allows three,
+#: because the founder can hold three.
+RUNAWAY = 25
+
 POLARITIES = ("positive", "negative", "neutral")
 CARDINALITIES = ("one", "many")
 ACTIONS = ("none", "sink")
@@ -154,11 +168,18 @@ class TypePolicy:
     lifecycles: tuple[Lifecycle, ...] = ()
 
     @property
-    def max_per_run(self) -> int | None:
-        """How many of this type one run may produce, or `None` for no ceiling."""
+    def max_per_run(self) -> int:
+        """How many of this type one run may produce.
+
+        A pack that says nothing gets `RUNAWAY`, not "no ceiling". Until the
+        score threshold left the gate there was always something bounding a
+        run's output; a type that declared no ceiling would have inherited a
+        queue nothing limits at all, and a queue nobody can work through
+        stops producing the feedback every number here is computed from.
+        """
         if self.cardinality == "one":
             return 1
-        return self.limit
+        return self.limit or RUNAWAY
 
     @property
     def required_evidence(self) -> list[str]:

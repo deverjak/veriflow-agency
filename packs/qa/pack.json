@@ -11,7 +11,6 @@
     "agency triage", "agency note", "agency findings",
     "git", "npx playwright test", "curl", "gh project item-list"
   ],
-  "minScore": 70,
   "sink": "python .claude/skills/agency-po/scripts/backlog.py draft --finding {id} --run-dir {runDir}",
   "budget": { "turns": 80, "minutes": 35 },
   "dimensions": [

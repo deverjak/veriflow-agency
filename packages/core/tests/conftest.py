@@ -85,7 +85,7 @@ def install_pack(project: config.Project, name: str, manifest: dict | None = Non
     skill_dir.mkdir(parents=True, exist_ok=True)
     m = {"name": name, "title": name, "description": "test pack",
          "requires": [], "target": "pull-request", "worktree": True,
-         "graph": False, "prompt": "optional", "needs": [], "minScore": 70,
+         "graph": False, "prompt": "optional", "needs": [],
          "dimensions": [{"id": "correctness", "title": "Correctness"}]}
     m.update(manifest or {})
     write_json(skill_dir / "pack.json", m)
@@ -97,7 +97,7 @@ def install_pack(project: config.Project, name: str, manifest: dict | None = Non
 def project(repo: Path, tmp_path: Path) -> config.Project:
     p = config.discover(repo)
     assert p is not None
-    install_pack(p, "review-graph", {"minScore": 80})
+    install_pack(p, "review-graph")
     return p
 
 

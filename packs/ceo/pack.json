@@ -13,7 +13,6 @@
     "WebSearch", "WebFetch"
   ],
   "scope": "python .claude/skills/agency-ceo/scripts/scope.py",
-  "minScore": 80,
   "outputs": {
     "bet": {
       "cardinality": "many",

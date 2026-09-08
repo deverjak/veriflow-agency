@@ -11,7 +11,6 @@
     "agency triage", "agency note", "agency findings",
     "git", "gh issue view", "gh issue list"
   ],
-  "minScore": 85,
   "sink": "python .claude/skills/agency-po/scripts/backlog.py draft --finding {id} --run-dir {runDir}",
   "budget": { "turns": 60, "minutes": 30 },
   "dimensions": [

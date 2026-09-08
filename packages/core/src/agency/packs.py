@@ -93,8 +93,16 @@ class Pack:
         return list(self.manifest.get("dimensions") or [])
 
     @property
-    def min_score(self) -> int:
-        return int(self.manifest.get("minScore") or 70)
+    def superseded_keys(self) -> list[str]:
+        """Manifest keys that no longer do anything, for `agency doctor`.
+
+        `minScore` was the gate's threshold until 8 September 2026, and its
+        removal is silent in the worst way: a pack that says 85 keeps saying
+        it, keeps reading as a stricter pack, and nothing enforces a thing.
+        The key is not an error — the live packs are in other repositories and
+        history is not rewritten — but nobody should find out by measuring.
+        """
+        return [k for k in ("minScore",) if self.manifest.get(k) is not None]
 
     @property
     def budget(self) -> dict:

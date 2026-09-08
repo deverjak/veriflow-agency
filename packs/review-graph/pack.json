@@ -13,7 +13,6 @@
     "gh pr view", "gh pr diff", "gh pr comment", "gh issue view",
     "npx vitest", "npm test"
   ],
-  "minScore": 80,
   "sink": "python .claude/skills/agency-po/scripts/backlog.py draft --finding {id} --run-dir {runDir}",
   "budget": { "turns": 60, "minutes": 25 },
   "dimensions": [

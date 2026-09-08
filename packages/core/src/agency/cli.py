@@ -92,7 +92,6 @@ def cmd_packs(args) -> int:
             "dimensions": p.dimensions,
             "requires": p.requires,
             "run": p.run_policy,
-            "minScore": p.min_score,
             "scope": p.scope,
             "sink": p.sink,
         })
@@ -252,6 +251,15 @@ def cmd_doctor(args) -> int:
         # deduplicating and the pack's author would have no way to find out.
         for problem in outputs.errors(p):
             check(f"pack {p.name} outputs", False, problem, fatal=False)
+
+        # A key that reads like a rule and is not one. `minScore` was the
+        # gate's threshold until 8 September 2026; a pack still declaring 85
+        # looks stricter than one declaring 70 and neither is stricter at all.
+        for key in p.superseded_keys:
+            check(f"pack {p.name} {key}", False,
+                  f"`{key}` no longer does anything — a claim's bar is "
+                  f"`outputs.<type>.evidence`, volume is `outputs.<type>.limit`",
+                  fatal=False)
 
     fatal = [c for c in checks if not c["ok"] and c["fatal"]]
 
@@ -1477,7 +1485,7 @@ def cmd_ingest(args) -> int:
     if not run:
         raise SystemExit("No run found.")
 
-    data = ingest.ingest(project, run, min_score=args.min_score)
+    data = ingest.ingest(project, run)
     _emit(args, data, lambda: _ingest_report(run, data))
     return 1 if data.get("noOutput") else 0
 
@@ -2312,9 +2320,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(fn=cmd_graph)
 
     s = sub.add_parser("ingest", parents=[common],
-                       help="the gate: contract, existence, threshold, dedup — BEFORE a finding becomes a finding")
+                       help="the gate: contract, existence, evidence, dedup — BEFORE a finding becomes a finding")
     s.add_argument("--run", help="run id (default: the latest)")
-    s.add_argument("--min-score", type=int, help="overrides the pack's minScore")
     s.set_defaults(fn=cmd_ingest)
 
     s = sub.add_parser("knowledge", parents=[common],

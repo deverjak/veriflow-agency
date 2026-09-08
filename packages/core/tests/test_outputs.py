@@ -45,7 +45,7 @@ ANSWER = {"cardinality": "one", "dedup": False, "memory": "never",
 
 def _ceo(project, **types):
     """A pack that declares its own output types."""
-    return install_pack(project, "ceo", {"minScore": 0, "outputs": types or {"bet": BET}})
+    return install_pack(project, "ceo", {"outputs": types or {"bet": BET}})
 
 
 # ------------------------------------------------------------ the default
@@ -60,10 +60,29 @@ def test_a_pack_that_declares_nothing_keeps_the_policy_it_had(project):
     policy = outputs.policy_for(pack, None)
 
     assert policy.name == "finding"
-    assert policy.dedup is True and policy.max_per_run is None
+    # `max_per_run` is the one thing that is NOT what it was: a pack that
+    # names no ceiling gets the backstop, because since Step 8 nothing else
+    # bounds a run's output at all.
+    assert policy.dedup is True and policy.max_per_run == outputs.RUNAWAY
     assert policy.kinds == ("sent", "rejected")
     assert policy.polarity("sent") == "positive"
     assert policy.polarity("rejected") == "negative"
+
+
+def test_a_manifest_still_naming_minscore_is_told_it_does_nothing(project, capsys):
+    """The quietest way this step could have gone wrong. `minScore: 85` reads
+    as a stricter pack, keeps reading as one, and since Step 8 enforces
+    nothing — so `agency doctor` says so rather than leaving it to be found by
+    measuring."""
+    from agency import cli
+
+    install_pack(project, "legal", {"minScore": 85})
+    cli.main(["doctor", "--repo", str(project.root), "--json"])
+    checks = {c["name"]: c for c in json.loads(capsys.readouterr().out)["checks"]}
+
+    row = checks["pack legal minScore"]
+    assert row["ok"] is False and row["fatal"] is False
+    assert "outputs.<type>.evidence" in row["detail"]
 
 
 def test_the_finding_reasons_are_the_ones_the_board_uses():
@@ -485,7 +504,7 @@ def _bet(project, title: str, body: str, url: str = "https://www.kickk.cz/vyzvy"
 
 def _walked(project, make_run, title: str, body: str, url="https://www.kickk.cz/vyzvy"):
     """A run that fetched the page, kept it, and wrote the bet."""
-    install_pack(project, "ceo", {"minScore": 80, "outputs": {"bet": REAL_BET}})
+    install_pack(project, "ceo", {"outputs": {"bet": REAL_BET}})
     run = make_run(findings=[_bet(project, title, body, url)], pack="ceo")
     _kept_page(run, url)
     return run
@@ -520,7 +539,7 @@ def test_a_bet_needs_no_anchor_and_is_not_thereby_unchecked(project, make_run):
 def test_a_bet_citing_a_page_nobody_opened_is_refused(project, make_run):
     """The check that replaces the anchor. Without it, dropping the anchor
     would have left a type nothing could refuse."""
-    install_pack(project, "ceo", {"minScore": 80, "outputs": {"bet": REAL_BET}})
+    install_pack(project, "ceo", {"outputs": {"bet": REAL_BET}})
     run = make_run(findings=[_bet(project, BET_TITLE, BET_BODY)], pack="ceo")
     # The artifact is there; the page was never fetched.
     path = run.dir / "evidence" / "web" / "01.md"
@@ -539,7 +558,7 @@ def test_a_bet_citing_a_page_nobody_opened_is_refused(project, make_run):
 def test_a_finding_from_the_same_pack_still_must_point_at_source(project, make_run):
     """The policy is per type, not per pack. A CEO *finding* is a claim about
     the repository and keeps every check it had."""
-    install_pack(project, "ceo", {"minScore": 80, "outputs": {"bet": REAL_BET}})
+    install_pack(project, "ceo", {"outputs": {"bet": REAL_BET}})
     f = make_finding(project, "x", pack="ceo")
     del f["anchor"]
     run = make_run(findings=[f], pack="ceo")
@@ -619,7 +638,7 @@ def test_three_is_the_packs_own_ceiling(project, make_run):
     """“At most three live bets” was a sentence in `references/method.md` that
     nothing enforced. It is now `limit: 3` in the manifest, and the fourth is
     dropped with a reason rather than silently kept."""
-    install_pack(project, "ceo", {"minScore": 80, "outputs": {"bet": REAL_BET}})
+    install_pack(project, "ceo", {"outputs": {"bet": REAL_BET}})
     claims = [
         "Informační centra dovedou k produktu instruktory, ke kterým se přes vyhledávání nedostaneme.",
         "Newsletter udrží návštěvníky mezi sezónami a sníží závislost na sezónním provozu.",
@@ -635,6 +654,36 @@ def test_three_is_the_packs_own_ceiling(project, make_run):
 
     assert result["counts"]["kept"] == 3
     assert result["dropped"][0]["reason"] == "over-cardinality"
+
+
+def test_the_ceiling_keeps_the_best_scored_ones(project, make_run):
+    """The one thing `score` decides since Step 8, and it decides an ORDER.
+
+    It never says a bet is false — nothing a model gives itself can say that,
+    which is why `below-score` left the gate. It says *this one before that
+    one*, and that only matters when a run wrote more than anybody will read.
+    """
+    install_pack(project, "ceo", {"outputs": {"bet": REAL_BET}})
+    claims = [
+        ("Informační centra dovedou k produktu instruktory, ke kterým se přes vyhledávání nedostaneme.", 60),
+        ("Newsletter udrží návštěvníky mezi sezónami a sníží závislost na sezónním provozu.", 30),
+        ("Mobilní aplikace v obchodě otevře skupinu uživatelů, která web nepoužívá vůbec.", 95),
+        ("Partnerství s krajskou agenturou přinese data, která nikdo jiný nemá k dispozici.", 80),
+    ]
+    bets = []
+    for n, (claim, score) in enumerate(claims, start=1):
+        f = _bet(project, f"Sázka číslo {n} na distribuci produktu", claim)
+        f["score"] = score
+        bets.append(f)
+    run = make_run(findings=bets, pack="ceo")
+    _kept_page(run, "https://www.kickk.cz/vyzvy")
+
+    result = ingest.ingest(project, run)
+
+    assert result["counts"]["kept"] == 3
+    assert [f["score"] for f in run.findings()] == [60, 95, 80], \
+        "what survives is the best three; the order they were written in is kept"
+    assert result["dropped"][0]["title"].startswith("Sázka číslo 2")
 
 
 def test_the_real_ceo_manifest_says_all_of_this(project):

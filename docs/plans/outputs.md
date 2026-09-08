@@ -3,7 +3,7 @@
 **Datum:** 2026-09-06
 **Navazuje na:** [`agency-v1.md`](agency-v1.md) (pack je skill v projektu, žádná konfigurace), [`harness.md`](harness.md) (provenience tool callů, brána, metriky, revize packu), [`findings-ownership.md`](findings-ownership.md) (board je stav, lokál je brána a stopa), [`teams.md`](teams.md) (řetěz), [`shared-memory.md`](shared-memory.md) (paměť patří projektu)
 **Řeší:** jádro dnes umí evidovat jediný druh výstupu — nález s kotvou na soubor a řádek. PO a CEO produkují rozhodnutí, odpovědi, sázky a drafty, a **oba už jádro kvůli tomu obcházejí**. Plán zobecňuje mechanismy, které v jádru fungují (brána, dedup, sinky, paměť, metriky), tak aby přestaly předpokládat code-review nález — a nedělá z Agency univerzální platformu.
-**Stav k 8. 9. 2026:** Kroky 1–7 hotové a commitnuté (testy 479 zelených). Svislý řez `bet` prošel u Kroku 4 a **přeskládal zbytek plánu**; Krok 5 dal outputu `subject` a běhu `scope`, Krok 6 nahradil `sinks` akcemi a cestou opravil dvě místa, kde `agency ingest` nebyl idempotentní, Krok 7 zúžil fold událostí na jeden na lifecycle a oživil `requires`. CEO pack je **přenesený do repa Kvesteros** včetně `Ref:` řádků ve `strategy.md` — čeká na první ostrý běh. Další na řadě: Krok 8 (`score` přestane být branou).
+**Stav k 8. 9. 2026:** Kroky 1–8 hotové a commitnuté (testy 482 zelených). Svislý řez `bet` prošel u Kroku 4 a **přeskládal zbytek plánu**; Krok 5 dal outputu `subject` a běhu `scope`, Krok 6 nahradil `sinks` akcemi a cestou opravil dvě místa, kde `agency ingest` nebyl idempotentní, Krok 7 zúžil fold událostí na jeden na lifecycle a oživil `requires`, Krok 8 vyndal `score` z brány a nahradil ho stropem. CEO pack je **přenesený do repa Kvesteros** včetně `Ref:` řádků ve `strategy.md` — čeká na první ostrý běh. Další na řadě: Krok 9 (kotva jako `evidence.kind = code`) — nejdražší krok seznamu.
 
 **Nedělá:** nový generický agent framework. Žádný plugin systém metrik, žádný registr typů, žádná doménová znalost v jádru. Přibývají přesně dvě abstrakce — `TypePolicy` a `Run.scope`.
 
@@ -30,16 +30,16 @@ python .claude\skills\agency-ceo\scripts\scope.py   # tři živé sázky, ne pr�
 agency doctor --json                                # žádné „pack ceo scope" ani „pack ceo outputs"
 ```
 
-Stav k 8. 9. 2026: Kroky 1–7 hotové, 479 testů, CEO pack přenesený. **Další je Krok 8** (`score` přestane být branou).
+Stav k 8. 9. 2026: Kroky 1–8 hotové, 482 testů, CEO pack přenesený. **Další je Krok 9** (kotva jako `evidence.kind = code`).
 
-### První pohyb v Kroku 8
+### První pohyb v Kroku 9
 
-Krok 8 je **jediný krok plánu, který ruší kontrolu**, a proto se dělá v tomhle pořadí, ne opačném:
+Krok 9 je **nejdražší krok seznamu** — `anchor` má 58 výskytů v sedmi souborech jádra. Politika (`anchor: required | none`) je hotová z Kroku 4 a ověřená Krokem 8; co zbývá, je přestěhovat samotné pole.
 
-1. **Nejdřív náhrada, pak zrušení.** `cardinality` a `limit` v `TypePolicy` existují od Kroku 3 a `ingest` je čte — ověř to (`grep -n "max_per_run" packages/core/src/agency/ingest.py`), protože bez fungujícího stropu je zrušení `below-score` čistá regrese. `minScore` je dnes jediná pojistka na objem: `ceo` má 80, `po` 75, `review-graph` v testech 70.
-2. **Teprve pak vyndat `below-score` z brány.** Zmizí z `GATE_REASONS` a s ním `counts.belowScore` v `run.v1` — a to je přesně past §6.9: cokoliv, co mizí ze `run.json`, musí zmizet i ze schématu a ze statistik, které z něj čtou. `test_run_record.py` na to má hlídače.
-3. **`score` se dál zaznamenává** a `metrics` (`Tally.score`) z něj počítá `scoreAccepted` / `scoreRejected`. To se nesmí odstranit spolu s branou — je to jediné místo, kde se pozná pack, který dává všemu 90 a má precision 0.4.
-4. Otázka, kterou krok musí zodpovědět nahlas: **strop na typ a běh, nebo řazení podle score?** Plán připouští obojí (`cardinality` jako strop, „pošli N nejlepších" jako řazení). Strop je brána, řazení není — a `bet` už dnes má `limit: 3`, takže odpověď nejspíš existuje a jen se nepoužívá u ostatních typů.
+1. **Přečti si, co `anchor.py` dělá, než na něj sáhneš.** Čtyřvrstvé kotvení a drift zůstávají beze změny — mění se jen to, nad čím se volají. `test_anchor_metrics.py` a `test_replay.py` se u review nálezů nesmí pohnout ani o řádek; to je bod 4 přejímky a stojí na něm celý plán.
+2. **Správná formulace hranice** (a je v §Krok 9 napsaná): ne „CEO nemusí mít kotvu", ale „CEO nemusí mít **code** evidenci — musí mít jinou ověřitelnou". Kdykoliv se během kroku zdá, že něco nemusí mít důkaz, je to špatně přečtené.
+3. **`code` evidence s locatorem už existuje** od Kroku 2 a brána ji ověřuje (`test_gate.py::test_code_evidence_is_verified_at_the_commit`). Krok 9 tedy není nový mechanismus, je to migrace `anchor` → `evidence[kind=code].locator` a udržení všeho, co na `anchor` dnes visí: dedup (`subject_key` čte `anchor.symbol`), drift, `resolved` v `agency findings --json`, vlákna v extensionu.
+4. **Past, která se u Kroku 8 potvrdila** (§6.9 znovu): cokoliv, co ze `run.json` nebo `finding.v1` mizí, musí zmizet i ze schématu a ze všeho, co z něj čte. U Kroku 8 to byl jeden klíč (`belowScore`); tady je to pole s 58 výskyty.
 
 ### Co chybí — inventura k 8. 9. 2026
 
@@ -48,7 +48,7 @@ Krok 8 je **jediný krok plánu, který ruší kontrolu**, a proto se dělá v t
 | krok | odhad | co je na tom podstatné |
 |---|---|---|
 | ~~**7** — feedback jako události, projekce `state`~~ | ~~1,5 dne~~ · **hotovo za půl** | past 5 nenastala — fold byl jeden, jen moc hrubý. Události v plném tvaru dodal už Krok 4 |
-| **8** — `score` přestane být branou | ~0,5 dne | `minScore` je dnes **jediná pojistka na objem**. Náhrada (`cardinality`) v jádru od Kroku 3 je, takže krok je hlavně o tom nezrušit bránu dřív, než se ta náhrada u packů skutečně nastaví — `ceo` má 80, `po` 75 |
+| ~~**8** — `score` přestane být branou~~ | ~~0,5 dne~~ · **hotovo** | náhrada existovala, ale platila jen packu, který si ji vyžádal — a to byl jeden ze sedmi. Strop dostal backstop (25, změřený z `baseline.md`) a score se z brány přesunulo do řazení nad stropem |
 | **9** — kotva jako `evidence.kind = code` | ~2 dny | **nejdražší krok seznamu.** Politika kotvy je hotová z Kroku 4, ale samotné pole má 58 výskytů v sedmi souborech; `anchor.py` (čtyřvrstvé kotvení, drift) zůstává a jen se volá nad code evidencí |
 | **10** — migrace PO a CEO na jádro | ~1,5 dne | **přejímka celého plánu.** Ne „umí to jádro", ale „přestaly ho packy obcházet?" Mechanismus pro PO stojí od Kroku 6, chybí `decision` a `ticket_draft` jako typy a `backlog.py` v roli vykonavatele, ne obchvatu |
 | **11** — rename `finding` → `output` | ~0,5 dne | úplně nakonec, a při tom uklidit `dispatchErrors` (od Kroku 6 odvoditelné z `actions`) |
@@ -59,6 +59,7 @@ Krok 8 je **jediný krok plánu, který ruší kontrolu**, a proto se dělá v t
 * ~~**`decisions()` drží jedno rozhodnutí na output**~~ — vyřešeno Krokem 7. `verdicts()` drží jednu odpověď **na lifecycle**; `decisions()` zůstal vedle ní schválně, protože „rozhodl o tom vůbec někdo?" je jiná otázka než „jak dopadla otázka X".
 * **`by` nese to, co plán chtěl po `source`** (Krok 7). Druhé pole s touž informací by znamenalo dvě místa, která si můžou odporovat. Kdyby se `source` někdy přidával, ať je to proto, že `by` na něco nestačí — ne proto, že to plán kdysi napsal.
 * **`sinks` v `finding.v1` zůstává** jako superseded (Krok 6). Nemaže se — committed historie ho má a čtenáři z něj padají zpátky. To platí i po Kroku 11.
+* **`minScore` v manifestech živých packů** (Krok 8). Klíč nedělá nic, doctor to řekne, a smazat ho z cizích repozitářů odsud nejde. Patří ke Kroku 10 spolu se zbytkem migrace.
 
 **Co může říct jen ostrý provoz, ne test:**
 
@@ -293,7 +294,7 @@ Architektonický test každé další featury: *potřebuje to opravdu každý pa
 | `unproven` + `tool-calls.jsonl` | ověří citovaný **příkaz** | beze změny v logice, rozšíří se o non-shell tooly (Krok 1) |
 | `_exists_at_commit` | `anchor.file` @ commit | `evidence.kind = code` (Krok 9) |
 | `weak-evidence` (`required_evidence`) | dimenze deklaruje druhy důkazů | **předloha celého plánu** — přesune se z dimenze na typ (Krok 3) |
-| `below-score` | `score < minScore` → zahodit | zaniká jako brána, `score` zůstává jako kalibrace (Krok 8) |
+| `below-score` | `score < minScore` → zahodit | hotovo (Krok 8) — zanikl jako brána, `score` zůstalo jako kalibrace a nově jako pořadí u stropu |
 | `dedup` | otisk z `pack`+`type`+`dimension`+`subject_key`+podpis `body` | hotovo (Kroky 3 a 5) |
 | `knowledge.here` | `subject ∩ run.scope` | hotovo (Krok 5) |
 | `sinks: {prComment, githubProjectItem}` | `actions[]` s výsledkem, časem a jménem od packu | hotovo (Krok 6) |
@@ -550,17 +551,30 @@ Vedle ní `read_events()` (jediné místo, které log čte) a `decisions()` pře
 
 ---
 
-### Krok 8 — `score` přestane být branou, objem se řídí jinak (~0,5 dne)
+### Krok 8 — `score` přestane být branou, objem se řídí jinak (~0,5 dne) — **hotovo**
 
-**Co se mění:** `below-score` z brány mizí. `score` se **dál zaznamenává** — [`metrics`](../../packages/core/src/agency/metrics.py) (59) z něj počítá kalibraci a je to jediné místo, kde se pozná pack, který dává všemu 90 a má precision 0.4.
+**Co se změnilo:** `below-score` z brány zmizel a s ním `counts.belowScore` z `run.v1`, `--min-score` z CLI, `minScore` z `context.json` i z `agency packs --json`. `score` se **dál zaznamenává** — [`metrics`](../../packages/core/src/agency/metrics.py) z něj počítá `scoreAccepted` / `scoreRejected` a je to jediné místo, kde se pozná pack, který dává všemu 90 a má precision 0.4.
 
 > **Score není signál pravdivosti, je to signál kalibrace. Vyšší riziko musí zvyšovat nároky na evidenci, ne číslo, které si model přidělí sám.**
 
-**Ale:** `minScore` je dnes **jediná pojistka na objem** — cap na počet outputů v jádru nikde není. Bez náhrady může fronta narůst tak, že se míň rozhoduje, a tím klesne kvalita samotného učení. Náhrada nesmí tvrdit pravdivost: `cardinality` v `TypePolicy` jako strop na typ a běh, případně „pošli N nejlepších podle score" jako řazení, ne jako brána.
+**Otázka, kterou plán nechal otevřenou — strop, nebo řazení? — má odpověď: obojí, a každé na jiné vrstvě.** Strop rozhoduje *kolik*, score rozhoduje *které*:
 
-**Testy:** `test_gate.py` — nález se score 40 a dobrou evidencí projde; jedenáctý output typu se stropem 10 neprojde a je to vidět v `dropped`.
+* **`outputs.<type>.limit` je strop** na typ a běh. Existoval od Kroku 3, ale platil jen tomu, kdo si ho vyžádal — a `outputs` blok má **jediný ze sedmi packů** (`ceo`). Šest ostatních by po zrušení `minScore` nemělo pojistku na objem žádnou. Proto `TypePolicy.max_per_run` vrací `outputs.RUNAWAY` (25) tam, kde pack nic neřekl.
+* **Score se uplatní teprve u stropu**, a jen jako pořadí: přes strop přežije N nejlepších, shodu rozhodne pořadí, v jakém je pack napsal. Score nikdy neřekne „tohle je nepravda" — to o sobě žádné číslo od modelu říct nemůže. Řekne „tohle dřív než tamto", a to má smysl jen tam, kde běh napsal víc, než kdo přečte.
 
-**Hotovo, když:** `agency ingest` nezahodí nic kvůli score a fronta přesto neroste přes strop.
+**Číslo 25 není odhad, je změřené.** [`baseline.md`](../baseline.md) §1: obava z „bambiliónu nálezů" **daty nesedí** — poslední strukturovaný běh se čtyřmi personami dal **tři** nové nálezy a dvanáct shod (dedup potlačuje 80 % objemu), za celé měřené období vzniklo 51 nálezů a nejsilnější producent jich měl 36. *Úzké hrdlo je lidský triage, ne generování.* Strop je tedy zhruba osminásobek normálního běhu: chytí pack, který má špatný den, ne pack, který dělá svou práci.
+
+**Tři věci, které vyšly jinak, než plán čekal:**
+
+1. **Strop se přesunul za bránu, ne do ní.** Dřív se kontroloval v cyklu a padal *jedenáctý v pořadí příchodu*. Aby mohl rozhodovat score, musí se trimovat až nad tím, co branou prošlo — `_under_ceiling()` je druhý průchod. Vlastnost, kterou původní komentář hájil (*„nepoctivý jedenáctý se má zahodit jako nepoctivý, ne jako jedenáctý"*), tím platí dál a nově i pro řazení.
+2. **`minScore` se nedá jen tak smazat.** Živé packy bydlí v cizích repozitářích a `minScore: 85` v nich zůstane — a bude vypadat jako přísnější pack, kterým nebude. Klíč proto není chyba (manifest nemá schéma), ale `agency doctor` u něj řekne, že nedělá nic. Táž migrace jako u `sinks` v Kroku 6.
+3. **Agent se o stropu dozví předem.** Na místě, kde v `context.json` bylo `review.minScore`, je teď `review.limits` — mapa typ → strop. Rozdíl je mezi packem, který napíše jedenáct sázek a osm mu někdo ořízne, a packem, který napíše ty tři, o které byl požádán.
+
+**Co si tenhle krok vyžádal mimo jádro:** `minScore` zmizel z pěti referenčních `pack.json` a z dvanácti vět v sedmi `SKILL.md`, které o prahu mluvily jako o pravidle. **Živé packy to nemají** — CEO v repu Kvesteros pořád nese `minScore: 80` a větu o něm ve `SKILL.md`. Doctor to tam ohlásí; opravit se to má při Kroku 10.
+
+**Testy:** 3 nové, 482 celkem. `test_gate.py` — nález se score 40 a dobrou evidencí projde a score se pořád zapisuje; pack bez deklarovaného stropu ho přesto má (26 nálezů → 25 a jeden `over-cardinality` v `gatedBy`). `test_outputs.py` — přes strop přežijí nejlíp ohodnocené a v pořadí, v jakém byly napsané; manifest, který pořád jmenuje `minScore`, dostane od doktora větu, že to nic nedělá.
+
+**Hotovo, když:** ~~`agency ingest` nezahodí nic kvůli score a fronta přesto neroste přes strop.~~ Platí obojí.
 
 ---
 
@@ -629,7 +643,7 @@ To je jediná ochrana před frameworkem, který půl roku vypadá, že se učí.
 3. **Hrubý `subject`** (Krok 5). Vypne pojistku v dedupu a začne slučovat různá tvrzení.
 4. **Nechat `scope` psát agenta** (§3.2). Nekontrolovatelné, gameable, a stejně pozdě.
 5. ~~**Zapomenout na projekci `state`**~~ (Krok 7) — nenastalo, fold byl od začátku jeden. Past, která nastala místo toho: **podmínka, která zahodí odpověď.** `requires` říká, které otázky jsou otevřené; kdyby rozhodovalo i o tom, které odpovědi se počítají, sázka označená `successful` bez zapsaného `selected` by zmizela z metrik úplně. Chytil to test, ne úvaha.
-6. **Zrušit `minScore` bez náhrady objemu** (Krok 8). Fronta naroste, rozhodne se míň, precision přestane být signál.
+6. ~~**Zrušit `minScore` bez náhrady objemu**~~ (Krok 8) — nestalo se, ale málem jinudy: náhrada v jádru **byla** a platila jen packu, který si ji vyžádal. Šest ze sedmi packů `outputs` blok nemají. Past se tedy neschovává v tom, že náhrada chybí, ale v tom, že existuje a nikoho nechrání.
 7. **Postavit `register` jako output type** (§0.1). Zdvojí mechanismus, který v `knowledge/pages/` funguje.
 8. **Ověřovat evidenci proti živému světu** (§3.1). Zabije replay a determinismus.
 9. **Past §0.3 z [`harness.md`](harness.md) znovu:** cokoliv nového v `run.json` musí zároveň do `run.v1` a do statistik, které z něj čtou. `scope` z ní nakonec vyklouzl tím, že do záznamu nešel vůbec (Krok 5, důvod 2) — ale statistika `scopeItems` ano, a ta musela do `MEMORY_STATS`, jinak by ji `collect_evidence` u grafového běhu vložila do bloku `graph`, který má v `run.v1` zavřený seznam klíčů. Přesně ta chyba, kterou tahle past popisuje, jen o patro níž.

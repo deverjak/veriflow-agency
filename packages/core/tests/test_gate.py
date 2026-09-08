@@ -64,14 +64,55 @@ def test_a_finding_with_no_evidence_is_dropped(project, make_run):
     assert result["dropped"][0]["reason"] == "schema"
 
 
-def test_a_finding_below_the_score_threshold_is_dropped(project, make_run):
+def test_a_low_score_no_longer_keeps_a_finding_out(project, make_run):
+    """The gate asks whether a claim CAN be true, and a score is not an answer
+    to that — it is a number the model gave itself. A well-evidenced finding
+    scored 40 is a finding its author was honest about, and dropping it taught
+    every pack that the way through is to score higher."""
     run = make_run()
     write_json(run.findings_path, [make_finding(project, run.id, score=40)])
 
     result = ingest.ingest(project, run)
 
-    assert result["dropped"][0]["reason"] == "below-score"
-    assert run.record()["counts"]["belowScore"] == 1
+    assert result["counts"]["kept"] == 1
+    assert result["dropped"] == []
+    # Still recorded, because calibration is what it was always good for:
+    # a pack that scores everything 90 and has precision 0.4 shows up nowhere
+    # else.
+    assert run.findings()[0]["score"] == 40
+
+
+def test_a_pack_that_names_no_ceiling_still_has_one(project, make_run):
+    """What replaced `minScore` as the one thing bounding a run's output.
+
+    Six of the seven packs declare no `outputs` block at all, so a ceiling
+    that only existed when a pack asked for one would have left them with a
+    queue nothing limits — and a queue nobody can work through stops producing
+    the feedback every number in `agency metrics` is computed from.
+
+    The backstop is deliberately far above a real run: `baseline.md` measured
+    three new findings from a four-persona run, and 51 across the whole period.
+    It catches a pack having a bad day, not a pack doing its job.
+    """
+    from agency import outputs
+
+    over = outputs.RUNAWAY + 1
+    # Each in its own function, or they would be duplicates of one another —
+    # the claim is the same claim, and dedup is right about that.
+    run = make_run(findings=[
+        make_finding(project, "x", title=f"Finding number {n} in a very long run",
+                     anchor={"symbol": {"name": f"handler{n}", "range": [1, 4]}})
+        for n in range(over)
+    ])
+
+    result = ingest.ingest(project, run)
+
+    assert result["counts"]["kept"] == outputs.RUNAWAY
+    assert len(result["dropped"]) == 1
+    assert result["dropped"][0]["reason"] == "over-cardinality"
+    # Equal scores, so the ceiling falls where the pack stopped writing.
+    assert result["dropped"][0]["title"].startswith(f"Finding number {over - 1}")
+    assert run.record()["gatedBy"] == {"over-cardinality": 1}
 
 
 def test_the_gate_is_idempotent(project, make_run):
@@ -386,7 +427,7 @@ def test_a_dimension_that_stands_on_the_graph_refuses_a_quotation(project, make_
     """The schema weighs shape, not strength: `finding.v1` wants one piece of
     evidence out of six equal kinds. So `reuse` — which stands entirely on the
     call graph — used to pass on a sentence from the README."""
-    install_pack(project, "review-graph", {"minScore": 80, "dimensions": [
+    install_pack(project, "review-graph", {"dimensions": [
         {"id": "reuse", "title": "Code nothing points at", "evidence": ["graph"]}]})
     f = make_finding(project, "x", dimension="reuse")
     f["evidence"] = [{"kind": "doc", "detail": "the README says it is unused",
@@ -401,7 +442,7 @@ def test_a_dimension_that_stands_on_the_graph_refuses_a_quotation(project, make_
 
 
 def test_the_same_dimension_passes_on_the_proof_it_asked_for(project, make_run):
-    install_pack(project, "review-graph", {"minScore": 80, "dimensions": [
+    install_pack(project, "review-graph", {"dimensions": [
         {"id": "reuse", "title": "Code nothing points at", "evidence": ["graph"]}]})
     f = make_finding(project, "x", dimension="reuse")
     f["evidence"] = [{"kind": "graph", "detail": "no caller in the graph",

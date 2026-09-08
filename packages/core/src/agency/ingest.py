@@ -34,13 +34,12 @@ GATE_REASONS = {
     "schema": "does not match finding.v1",
     "phantom-file": "the file does not exist at the analysed commit",
     "phantom-line": "the line is past the end of the file as of the analysis",
-    "below-score": "score below the project threshold",
     "unproven-source": "evidence cites a command that never ran in this run",
     "weak-evidence": "not the kind of proof this dimension stands or falls on",
     "unverified-evidence": "the evidence locator points at something this run did not produce",
     "unknown-type": "an output of a type this pack does not declare",
     "missing-anchor": "a type whose claims must point at source, pointing at nothing",
-    "over-cardinality": "more of this type in one run than the pack allows",
+    "over-cardinality": "more of this type in one run than the ceiling allows",
 }
 
 #: What makes a `source` a claim about something that RAN, rather than a
@@ -363,10 +362,16 @@ def _upstream_pack(project: Project, run: Run):
         return None
 
 
-def gate(project: Project, run: Run, findings: list[dict], min_score: int | None,
+def gate(project: Project, run: Run, findings: list[dict],
          evidence: dict[str, list[str]] | None = None,
          pack=None) -> tuple[list[dict], list[dict]]:
-    """Splits findings into those that pass and those dropped, with a reason."""
+    """Splits findings into those that pass and those dropped, with a reason.
+
+    Every check here asks the same question — CAN this be true — and none of
+    them asks how good it is. Until 8 September 2026 one did: a score below
+    the pack's `minScore` was dropped, which let a number the model gave
+    itself decide what a person got to see.
+    """
     kept: list[dict] = []
     dropped: list[dict] = []
     errs = _schema_errors(findings)
@@ -374,10 +379,6 @@ def gate(project: Project, run: Run, findings: list[dict], min_score: int | None
     # whole check is skipped — never drop a finding because a hook did not run.
     ran = commands_run(run)
     urls = urls_fetched(run)
-    # How many of each type have already passed. The ceiling is the pack's own
-    # (`outputs.<type>.cardinality` / `limit`) — a CEO answer is one per run
-    # and a second one is not a second answer, it is a run that lost the plot.
-    seen_of_type: dict[str, int] = {}
 
     for i, f in enumerate(findings):
         def drop(reason: str, detail: str = "") -> None:
@@ -450,25 +451,51 @@ def gate(project: Project, run: Run, findings: list[dict], min_score: int | None
             drop("unverified-evidence", broken)
             continue
 
-        score = f.get("score")
-        if min_score is not None and isinstance(score, int) and score < min_score:
-            drop("below-score", f"score {score} < {min_score}")
-            continue
-
-        # Last, and after everything that judges the output itself: a ceiling
-        # is not a statement about this output, it is about how many came
-        # before it. Dropping the eleventh before checking whether it is
-        # honest would hide a broken pack behind a full quota.
-        ceiling = policy.max_per_run
-        if ceiling is not None and seen_of_type.get(type_name, 0) >= ceiling:
-            drop("over-cardinality",
-                 f"{type_name}: {ceiling} per run is this pack's own ceiling")
-            continue
-        seen_of_type[type_name] = seen_of_type.get(type_name, 0) + 1
-
         kept.append(f)
 
-    return kept, dropped
+    return _under_ceiling(kept, dropped, pack)
+
+
+def _under_ceiling(kept: list[dict], dropped: list[dict],
+                   pack) -> tuple[list[dict], list[dict]]:
+    """Trims each type to its ceiling, keeping the best-scored ones.
+
+    Run last, and over everything that survived, because a ceiling is not a
+    statement about one output — it is about how many came with it. Judging
+    the eleventh against a full quota before asking whether it is honest would
+    hide a broken pack behind its own volume.
+
+    **This is the one thing `score` decides, and it decides an ORDER, not a
+    truth.** A score never says a finding is false — nothing a model gives
+    itself can. It says *this one before that one*, and that only matters at
+    all when a run produced more than anybody is going to read. A pack that
+    scores everything 90 loses nothing by it: the ceiling still holds, and the
+    tie falls back to the order the pack itself wrote them in, which is as
+    good an answer as it gave.
+    """
+    counted: dict[str, list[tuple[int, dict]]] = {}
+    for i, f in enumerate(kept):
+        counted.setdefault(str(f.get("type") or outputs.DEFAULT_TYPE), []).append((i, f))
+
+    cut: set[int] = set()
+    for type_name, rows in counted.items():
+        ceiling = outputs.policy_for(pack, type_name).max_per_run
+        if len(rows) <= ceiling:
+            continue
+        # Highest score first; the pack's own order breaks a tie, and a
+        # finding with no score at all sorts last rather than crashing.
+        ranked = sorted(rows, key=lambda r: (-(r[1].get("score") or 0), r[0]))
+        for i, f in ranked[ceiling:]:
+            cut.add(i)
+            dropped.append({
+                "id": f.get("id"), "title": f.get("title"),
+                "reason": "over-cardinality",
+                "detail": f"{type_name}: {len(rows)} in one run, "
+                          f"{ceiling} is the ceiling — this one scored below the rest",
+                "finding": f,
+            })
+
+    return [f for i, f in enumerate(kept) if i not in cut], dropped
 
 
 #: How many times one run may be sent back to fix its own output. Two, and
@@ -577,9 +604,9 @@ def _held_upstream_runs(project: Project, chain: dict) -> list[Run]:
     return found
 
 
-def ingest(project: Project, run: Run, min_score: int | None = None) -> dict:
-    """The whole gate: contract → existence → threshold → dedup → chain
-    handoff → dispatch → write.
+def ingest(project: Project, run: Run) -> dict:
+    """The whole gate: contract → existence → evidence → ceiling → dedup →
+    chain handoff → dispatch → write.
 
     Idempotent. A second run over the same run gives the same result, because it
     always starts from `findings.raw.json` when that exists, and a finding
@@ -641,12 +668,10 @@ def ingest(project: Project, run: Run, min_score: int | None = None) -> dict:
         pack = packs.load(pack_name, project)
     except SystemExit:
         # The pack no longer exists (renamed, removed) — the gate still has to
-        # run, just without a threshold or per-dimension evidence to check.
+        # run, just without per-dimension evidence or its own ceilings.
         pack = None
-    if min_score is None and pack:
-        min_score = pack.min_score
 
-    kept, dropped = gate(project, run, findings, min_score,
+    kept, dropped = gate(project, run, findings,
                          evidence=required_evidence(pack), pack=pack)
     for f in kept:
         f["fingerprint"] = dedup.fingerprint(f)
@@ -733,7 +758,6 @@ def ingest(project: Project, run: Run, min_score: int | None = None) -> dict:
     rec["counts"] = {
         "raw": raw_count,
         "gated": len(dropped),
-        "belowScore": by_reason.get("below-score", 0),
         "duplicates": len(dups),
         "kept": len([f for f in kept if f.get("state") != "duplicate"]),
         "sent": sent,
