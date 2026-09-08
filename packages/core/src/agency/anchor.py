@@ -11,6 +11,13 @@ they all fail, the finding is degraded, not lost.
 Both fixes that came out of the spike are here:
   layer 1 asks whether the FILE is unchanged, not the repository,
   layer 2 looks for a block, not a single line.
+
+Since 8 September 2026 the four layers are carried by a `code` evidence item
+rather than by an `anchor` field of its own. Nothing about the layers changed —
+what changed is that pointing at source stopped being a property every output
+has and became one kind of proof among five, which a type asks for or does not.
+`of()` and `places()` are where both shapes are read; everything below them
+sees one dict either way.
 """
 
 from __future__ import annotations
@@ -33,6 +40,51 @@ class Resolution:
     @property
     def ok(self) -> bool:
         return self.line is not None
+
+
+def of(finding: dict) -> dict:
+    """Where in the source this output sits — `{}` when it sits nowhere.
+
+    Two shapes, and both are read for good. An output written since Step 9
+    says it with a `code` evidence item whose locator carries the same four
+    layers; every output written before it — which is all of committed run
+    history — carries the `anchor` field. History is not rewritten, so the
+    older shape is a fallback and not a deprecation.
+
+    Code evidence wins when an output has both: a pack that writes it is a
+    pack that knows about the newer shape, and the locator is where it put
+    the layers. `places()` still checks the other one.
+    """
+    for item in finding.get("evidence") or []:
+        if (item or {}).get("kind") != "code":
+            continue
+        loc = item.get("locator") or {}
+        if loc.get("file"):
+            return loc
+    a = finding.get("anchor")
+    return a if isinstance(a, dict) else {}
+
+
+def places(finding: dict) -> list[dict]:
+    """Every place in the source this output points at.
+
+    A different question from `of()`, which is why it is a different function.
+    `of()` answers "where does this sit" and one output sits in one place — it
+    is what dedup, drift and the queue read. This answers "what has the gate
+    got to check", and a finding may cite three pieces of code, of which any
+    one can be invented.
+    """
+    out = []
+    for item in finding.get("evidence") or []:
+        if (item or {}).get("kind") != "code":
+            continue
+        loc = item.get("locator") or {}
+        if loc.get("file"):
+            out.append(loc)
+    a = finding.get("anchor")
+    if isinstance(a, dict) and a.get("file"):
+        out.append(a)
+    return out
 
 
 def distinctive_line(anchor: dict) -> tuple[str, int] | None:

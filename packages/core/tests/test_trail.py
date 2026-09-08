@@ -13,6 +13,8 @@ import shutil
 
 from agency import ingest, knowledge, runs
 
+from conftest import as_code_evidence, make_finding
+
 RUN_A = "01AAAAAAAAAAAAAAAAAAAAAAAA"
 RUN_B = "01BBBBBBBBBBBBBBBBBBBBBBBB"
 
@@ -47,6 +49,22 @@ def test_a_broken_line_is_skipped_not_fatal(project, make_run):
 
 def test_reading_an_empty_trail_is_not_an_error(project):
     assert runs.read_trail(project) == {}
+
+
+def test_the_trail_keeps_the_place_of_a_finding_that_said_it_the_new_way(project, make_run):
+    """The trail outlives the run directory, and both dedup and the
+    do-not-report brief read the place out of the row rather than out of the
+    finding. A finding carrying its anchor as `code` evidence would have left
+    that row empty — and a project that had run `agency cleanup` would have
+    started reporting the thing it rejected all over again."""
+    run = make_run(findings=[as_code_evidence(make_finding(project, "x"))])
+    fid = run.findings()[0]["id"]
+
+    runs.reject(project, run, fid, reason="by-design")
+
+    row = runs.read_trail(project)[fid]
+    assert row["anchor"]["file"] == "src/auth.ts"
+    assert row["anchor"]["symbol"]["name"] == "getUser"
 
 
 # ------------------------------------------------------------------ dedup

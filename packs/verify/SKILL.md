@@ -53,13 +53,13 @@ That is the gap this pack exists to close. It is not a reviewer of pull requests
 
 ## 1. Read the brief, then put it down
 
-`evidence/upstream.json` has every finding: `id`, `title`, `body`, `dimension`, `severity`, `anchor` (file, line, endLine, commit, snippet, symbol) and `evidence[]`.
+`evidence/upstream.json` has every finding: `id`, `title`, `body`, `dimension`, `severity`, `type`, `subject`, the place it sits flattened to `file`, `line` and `symbol`, and — in the run's own `findings.json` — `evidence[]`, where a `code` item carries the full locator.
 
 Read it once, to know what you are being asked about and where to look. Then **work from the code**, not from that file. The order matters: what you are testing is whether the code supports the claim, and someone who re-reads the claim while looking at the code will find it supported.
 
 ## 2. Per finding, in this order
 
-**a. The anchor.** Open `anchor.file` at `anchor.line` in the worktree — it stands on `target.headRefOid`, so what you see is what the finding saw. Does the code there resemble `anchor.snippet`? If the file, the line or the symbol is not there, the finding fails on its own terms.
+**a. The place.** Open `file` at `line` in the worktree — it stands on `target.headRefOid`, so what you see is what the finding saw. Does the code there resemble the `snippet` in the finding's `code` evidence? If the file, the line or the symbol is not there, the finding fails on its own terms.
 
 **b. The claim, derived again.** Read the function and its callers. Say in your own words what happens. Compare that to `body` afterwards, not while you read. `agency graph impact --files <file>` gives you the callers — the same graph the first specialist had.
 
@@ -105,7 +105,7 @@ Some runs end at a wall rather than at an answer: the commit is not in the clone
 # Blocked
 
 **What I could not do:** judge any of the 7 findings from review-graph.
-**Why:** the worktree is on a commit where `src/` does not exist — `git show` fails for every anchor.
+**Why:** the worktree is on a commit where `src/` does not exist — `git show` fails for every place a finding points at.
 **What would unblock me:** a worktree built from `target.headRefOid` rather than the default branch.
 **What I did instead:** nothing — every dimension needs the code.
 ```

@@ -205,14 +205,14 @@ rg -n "obchodní podmínky|terms|souhlas|consent" --glob '!node_modules'
 code-review-graph search "<name>" --repo <project.root>   # when the project has a graph
 ```
 
-`anchor` requires `file` + `line` + `commit`:
+**Where a finding sits is evidence, not a field of its own:** a `code` item whose `locator` requires `file` + `line` + `commit`:
 
 - **`file`** — POSIX path relative to the project root.
 - **`commit`** — `target.headRefOid`, **all 40 characters**.
 - **`snippet`** — the whole `line..endLine` block, so the finding survives the file moving.
-- **`symbol`** — fill it from the graph when the anchor is code, not by guessing. Markdown documents have no symbols; leave it null.
+- **`symbol`** — fill it from the graph when the place is code, not by guessing. Markdown documents have no symbols; leave it null.
 
-A finding without an anchor does not pass the gate in `agency ingest`, so it would be work thrown away.
+A finding that points nowhere does not pass the gate in `agency ingest`, so it would be work thrown away. The `doc` item carrying the provision is a separate requirement and neither replaces the other: one says where the code is wrong, the other says which rule makes it wrong.
 
 ## 7. Write `findings.json`
 
@@ -239,16 +239,17 @@ The `evidence.kind` enum is fixed and shared with the other packs, so map onto i
   "severity": "blocker",
   "title": "Změna podmínek pro lektory nemá 15denní lhůtu ani trvalý nosič",
   "body": "VOP pro lektory si vyhrazují změnu s účinností dnem zveřejnění. Podle čl. 3 odst. 2 nařízení (EU) 2019/1150 musí být navržená změna oznámena na trvalém nosiči a nesmí nabýt účinnosti dřív než za 15 dní; podle čl. 3 odst. 3 je změna provedená v rozporu s tím **neplatná**. Nejlevnější náprava: do změnové doložky doplnit oznámení e-mailem a účinnost nejdřív patnáctý den po odeslání, s právem ukončit smlouvu před uplynutím lhůty.",
-  "anchor": {
-    "file": "src/app/[locale]/terms-of-use-for-instructors/page.tsx",
-    "line": 88,
-    "endLine": 94,
-    "commit": "<all 40 characters of target.headRefOid>",
-    "snippet": "<text of the 88..94 block>",
-    "symbol": null,
-    "body": null
-  },
   "evidence": [
+    { "kind": "code", "detail": "změnová doložka VOP pro lektory, řádky 88–94",
+      "locator": {
+        "file": "src/app/[locale]/terms-of-use-for-instructors/page.tsx",
+        "line": 88,
+        "endLine": 94,
+        "commit": "<all 40 characters of target.headRefOid>",
+        "snippet": "<text of the 88..94 block>",
+        "symbol": null,
+        "body": null
+      } },
     { "kind": "doc", "detail": "čl. 3 odst. 2 a 3 nařízení (EU) 2019/1150 — oznámení na trvalém nosiči, lhůta nejméně 15 dní, změny v rozporu jsou neplatné", "source": "https://eur-lex.europa.eu/legal-content/CS/TXT/?uri=CELEX:32019R1150" },
     { "kind": "doc", "detail": "VOP pro lektory: „Změny nabývají účinnosti dnem zveřejnění.“", "source": "src/app/[locale]/terms-of-use-for-instructors/page.tsx#L88" },
     { "kind": "test-gap", "detail": "notify-change route neposílá lektorům žádnou notifikaci o změně podmínek", "source": "src/app/api/internal/legal/notify-change/" }

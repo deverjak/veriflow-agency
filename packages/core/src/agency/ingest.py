@@ -22,7 +22,7 @@ import json
 from pathlib import Path
 from urllib.parse import urlparse
 
-from . import dedup, knowledge, outputs, proc
+from . import anchor, dedup, knowledge, outputs, proc
 from . import runs as _runs
 from .config import Project
 from .runs import Run, load_runs, now
@@ -210,6 +210,11 @@ def unverified(project: Project, run: Run, finding: dict,
 
     Locators are checked, `source` is not: an item with no locator is the
     older shape and keeps passing exactly as it did.
+
+    `code` is missing from the list on purpose: since Step 9 a code locator is
+    where an output points at source, and the gate checks that by its own
+    name, above. Verifying it twice would have been harmless; naming the same
+    fault two ways in `gatedBy` would not.
     """
     for item in finding.get("evidence") or []:
         kind = (item or {}).get("kind")
@@ -217,7 +222,7 @@ def unverified(project: Project, run: Run, finding: dict,
         if not loc:
             continue
 
-        if kind in ("code", "document"):
+        if kind == "document":
             ok, lines = _exists_at_commit(project.root, loc.get("commit") or "",
                                           loc.get("file") or "")
             if not ok:
@@ -406,18 +411,34 @@ def gate(project: Project, run: Run, findings: list[dict],
         # call. What replaces it is the type's own `evidence.required`, and a
         # policy that drops one without naming the other is refused by
         # `outputs.errors`.
-        a = f.get("anchor") or {}
-        if policy.anchor == "required" and not a.get("file"):
+        # Both shapes count as pointing at source — a `code` evidence item
+        # since Step 9, the `anchor` field before it — and both are checked,
+        # because a finding that cites three files can invent any of them.
+        #
+        # The reason keeps its name whichever field carried the fault, and
+        # that is the point of doing it here rather than leaving code
+        # locators to `unverified` below. `phantom-file` is the hallucination
+        # counter; had it gone on counting only the old field, a pack moving
+        # to the new one would have shown its invented files draining away
+        # into `unverified-evidence` and read like a pack that got better.
+        spots = anchor.places(f)
+        if policy.anchor == "required" and not spots:
             drop("missing-anchor", f"{type_name} must point at a file and a line")
             continue
-        if a.get("file"):
+        phantom: tuple[str, str] | None = None
+        for a in spots:
             ok, lines = _exists_at_commit(project.root, a.get("commit") or "", a["file"])
+            line = a.get("line") or 1
             if not ok:
-                drop("phantom-file", f"{a['file']} is not at {(a.get('commit') or '')[:8]}")
-                continue
-            if lines is not None and a.get("line", 1) > lines:
-                drop("phantom-line", f"line {a['line']} > {lines} lines in the file")
-                continue
+                phantom = ("phantom-file",
+                           f"{a['file']} is not at {(a.get('commit') or '')[:8]}")
+                break
+            if lines is not None and line > lines:
+                phantom = ("phantom-line", f"line {line} > {lines} lines in the file")
+                break
+        if phantom:
+            drop(*phantom)
+            continue
 
         # The type wins over the dimension when it says anything: the type is
         # the coarser statement ("a bet stands on documents or the web") and a
@@ -510,7 +531,9 @@ def stop_errors(run_dir: Path, root: Path) -> list[str]:
     """What is wrong with this run's `findings.json`, in the agent's own terms.
 
     Deliberately only the two checks that need nothing but this run: the
-    contract, and whether the anchor exists at the commit under review. Dedup,
+    contract, and whether the source it points at exists at the commit under
+    review — in either shape, so a pack that moved to `code` evidence gets the
+    same second chance it had with `anchor`. Dedup,
     score distribution and provenance all need state from outside the run and
     belong to the gate — a hook that reached for them would be a second gate
     with a worse view.
@@ -531,17 +554,17 @@ def stop_errors(run_dir: Path, root: Path) -> list[str]:
         problems.append(f"{title}: {'; '.join(msgs)[:300]}")
 
     for f in findings:
-        a = (f or {}).get("anchor") or {}
-        if not a.get("file") or not a.get("commit"):
-            continue
-        ok, lines = _exists_at_commit(Path(root), a.get("commit") or "", a["file"])
         title = str((f or {}).get("title") or "")[:60]
-        if not ok:
-            problems.append(f"{title}: {a['file']} does not exist at "
-                            f"{(a.get('commit') or '')[:8]}.")
-        elif lines is not None and (a.get("line") or 1) > lines:
-            problems.append(f"{title}: line {a.get('line')} is past the end of "
-                            f"{a['file']} ({lines} lines).")
+        for a in anchor.places(f or {}):
+            if not a.get("commit"):
+                continue
+            ok, lines = _exists_at_commit(Path(root), a["commit"], a["file"])
+            if not ok:
+                problems.append(f"{title}: {a['file']} does not exist at "
+                                f"{a['commit'][:8]}.")
+            elif lines is not None and (a.get("line") or 1) > lines:
+                problems.append(f"{title}: line {a.get('line')} is past the end of "
+                                f"{a['file']} ({lines} lines).")
     return problems
 
 
@@ -709,7 +732,7 @@ def ingest(project: Project, run: Run) -> dict:
             "state": "gated-out", "title": d.get("title"),
             "severity": dropped_finding.get("severity"),
             "dimension": dropped_finding.get("dimension"), "fingerprint": None,
-            "anchor": dropped_finding.get("anchor"),
+            "anchor": anchor.of(dropped_finding) or None,
             "subject": dropped_finding.get("subject"), "by": None,
             "reason": d.get("reason"), "ref": None, "url": None,
         })

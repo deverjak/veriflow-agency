@@ -13,7 +13,7 @@ import json
 from agency import dedup, ingest, runs
 from agency.util import read_json, write_json
 
-from conftest import git, install_pack, make_finding
+from conftest import as_code_evidence, git, install_pack, make_finding
 
 RUN_A = "01AAAAAAAAAAAAAAAAAAAAAAAA"
 RUN_B = "01BBBBBBBBBBBBBBBBBBBBBBBB"
@@ -527,12 +527,18 @@ def test_code_evidence_pointing_at_a_file_that_is_not_there_is_dropped(project, 
     result = ingest.ingest(project, run)
 
     assert result["counts"]["kept"] == 0
-    assert result["dropped"][0]["reason"] == "unverified-evidence"
+    # `phantom-file`, not `unverified-evidence`, since Step 9: a code locator
+    # IS where an output points at source, and an invented file gets the name
+    # the invented-file counter has always had. Were it counted as a broken
+    # locator instead, a pack moving to the new shape would have watched its
+    # hallucinations drain out of `phantom-file` and read like a better pack.
+    assert result["dropped"][0]["reason"] == "phantom-file"
     assert "src/nowhere.ts" in result["dropped"][0]["detail"]
 
 
 def test_code_evidence_past_the_end_of_the_file_is_dropped(project, make_run):
-    """The two questions the anchor is asked, asked of the proof as well."""
+    """The two questions the anchor is asked, asked of the proof as well —
+    and answered under the anchor's own two names."""
     commit = git(project.root, "rev-parse", "HEAD")
     run = make_run(findings=[_evidence(project, {
         "kind": "code", "detail": "no caller checks the session",
@@ -540,8 +546,76 @@ def test_code_evidence_past_the_end_of_the_file_is_dropped(project, make_run):
 
     result = ingest.ingest(project, run)
 
-    assert result["dropped"][0]["reason"] == "unverified-evidence"
+    assert result["dropped"][0]["reason"] == "phantom-line"
     assert "900" in result["dropped"][0]["detail"]
+
+
+# --------------------------------------------- the anchor as `code` evidence
+
+def test_a_finding_that_points_at_source_with_evidence_gets_through(project, make_run):
+    """The migration in one line: the same finding, said the other way.
+
+    Nothing about the claim changed — only which field carries the four
+    layers — so the gate has to reach the same verdict. If it did not, every
+    pack in every other repository would have had to migrate in the same
+    commit as the core."""
+    run = make_run(findings=[as_code_evidence(make_finding(project, "x"))])
+
+    result = ingest.ingest(project, run)
+
+    assert result["counts"]["kept"] == 1
+    assert result["dropped"] == []
+
+
+def test_a_type_that_must_point_at_source_is_not_satisfied_by_other_proof(project, make_run):
+    """`anchor: required` asks for a place in the code, and only `code`
+    evidence is one. A finding that proves itself with a graph fact and names
+    no file is the shape the policy exists to refuse — the formulation being
+    "a bet needs a different kind of proof", never "a bet needs no proof"."""
+    f = make_finding(project, "x")
+    f.pop("anchor")
+    run = make_run(findings=[f])
+
+    result = ingest.ingest(project, run)
+
+    assert result["dropped"][0]["reason"] == "missing-anchor"
+
+
+def test_every_place_a_finding_cites_is_checked_not_only_the_first(project, make_run):
+    """A finding may cite three pieces of code and invent the third. Checking
+    only the place it SITS would leave the other two unread, which is the
+    whole difference between `anchor.of()` and `anchor.places()`."""
+    commit = git(project.root, "rev-parse", "HEAD")
+    f = as_code_evidence(make_finding(project, "x"))
+    f["evidence"].append({"kind": "code", "detail": "and its caller does not either",
+                          "locator": {"file": "src/invented.ts", "line": 3,
+                                      "commit": commit}})
+    run = make_run(findings=[f])
+
+    result = ingest.ingest(project, run)
+
+    assert result["dropped"][0]["reason"] == "phantom-file"
+    assert "src/invented.ts" in result["dropped"][0]["detail"]
+
+
+def test_a_pack_that_migrates_does_not_report_its_backlog_again(project, make_run):
+    """The expensive way to get this step wrong.
+
+    A pack that moves its anchor into `code` evidence goes on finding the same
+    things in the same code. Dedup keys an output on its PLACE, and the place
+    comes out of the symbol — so a locator that lost the symbol would make the
+    first run after the migration report everything the project had already
+    seen, with nothing failing to say so."""
+    older = make_run(run_id=RUN_A)
+    ingest.ingest(project, older)
+
+    newer = make_run(run_id=RUN_B)
+    write_json(newer.findings_path, [as_code_evidence(make_finding(project, RUN_B))])
+
+    result = ingest.ingest(project, newer)
+
+    assert len(result["duplicates"]) == 1, "the migrated finding was reported a second time"
+    assert dedup.subject_key(read_json(newer.findings_path)[0]) == "sym:getUser"
 
 
 def test_a_cited_command_reads_the_same_in_both_shapes(project, make_run):

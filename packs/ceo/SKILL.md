@@ -165,8 +165,8 @@ Kvesteros can hold **at most three live bets** — a bet is a sentence with a hy
 | | A bet |
 |---|---|
 | `type` | `"bet"` |
-| `anchor` | **omit it.** A claim about a funding call does not live in `footer.tsx`, and pointing it there was a way of satisfying a check rather than of proving anything |
-| `subject` | `{ "kind": "bet", "ref": "<slug>" }` — the `Ref:` line of the bet in `strategy.md`, or a new slug for a bet you are proposing for the first time. This is the bet's place: it is what makes the founder's verdict on it come back to you on the run that argues about it again, and what keeps two bets about distribution from being read as one. Without an anchor it is the only place a bet has |
+| `code` evidence | **write none.** A claim about a funding call does not live in `footer.tsx`, and pointing it there was a way of satisfying a check rather than of proving anything. What a bet proves itself with instead is `web_snapshot` and `document`, which `pack.json` requires of it — the rule is *a bet needs a different kind of proof*, never *a bet needs no proof* |
+| `subject` | `{ "kind": "bet", "ref": "<slug>" }` — the `Ref:` line of the bet in `strategy.md`, or a new slug for a bet you are proposing for the first time. This is the bet's place: it is what makes the founder's verdict on it come back to you on the run that argues about it again, and what keeps two bets about distribution from being read as one. With no place in the code, this is the only place a bet has |
 | `evidence` | at least one `web_snapshot` or `document`, both with a `locator` (below) |
 | how many | three per run; the fourth is dropped and told why |
 | `dimension` | the one it argues from — usually `distribution`, `positioning` or `stakeholders` |
@@ -238,7 +238,7 @@ Drafts go to `<RUN_DIR>/drafts/<slug>.md` — `outreach-kickk.md`, `one-pager-ou
 
 ## 5. Findings
 
-Into `<RUN_DIR>/findings.json`, an array of `finding.v1` objects — what is wrong with the strategy, not with one question. Findings are the type that still points at code: they carry an `anchor`, exactly as below. Bets live in the same file and do not (§2).
+Into `<RUN_DIR>/findings.json`, an array of `finding.v1` objects — what is wrong with the strategy, not with one question. Findings are the type that still points at code: they carry a `code` evidence item, exactly as below. Bets live in the same file and do not (§2).
 
 | Dimension | What it reports |
 |---|---|
@@ -249,7 +249,7 @@ Into `<RUN_DIR>/findings.json`, an array of `finding.v1` objects — what is wro
 | `readiness` | what blocks an outward-facing conversation — no legal entity, no imprint, no working public URL, no contact route, no provenance statement, no one-pager |
 | `measurement` | a strategic claim — "retention", "differentiator", "killer combination" — with no number, no source, and nothing that would produce one |
 
-**Anchors.** A strategy *finding* still points at a file that would change — this is what separates it from a bet, which argues about the market and points at the market:
+**Where a finding sits.** A strategy *finding* still points at a file that would change — this is what separates it from a bet, which argues about the market and points at the market:
 
 - a roadmap or spec claim → `ROADMAP-2026.md`, `docs/product-roadmap.md`, `docs/kvesteros-platform-spec.md`, `docs/ai-guide-product-roadmap.md` — the line of the claim;
 - a claim the product makes to visitors → the copy: `src/client/src/i18n/dictionaries/<locale>/*.json`, `src/client/src/components/sections/hero-section.tsx`, `src/client/src/components/layout/footer.tsx`;
@@ -257,7 +257,7 @@ Into `<RUN_DIR>/findings.json`, an array of `finding.v1` objects — what is wro
 - a source relationship → the adapter under `src/event-ingestor/event_ingestor/adapters/`;
 - a wrong assumption in this pack → `.claude/skills/agency-ceo/SKILL.md`, the line of the fact.
 
-`anchor` requires `file` + `line` + `commit` (`target.headRefOid`, all 40 characters), `snippet` (the whole `line..endLine` block), `symbol` (`null` for markdown and JSON).
+It says so with a `code` evidence item, whose `locator` requires `file` + `line` + `commit` (`target.headRefOid`, all 40 characters), `snippet` (the whole `line..endLine` block), `symbol` (`null` for markdown and JSON).
 
 **Evidence kinds** (the enum is shared with the other packs — map onto it): `doc` — a web page read this run (`source` = the URL) or the project's own document; `rule` — a rule from `references/method.md`, `ROADMAP-2026.md` §7 or `decisions.md`; `diff` — `files[]` / `recent-commits.txt`; `test-gap` — a claim with nothing that would measure it; `runtime` — something observed on the live product. **Every finding carries at least one `doc` item**; a `positioning`, `stakeholders` or `distribution` finding carries one with a URL.
 
@@ -271,9 +271,10 @@ Into `<RUN_DIR>/findings.json`, an array of `finding.v1` objects — what is wro
   "dimension": "readiness", "severity": "high",
   "title": "Web neříká, kdo Kvesteros provozuje — první e-mail na KIC KK nemá kam odkázat",
   "body": "Patička veřejného webu nese jen `info@kvesteros.cz`; žádná tiráž, žádný název subjektu, IČO ani adresa (`footer.tsx`, slovníky `info.json`). Instituce, která dostane e-mail od neznámého odesílatele, si nejdřív otevře web — a tam se nedozví, s kým mluví. Návrh: doplnit do patičky provozovatele (subjekt, IČO, sídlo, kontakt) a stránku „O nás“ s jednou větou o tom, odkud jsou data a jak se uvádí zdroj. Do té doby oslovení KIC KK nedávat.",
-  "anchor": { "file": "src/client/src/components/layout/footer.tsx", "line": 1, "endLine": 12,
-              "commit": "<all 40 characters>", "snippet": "…", "symbol": null, "body": null },
   "evidence": [
+    { "kind": "code", "detail": "patička veřejného webu — jediné místo, kde by tiráž byla",
+      "locator": { "file": "src/client/src/components/layout/footer.tsx", "line": 1, "endLine": 12,
+                   "commit": "<all 40 characters>", "snippet": "…", "symbol": null, "body": null } },
     { "kind": "doc", "detail": "slovník `info.json` obsahuje jen e-mail, žádný subjekt", "source": "src/client/src/i18n/dictionaries/cs/info.json#L36" },
     { "kind": "rule", "detail": "outreach.md: bez subjektu a veřejné URL se první e-mail nepíše", "source": ".claude/skills/agency-ceo/references/outreach.md" }
   ],

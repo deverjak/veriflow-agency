@@ -175,14 +175,14 @@ agency graph neighbors <name> --direction in --repo <project.root>
 
 A failed spec's trace helps too — it carries the last request, its status and a stack, and from there it is one step to the handler.
 
-`anchor` needs:
+**Where a finding sits is evidence, not a field of its own:** a `code` item whose `locator` needs
 
 - **`file` + `line`** — POSIX path relative to the project root, the line that causes the behavior. Not the test, not configuration, not merely where it shows up.
 - **`commit`** — `target.headRefOid`, **all 40 characters**.
 - **`snippet`** — the whole `line..endLine` block, not one line.
-- **`symbol`** — the one layer of the anchor that survives a refactor. Fill it from the graph, not by guessing.
+- **`symbol`** — the layer that survives a refactor, and the finding's place for deduplication. Fill it from the graph, not by guessing.
 
-When you genuinely cannot find the anchor — the fault is in data or in an external service — anchor to where the application consumes that result, and say so in `body`. A finding with no anchor does not pass the gate in `agency ingest`, so it would be wasted work.
+When you genuinely cannot find the place — the fault is in data or in an external service — point at where the application consumes that result, and say so in `body`. A finding that points nowhere does not pass the gate in `agency ingest`, so it would be wasted work.
 
 ## 7. Write `findings.json`
 
@@ -197,16 +197,17 @@ The only mandatory output. Into `<RUN_DIR>/findings.json`, an array of `finding.
   "severity": "high",
   "title": "One-sentence claim of what is broken",
   "body": "Markdown: what happened, what should have happened, and STEPS: 1. … 2. … 3. → empty page instead of a confirmation.",
-  "anchor": {
-    "file": "src/application/booking/createBooking.ts",
-    "line": 142,
-    "endLine": 158,
-    "commit": "<all 40 characters of target.headRefOid>",
-    "snippet": "<text of the 142..158 block>",
-    "symbol": { "name": "createBooking", "range": [128, 171] },
-    "body": "<the symbol's body, capped at 8 kB>"
-  },
   "evidence": [
+    { "kind": "code", "detail": "createBooking returns before the confirmation is written",
+      "locator": {
+        "file": "src/application/booking/createBooking.ts",
+        "line": 142,
+        "endLine": 158,
+        "commit": "<all 40 characters of target.headRefOid>",
+        "snippet": "<text of the 142..158 block>",
+        "symbol": { "name": "createBooking", "range": [128, 171] },
+        "body": "<the symbol's body, capped at 8 kB>"
+      } },
     { "kind": "runtime", "detail": "spec fails 2/2 runs: expected confirmation, got 500", "source": "specs/rezervace-prazdna-stranka.spec.ts" },
     { "kind": "runtime", "detail": "trace: POST /api/booking → 500, TypeError in console", "source": "evidence/playwright/…/trace.zip" }
   ],

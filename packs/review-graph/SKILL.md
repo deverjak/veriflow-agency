@@ -115,16 +115,17 @@ The only mandatory output. Into `<RUN_DIR>/findings.json`, an array of `finding.
   "severity": "high",
   "title": "One-sentence claim of what is wrong",
   "body": "Markdown: the claim plus a concrete failure scenario — inputs/state → wrong output.",
-  "anchor": {
-    "file": "src/foo.ts",
-    "line": 142,
-    "endLine": 158,
-    "commit": "<all 40 characters of headRefOid>",
-    "snippet": "<text of the 142..158 block from the worktree>",
-    "symbol": { "name": "UserService.getUser", "range": [128, 171] },
-    "body": "<the symbol's body, capped at 8 kB>"
-  },
   "evidence": [
+    { "kind": "code", "detail": "getUser returns the user without checking the session",
+      "locator": {
+        "file": "src/foo.ts",
+        "line": 142,
+        "endLine": 158,
+        "commit": "<all 40 characters of headRefOid>",
+        "snippet": "<text of the 142..158 block from the worktree>",
+        "symbol": { "name": "UserService.getUser", "range": [128, 171] },
+        "body": "<the symbol's body, capped at 8 kB>"
+      } },
     { "kind": "graph", "detail": "3 callers at d=1, 0 tests", "source": "agency graph impact --depth 2" }
   ],
   "score": 92,
@@ -133,12 +134,14 @@ The only mandatory output. Into `<RUN_DIR>/findings.json`, an array of `finding.
 }
 ```
 
-On the anchor, because a finding's usability a month from now stands on it:
+**Where a finding sits is evidence, not a field of its own.** The `code` item above is the anchor: its `locator` carries the same four layers a separate `anchor` field used to, unchanged. The old field is still read — every finding this project has written so far has one — but write the evidence item.
+
+On those four layers, because a finding's usability a month from now stands on them:
 
 - **`commit` is all 40 characters.** A shortened SHA can later silently point at a different line.
 - **`snippet` is the whole `line..endLine` block,** not one line. A one-line snippet fails on `/**`, `}` and similar boilerplate — and a docblock starts with exactly that.
-- **Fill `symbol` from the graph,** not by guessing: `agency graph locate "<name>" --repo <worktree>` returns `file`, `line` and `endLine`. It is the one layer of the anchor that survives a refactor.
-- **`anchor.body`** is the safety net for a commit no longer in the clone — a squash-merge with the branch deleted is GitHub's default.
+- **Fill `symbol` from the graph,** not by guessing: `agency graph locate "<name>" --repo <worktree>` returns `file`, `line` and `endLine`. It is the layer that survives a refactor — and it is also the finding's place for deduplication, so a locator without one makes the run report what the project has already been told.
+- **`locator.body`** is the safety net for a commit no longer in the clone — a squash-merge with the branch deleted is GitHub's default.
 
 Complete `run.json`: `status`, `finishedAt`, `counts` and `cost` (provider, model, number of dimensions, duration).
 

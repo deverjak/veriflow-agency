@@ -58,7 +58,7 @@
 
     "anchor": {
       "type": "object",
-      "description": "A four-layer anchor. Resolved top to bottom, stopping at the first layer that succeeds. Without it a finding points at innocent code after a few weeks and has no way to know it.",
+      "description": "SUPERSEDED by `evidence[kind=code].locator` on 2026-09-08; the four layers moved there unchanged. Kept, and still read, because committed run history is full of it — exactly as for `sinks` and for evidence without a locator. Written on its own it made pointing at source a property EVERY output has, which is how a claim about a funding call came to be anchored to `footer.tsx`. As one kind of proof among five it is something a type asks for (`outputs.<type>.anchor`) or does not.",
       "additionalProperties": false,
       "required": ["file", "line", "commit"],
       "properties": {
@@ -114,7 +114,7 @@
           "kind": {
             "enum": ["graph", "rule", "test-gap", "diff", "runtime", "doc",
                      "code", "document", "command", "web_snapshot", "board_item"],
-            "description": "Two generations. WITHOUT a locator (older, still valid): graph = a fact from the code-graph driver (`agency graph`), rule = a rule from the project's own documentation, test-gap = missing coverage, diff = content of the change, runtime = observed behaviour, doc = contradicts the documentation. WITH a locator (since 2026-09-06, machine-verifiable): code = a place in the source at a commit, document = a file in the repository at a commit, command = something that ran in this run, web_snapshot = a page fetched in this run and kept, board_item = an item in a board snapshot taken by this run."
+            "description": "Two generations. WITHOUT a locator (older, still valid): graph = a fact from the code-graph driver (`agency graph`), rule = a rule from the project's own documentation, test-gap = missing coverage, diff = content of the change, runtime = observed behaviour, doc = contradicts the documentation. WITH a locator (since 2026-09-06, machine-verifiable): code = a place in the source at a commit — since 2026-09-08 this is where an output's anchor lives, and its locator carries all four layers, document = a file in the repository at a commit, command = something that ran in this run, web_snapshot = a page fetched in this run and kept, board_item = an item in a board snapshot taken by this run."
           },
           "detail": { "type": "string", "minLength": 3 },
           "source": {
@@ -129,11 +129,36 @@
               "file": {
                 "type": "string",
                 "pattern": "^[^/].*",
-                "description": "POSIX path relative to the project root, as in `anchor.file`."
+                "description": "POSIX path relative to the project root. Never absolute — otherwise the run record could not be shared or committed.",
+                "not": { "pattern": "^[A-Za-z]:|\\\\" }
               },
               "line": { "type": "integer", "minimum": 1 },
               "endLine": { "type": "integer", "minimum": 1 },
               "commit": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+              "snippet": {
+                "type": ["string", "null"],
+                "description": "Layer 2 of the anchor, for `code`. The text of the line..endLine block on the day of the analysis; the most distinctive line in it is what gets searched for when the code has moved. A one-line snippet fails on '/**' and similar boilerplate, so send the block."
+              },
+              "symbol": {
+                "type": ["object", "null"],
+                "description": "Layer 3 of the anchor, for `code`: the symbol as the graph knows it. It survives a refactor and a moved block where a line number does not — AND it is what deduplication uses for the output's place, so a locator that drops it makes the run re-report what it already reported.",
+                "additionalProperties": false,
+                "required": ["name"],
+                "properties": {
+                  "name": { "type": "string" },
+                  "range": {
+                    "type": "array",
+                    "items": { "type": "integer", "minimum": 1 },
+                    "minItems": 2,
+                    "maxItems": 2
+                  }
+                }
+              },
+              "body": {
+                "type": ["string", "null"],
+                "maxLength": 8192,
+                "description": "Layer 4 of the anchor, for `code`: the symbol's body on the day of the analysis. The safety net for a commit no longer in the clone — a squash-merge with the branch deleted is GitHub's default."
+              },
               "command": {
                 "type": "string",
                 "minLength": 2,
@@ -177,7 +202,7 @@
       "type": "integer",
       "minimum": 0,
       "maximum": 100,
-      "description": "Confidence after the false-positive filter. Below the project's threshold a finding is not published, but it stays in the run record. Required since 2026-09-06: while it was optional the threshold could be walked around by saying nothing, and the one number that shows a miscalibrated pack — the score distribution against precision — had a bucket full of unknowns. Findings written before that are left alone; they are an older population, and `agency validate --fix` does not invent a number for them."
+      "description": "Confidence after the false-positive filter. Nothing is dropped for being low — that stopped on 2026-09-08, because a number the model gives itself cannot say whether a claim is true. It is read as calibration (the score distribution against precision is what shows a pack that scores everything 90), and it breaks the tie when a run writes more of a type than `outputs.<type>.limit` allows. Required since 2026-09-06: while it was optional that distribution had a bucket full of unknowns. Findings written before that are left alone; they are an older population, and `agency validate --fix` does not invent a number for them."
     },
     "scoreReason": {
       "type": ["string", "null"],

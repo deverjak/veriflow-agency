@@ -32,7 +32,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import events, graph, instructions, outputs, packs, proc, providers
+from . import anchor, events, graph, instructions, outputs, packs, proc, providers
 from .config import AGENCY_DIR, Project
 from .util import out, posix, read_json, ulid, write_json
 
@@ -1708,7 +1708,7 @@ def dispatch(project: Project, run: Run, finding: dict, by: str) -> dict:
         "state": "sent", "lifecycle": "triage", "polarity": "positive",
         "title": finding.get("title"), "severity": finding.get("severity"),
         "dimension": finding.get("dimension"), "fingerprint": finding.get("fingerprint"),
-        "anchor": finding.get("anchor"), "subject": finding.get("subject"),
+        "anchor": anchor.of(finding) or None, "subject": finding.get("subject"),
         "by": by, "ref": ref, "url": url, "reason": None,
     })
     return {"id": fid, "ok": True, "noSink": False, "ref": ref, "url": url, "error": None}
@@ -1726,7 +1726,7 @@ def reject(project: Project, run: Run, finding_id: str, reason: str,
         "state": "rejected", "lifecycle": ev.get("lifecycle"), "polarity": ev.get("polarity"),
         "title": finding.get("title"), "severity": finding.get("severity"),
         "dimension": finding.get("dimension"), "fingerprint": finding.get("fingerprint"),
-        "anchor": finding.get("anchor"), "subject": finding.get("subject"),
+        "anchor": anchor.of(finding) or None, "subject": finding.get("subject"),
         "by": ev["by"], "reason": reason, "ref": None, "url": None,
     })
     return ev
@@ -1756,7 +1756,7 @@ def record_feedback(project: Project, run: Run, finding_id: str, kind: str,
         "state": kind, "lifecycle": ev.get("lifecycle"), "polarity": ev.get("polarity"),
         "title": finding.get("title"), "severity": finding.get("severity"),
         "dimension": finding.get("dimension"), "fingerprint": finding.get("fingerprint"),
-        "anchor": finding.get("anchor"), "subject": finding.get("subject"),
+        "anchor": anchor.of(finding) or None, "subject": finding.get("subject"),
         "by": ev["by"], "reason": reason, "ref": None, "url": None,
     })
     return ev

@@ -151,7 +151,8 @@ class TypePolicy:
     name: str
     cardinality: str = "many"
     limit: int | None = None
-    #: Whether this type must point at a place in the source.
+    #: Whether this type must point at a place in the source — which, since
+    #: Step 9, is to say whether it must carry `code` evidence.
     #:
     #: Required for a finding and that does not change: a review claim with no
     #: file and line is unfalsifiable, and the anchor is what `agency replay`
@@ -160,6 +161,12 @@ class TypePolicy:
     #: They are not thereby unchecked: the type's own `evidence.required` is
     #: what replaces it, which is why a policy that drops the anchor without
     #: naming evidence is refused by `errors()`.
+    #:
+    #: Not folded into `evidence.required` even though both now speak about
+    #: evidence kinds, because they ask different questions: `required` is a
+    #: list any one of which will do, this one is a kind that must be there.
+    #: A review finding needs `code` AND one of graph/rule, and an OR-list
+    #: cannot say that.
     anchor: str = "required"
     dedup: bool = True
     evidence: dict = field(default_factory=dict)

@@ -26,6 +26,8 @@ import hashlib
 import re
 import unicodedata
 
+from . import anchor
+
 # Words carrying zero information about WHAT a finding claims. Czech and
 # English alike, because findings arrive in both languages depending on
 # `review.language`.
@@ -95,6 +97,12 @@ def subject_key(finding: dict) -> str:
       symbol    from the anchor: survives a moved block and a refactor,
       file      from the anchor: weaker, but still independent of the line.
 
+    The anchor is read through `anchor.of()`, so an output that points at
+    source with a `code` evidence item gets the same key as one that used the
+    `anchor` field — provided its locator carries the same `symbol`. That is
+    the whole reason a locator may carry one: a pack that migrates and loses
+    the symbol would silently re-report everything it already reported.
+
     An explicit `subject` wins over the anchor because it is the pack saying
     it, and the anchor-derived key is what an output written before subjects
     existed falls back to. No committed finding carries one, so every
@@ -112,9 +120,9 @@ def subject_key(finding: dict) -> str:
     kind, ref = subject.get("kind"), subject.get("ref")
     if kind and ref:
         return f"{kind}:{ref}"
-    a = finding.get("anchor") or {}
+    a = anchor.of(finding)
     sym = a.get("symbol") or {}
-    name = sym.get("name")
+    name = sym.get("name") if isinstance(sym, dict) else None
     if name:
         return f"sym:{name}"
     file = a.get("file")

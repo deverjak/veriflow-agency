@@ -134,6 +134,25 @@ def make_finding(project: config.Project, run_id: str, **over) -> dict:
     return f
 
 
+def as_code_evidence(finding: dict) -> dict:
+    """The same finding, saying where it sits the way Step 9 asks for it.
+
+    The `anchor` field goes and a `code` evidence item carries the four layers
+    instead. Every "both shapes behave the same" test builds its pair through
+    this, so the two halves cannot quietly drift apart — a helper per test file
+    would have let one of them keep the symbol and the other drop it, which is
+    exactly the difference that would break dedup without failing anything.
+    """
+    f = json.loads(json.dumps(finding))
+    a = f.pop("anchor")
+    f.setdefault("evidence", []).insert(0, {
+        "kind": "code",
+        "detail": "the place in the source this finding is about",
+        "locator": {k: v for k, v in a.items() if v is not None},
+    })
+    return f
+
+
 @pytest.fixture
 def make_run(project: config.Project):
     """Produces a run with findings the way an agent would have left it."""

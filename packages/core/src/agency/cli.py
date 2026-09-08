@@ -1346,13 +1346,16 @@ def cmd_validate(args) -> int:
     except ImportError:
         out.note("jsonschema is not installed, checking required fields only")
         for i, f in enumerate(findings):
-            for key in ("id", "runId", "pack", "severity", "title", "body", "anchor", "evidence"):
+            # No `anchor`: since Step 4 whether an output points at source
+            # is the type's policy, not the schema's, and this branch cannot
+            # see the pack. It checks what every output has.
+            for key in ("id", "runId", "pack", "severity", "title", "body", "evidence"):
                 if key not in f:
                     errors.append({"index": i, "id": f.get("id"), "path": key, "message": "missing"})
 
     resolved = []
     for f in findings:
-        a = f.get("anchor") or {}
+        a = anchor.of(f)
         if not a.get("file"):
             continue
         r = anchor.resolve(project.root, a)
@@ -1667,7 +1670,7 @@ def cmd_findings(args) -> int:
             fid = f.get("id")
             seen_ids.add(fid)
             d = dec.get(fid)
-            a = f.get("anchor") or {}
+            a = anchor.of(f)
             row = {
                 "runId": run.id, "id": fid, "severity": f.get("severity"),
                 "title": f.get("title"), "body": f.get("body"),

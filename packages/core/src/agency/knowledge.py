@@ -142,7 +142,7 @@ def do_not_report(project: Project) -> str | None:
 def _view(run, rec: dict, finding: dict, decision: dict | None,
           notes: list[dict] | None) -> dict:
     """One finding as someone other than the run that found it sees it."""
-    a = finding.get("anchor") or {}
+    a = anchor.of(finding)
     who = (rec.get("agent") or {}).get("hire")
     view = {
         "id": finding.get("id"), "title": finding.get("title"),
@@ -568,8 +568,8 @@ TIERS = ("unverified", "machine-confirmed", "human-reviewed")
 def _concept(members: list[dict], origin: dict) -> dict:
     """A duplicate family as one finding — with who confirmed it."""
     f = origin["finding"]
-    a = f.get("anchor") or {}
-    sym = (a.get("symbol") or {}).get("name")
+    a = anchor.of(f)
+    sym = (a.get("symbol") or {}).get("name") if isinstance(a.get("symbol"), dict) else None
 
     # A duplicate from the SAME worker is not an independent confirmation, it
     # is the same worker a second time.
@@ -762,8 +762,8 @@ def _rel_link(from_dir: Path, target: Path) -> str:
     return posix(os.path.relpath(target, from_dir))
 
 
-def _where(anchor: dict) -> str:
-    f, line = anchor.get("file"), anchor.get("line")
+def _where(place: dict) -> str:
+    f, line = place.get("file"), place.get("line")
     if not f:
         return ""
     return f"{f}:{line}" if line else f

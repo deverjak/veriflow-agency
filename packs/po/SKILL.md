@@ -230,13 +230,13 @@ The second output: what is wrong with the queue and the plan, not with one reque
 | `sequencing` | order that cannot hold |
 | `value` | commitments with no measurable outcome |
 
-**Anchors.** A product finding still has to point at a file that would change:
+**Where a finding sits.** A product finding still has to point at a file that would change, and it says so with a `code` evidence item:
 
 - drift or an unmeasurable goal → the specification file and the line of the requirement, or `docs/current/business-rules.md` where the roadmap-equivalent statement lives;
 - work in flight nothing covers → the code being written, from `files[]`;
 - a queue problem → the spec requirement the queue is failing to serve, or `.claude/skills/agency-po/pack.json` when the rule itself needs to change.
 
-`anchor` requires `file` + `line` + `commit` (`target.headRefOid`, all 40 characters), `snippet` (the whole `line..endLine` block), `symbol` (`null` for markdown).
+Its `locator` requires `file` + `line` + `commit` (`target.headRefOid`, all 40 characters), `snippet` (the whole `line..endLine` block), `symbol` (`null` for markdown).
 
 **Evidence kinds:** `doc` (a spec line, a ticket, a comment), `rule` (from `references/feature-admission.md` or this file), `diff` (`files[]` / `recent-commits.txt`), `test-gap` (a committed outcome with nothing that would show it was reached).
 
@@ -250,9 +250,10 @@ The second output: what is wrong with the queue and the plan, not with one reque
   "dimension": "scope", "severity": "high",
   "title": "Exporty do PDF se staví, i když je nekryje žádný závazek v #255",
   "body": "Poslední čtyři commity přidávají generování PDF (`lib/export/pdf.ts`, 340 řádků). Žádný z milníků #255 export nezmiňuje a nejbližší milník je Launch 1. 9. — po termínu. Návrh: zastavit a pojmenovat závazek, který to kryje, nebo přesunout mimo tento cyklus.",
-  "anchor": { "file": "lib/export/pdf.ts", "line": 1, "endLine": 12,
-              "commit": "<all 40 characters>", "snippet": "…", "symbol": null, "body": null },
   "evidence": [
+    { "kind": "code", "detail": "generování PDF, které žádný závazek nekryje",
+      "locator": { "file": "lib/export/pdf.ts", "line": 1, "endLine": 12,
+                   "commit": "<all 40 characters>", "snippet": "…", "symbol": null, "body": null } },
     { "kind": "diff", "detail": "4 commity za 6 dní přidávají generování PDF", "source": "evidence/recent-commits.txt" },
     { "kind": "doc", "detail": "#255 nemá závazek na export v žádném milníku", "source": "https://github.com/Chci-na-lekci/main-panel/issues/255" }
   ],

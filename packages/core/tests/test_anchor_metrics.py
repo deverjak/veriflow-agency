@@ -11,7 +11,7 @@ from __future__ import annotations
 from agency import anchor, metrics, runs
 from agency.util import write_json
 
-from conftest import git, make_finding
+from conftest import as_code_evidence, git, make_finding
 
 
 def _shift_file(repo):
@@ -73,6 +73,26 @@ def test_drift_notices_that_the_code_was_touched(project, make_run):
     git(project.root, "commit", "-q", "-m", "fix")
 
     assert anchor.drift(project.root, a) == "touched"
+
+
+def test_the_four_layers_read_a_code_locator_the_same_way(project, make_run):
+    """Step 9 moved the layers into `evidence[kind=code].locator`. It moved
+    the field, not the behaviour — so the shift and the drift above have to
+    come out identical here, and those two tests are this one's control."""
+    run = make_run(findings=[as_code_evidence(make_finding(project, "x"))])
+    f = run.findings()[0]
+    assert "anchor" not in f, "the fixture did not actually move the field"
+    a = anchor.of(f)
+
+    assert anchor.drift(project.root, a) == "untouched"
+
+    _shift_file(project.root)
+    r = anchor.resolve(project.root, a)
+
+    assert r.line == a["line"] + 10, "the shifted code was not found"
+    assert r.via.startswith("snippet")
+    assert anchor.drift(project.root, a) == "untouched", \
+        "ten lines above the block are not a change to the block"
 
 
 def test_a_deleted_file_degrades_rather_than_disappears(project, make_run):

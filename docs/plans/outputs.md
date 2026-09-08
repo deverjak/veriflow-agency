@@ -3,7 +3,7 @@
 **Datum:** 2026-09-06
 **Navazuje na:** [`agency-v1.md`](agency-v1.md) (pack je skill v projektu, žádná konfigurace), [`harness.md`](harness.md) (provenience tool callů, brána, metriky, revize packu), [`findings-ownership.md`](findings-ownership.md) (board je stav, lokál je brána a stopa), [`teams.md`](teams.md) (řetěz), [`shared-memory.md`](shared-memory.md) (paměť patří projektu)
 **Řeší:** jádro dnes umí evidovat jediný druh výstupu — nález s kotvou na soubor a řádek. PO a CEO produkují rozhodnutí, odpovědi, sázky a drafty, a **oba už jádro kvůli tomu obcházejí**. Plán zobecňuje mechanismy, které v jádru fungují (brána, dedup, sinky, paměť, metriky), tak aby přestaly předpokládat code-review nález — a nedělá z Agency univerzální platformu.
-**Stav k 8. 9. 2026:** Kroky 1–8 hotové a commitnuté (testy 482 zelených). Svislý řez `bet` prošel u Kroku 4 a **přeskládal zbytek plánu**; Krok 5 dal outputu `subject` a běhu `scope`, Krok 6 nahradil `sinks` akcemi a cestou opravil dvě místa, kde `agency ingest` nebyl idempotentní, Krok 7 zúžil fold událostí na jeden na lifecycle a oživil `requires`, Krok 8 vyndal `score` z brány a nahradil ho stropem. CEO pack je **přenesený do repa Kvesteros** včetně `Ref:` řádků ve `strategy.md` — čeká na první ostrý běh. Další na řadě: Krok 9 (kotva jako `evidence.kind = code`) — nejdražší krok seznamu.
+**Stav k 8. 9. 2026:** Kroky 1–9 hotové a commitnuté (testy 488 zelených). Svislý řez `bet` prošel u Kroku 4 a **přeskládal zbytek plánu**; Krok 5 dal outputu `subject` a běhu `scope`, Krok 6 nahradil `sinks` akcemi a cestou opravil dvě místa, kde `agency ingest` nebyl idempotentní, Krok 7 zúžil fold událostí na jeden na lifecycle a oživil `requires`, Krok 8 vyndal `score` z brány a nahradil ho stropem, Krok 9 přestěhoval kotvu do `evidence.kind = code`. CEO pack je **přenesený do repa Kvesteros** včetně `Ref:` řádků ve `strategy.md` — čeká na první ostrý běh. Další na řadě: Krok 10 (migrace PO a CEO na jádro) — přejímka celého plánu.
 
 **Nedělá:** nový generický agent framework. Žádný plugin systém metrik, žádný registr typů, žádná doménová znalost v jádru. Přibývají přesně dvě abstrakce — `TypePolicy` a `Run.scope`.
 
@@ -30,16 +30,16 @@ python .claude\skills\agency-ceo\scripts\scope.py   # tři živé sázky, ne pr�
 agency doctor --json                                # žádné „pack ceo scope" ani „pack ceo outputs"
 ```
 
-Stav k 8. 9. 2026: Kroky 1–8 hotové, 482 testů, CEO pack přenesený. **Další je Krok 9** (kotva jako `evidence.kind = code`).
+Stav k 8. 9. 2026: Kroky 1–9 hotové, 488 testů, CEO pack přenesený. **Další je Krok 10** (migrace PO a CEO na jádro).
 
-### První pohyb v Kroku 9
+### První pohyb v Kroku 10
 
-Krok 9 je **nejdražší krok seznamu** — `anchor` má 58 výskytů v sedmi souborech jádra. Politika (`anchor: required | none`) je hotová z Kroku 4 a ověřená Krokem 8; co zbývá, je přestěhovat samotné pole.
+Krok 10 **není funkce, je to přejímka.** Jádro devíti kroky získalo všechno, co PO a CEO potřebují; otázka teď zní, jestli ho packy přestaly obcházet. Test je jednověta v [`packs/po/SKILL.md:21`](../../packs/po/SKILL.md): *„Findings still go to the board through the core, decisions do not."* Dokud tam stojí, plán není hotový.
 
-1. **Přečti si, co `anchor.py` dělá, než na něj sáhneš.** Čtyřvrstvé kotvení a drift zůstávají beze změny — mění se jen to, nad čím se volají. `test_anchor_metrics.py` a `test_replay.py` se u review nálezů nesmí pohnout ani o řádek; to je bod 4 přejímky a stojí na něm celý plán.
-2. **Správná formulace hranice** (a je v §Krok 9 napsaná): ne „CEO nemusí mít kotvu", ale „CEO nemusí mít **code** evidenci — musí mít jinou ověřitelnou". Kdykoliv se během kroku zdá, že něco nemusí mít důkaz, je to špatně přečtené.
-3. **`code` evidence s locatorem už existuje** od Kroku 2 a brána ji ověřuje (`test_gate.py::test_code_evidence_is_verified_at_the_commit`). Krok 9 tedy není nový mechanismus, je to migrace `anchor` → `evidence[kind=code].locator` a udržení všeho, co na `anchor` dnes visí: dedup (`subject_key` čte `anchor.symbol`), drift, `resolved` v `agency findings --json`, vlákna v extensionu.
-4. **Past, která se u Kroku 8 potvrdila** (§6.9 znovu): cokoliv, co ze `run.json` nebo `finding.v1` mizí, musí zmizet i ze schématu a ze všeho, co z něj čte. U Kroku 8 to byl jeden klíč (`belowScore`); tady je to pole s 58 výskyty.
+1. **PO první, je jednodušší.** `decision` a `ticket_draft` jako typy v `outputs`, `backlog.py` jako vykonavatel přes `actions` — ten mechanismus stojí od Kroku 6 a nic nového nepotřebuje. Pět dispozic (`BUILD-NOW`, `FIX-REMOVE-NOW`, `VALIDATE-CHEAPLY`, `DEFER-WITH-TRIGGER`, `REJECT`) jsou **`kinds` v lifecyclu**, ne stavy v jádru. Kdyby jádro začalo vědět, co `BUILD-NOW` znamená, je celý plán k ničemu (§3.5).
+2. **CEO druhý:** `answer` s `cardinality: one`. Registry (`strategy.md`, `competitors.md`, …) **zůstávají paměťové stránky** a output typem se nestávají — §0.1 a §3.3 to zdůvodňují a past 7 na to čeká.
+3. **Živé packy jsou součástí kroku, ne jeho následkem.** CEO v repu Kvesteros nese `minScore: 80` (Krok 8), větu o prahu ve `SKILL.md` a kotvy jako pole `anchor` (Krok 9). Nic z toho není chyba — jádro obojí čte — ale je to poslední místo, kde plán ještě neplatí. `agency doctor --json` v tom repu je seznam úkolů.
+4. **Past §6.9 potřetí:** cokoliv, co se u packu mění v manifestu, se musí projevit i v `SKILL.md`, jinak si model přečte starší polovinu. U Kroku 8 to bylo dvanáct vět v sedmi souborech, u Kroku 9 sedm sekcí — počítej s tím i tady.
 
 ### Co chybí — inventura k 8. 9. 2026
 
@@ -49,16 +49,17 @@ Krok 9 je **nejdražší krok seznamu** — `anchor` má 58 výskytů v sedmi so
 |---|---|---|
 | ~~**7** — feedback jako události, projekce `state`~~ | ~~1,5 dne~~ · **hotovo za půl** | past 5 nenastala — fold byl jeden, jen moc hrubý. Události v plném tvaru dodal už Krok 4 |
 | ~~**8** — `score` přestane být branou~~ | ~~0,5 dne~~ · **hotovo** | náhrada existovala, ale platila jen packu, který si ji vyžádal — a to byl jeden ze sedmi. Strop dostal backstop (25, změřený z `baseline.md`) a score se z brány přesunulo do řazení nad stropem |
-| **9** — kotva jako `evidence.kind = code` | ~2 dny | **nejdražší krok seznamu.** Politika kotvy je hotová z Kroku 4, ale samotné pole má 58 výskytů v sedmi souborech; `anchor.py` (čtyřvrstvé kotvení, drift) zůstává a jen se volá nad code evidencí |
+| ~~**9** — kotva jako `evidence.kind = code`~~ | ~~2 dny~~ · **hotovo** | 58 výskytů byla špatná míra: většina je slovo „anchor" jako jméno mechanismu. Čtenářů pole bylo jedenáct a schovali se za `anchor.of()`. Drahá byla dokumentace packů, ne jádro |
 | **10** — migrace PO a CEO na jádro | ~1,5 dne | **přejímka celého plánu.** Ne „umí to jádro", ale „přestaly ho packy obcházet?" Mechanismus pro PO stojí od Kroku 6, chybí `decision` a `ticket_draft` jako typy a `backlog.py` v roli vykonavatele, ne obchvatu |
 | **11** — rename `finding` → `output` | ~0,5 dne | úplně nakonec, a při tom uklidit `dispatchErrors` (od Kroku 6 odvoditelné z `actions`) |
 
 **Vědomě otevřené věci, které nepatří k žádnému kroku** — každá byla rozhodnutá, ne zapomenutá:
 
-* **`stop_errors()` nekontroluje locatory** (Krok 2). Agent dostane zpět chybějící `locator` (to je schéma), ale o neuloženém artefaktu se dozví až brána po jeho konci. Odloženo za Krok 4, aby bylo vidět, jak často to nastává — **a to je teď: první ostrý běh CEO to ukáže.** Do té doby nic neměnit.
+* **`stop_errors()` nekontroluje locatory** (Krok 2) — **už jen ty artefaktové.** Krok 9 tam dostal code locatory zadarmo (kotva se kontrolovala vždycky a teď je kotvou právě code evidence), takže agent se o vymyšleném souboru dozví ještě před koncem běhu. O neuloženém `web_snapshot` pořád až od brány; odloženo dál, protože to ukáže teprve první ostrý běh CEO.
 * ~~**`decisions()` drží jedno rozhodnutí na output**~~ — vyřešeno Krokem 7. `verdicts()` drží jednu odpověď **na lifecycle**; `decisions()` zůstal vedle ní schválně, protože „rozhodl o tom vůbec někdo?" je jiná otázka než „jak dopadla otázka X".
 * **`by` nese to, co plán chtěl po `source`** (Krok 7). Druhé pole s touž informací by znamenalo dvě místa, která si můžou odporovat. Kdyby se `source` někdy přidával, ať je to proto, že `by` na něco nestačí — ne proto, že to plán kdysi napsal.
 * **`sinks` v `finding.v1` zůstává** jako superseded (Krok 6). Nemaže se — committed historie ho má a čtenáři z něj padají zpátky. To platí i po Kroku 11.
+* **`anchor` ve `finding.v1` zůstává** jako superseded (Krok 9), ze stejného důvodu a čte ho `anchor.of()` jako záložní tvar. Rozdíl proti `sinks`: tenhle tvar je pořád **správný** — jen se nemá psát nový.
 * **`minScore` v manifestech živých packů** (Krok 8). Klíč nedělá nic, doctor to řekne, a smazat ho z cizích repozitářů odsud nejde. Patří ke Kroku 10 spolu se zbytkem migrace.
 
 **Co může říct jen ostrý provoz, ne test:**
@@ -75,7 +76,7 @@ Krok 9 je **nejdražší krok seznamu** — `anchor` má 58 výskytů v sedmi so
 | 1. `--type bet` funguje, sázka code evidenci nemá ani nepředstírá | platí (test, ne ostrý běh) |
 | 2. brána zahodí sázku s neotevřeným URL, offline | platí |
 | 3. `selection_rate` a `success_rate` jako dvě nezávislá čísla | platí od Kroku 7 — jedna sázka může být `selected` i `successful` a počítá se do obou, a nevybraná sázka už `success_rate` neředí |
-| 4. review se chová identicky jako před refactorem | platí — 469 testů, klíč dedupu u ukotvených nálezů beze změny, drift netknutý |
+| 4. review se chová identicky jako před refactorem | platí — 488 testů, klíč dedupu u ukotvených nálezů beze změny, drift netknutý, a od Kroku 9 i přes migraci tvaru: nález řečený code evidencí má týž otisk jako týž nález s polem |
 | 5. `packs/po/SKILL.md` už neobsahuje větu o obcházení jádra | **neplatí** — Krok 10 |
 
 ### Konvence, které drží plán a kód pohromadě
@@ -292,7 +293,7 @@ Architektonický test každé další featury: *potřebuje to opravdu každý pa
 | mechanismus | dnes | po plánu |
 |---|---|---|
 | `unproven` + `tool-calls.jsonl` | ověří citovaný **příkaz** | beze změny v logice, rozšíří se o non-shell tooly (Krok 1) |
-| `_exists_at_commit` | `anchor.file` @ commit | `evidence.kind = code` (Krok 9) |
+| `_exists_at_commit` | `anchor.file` @ commit | hotovo (Krok 9) — čte `anchor.places()`, tedy code locatory i staré pole, a každý z nich |
 | `weak-evidence` (`required_evidence`) | dimenze deklaruje druhy důkazů | **předloha celého plánu** — přesune se z dimenze na typ (Krok 3) |
 | `below-score` | `score < minScore` → zahodit | hotovo (Krok 8) — zanikl jako brána, `score` zůstalo jako kalibrace a nově jako pořadí u stropu |
 | `dedup` | otisk z `pack`+`type`+`dimension`+`subject_key`+podpis `body` | hotovo (Kroky 3 a 5) |
@@ -578,19 +579,28 @@ Vedle ní `read_events()` (jediné místo, které log čte) a `decisions()` pře
 
 ---
 
-### Krok 9 — uvolnit povinnou kotvu (~2 dny) — *jádro hotové v Kroku 4*
+### Krok 9 — uvolnit povinnou kotvu (~2 dny) — **hotovo**, a nebyl to nejdražší krok
 
-**Proč až teď:** teprve tady existuje plná náhrada (Krok 2) a je ověřená (Krok 4).
+**Co se změnilo:** `anchor` přestal být zvláštní pole a je z něj `evidence.kind = code`; čtyři vrstvy se přestěhovaly do `locator` beze změny. [`anchor.py`](../../packages/core/src/agency/anchor.py) — čtyřvrstvé kotvení, drift — zůstal nedotčený a přibyly mu dvě čtecí funkce. Pole ve `finding.v1` zůstává jako superseded, přesně jako `sinks` z Kroku 6: committed historie ho má a jádro ho pořád čte.
 
-**Co se mění:** `anchor` přestává být zvláštní pole a stává se `evidence.kind = code`. Není to odstranění fieldu — `anchor` má 58 výskytů v sedmi souborech jádra a [`anchor.py`](../../packages/core/src/agency/anchor.py) je celý modul (čtyřvrstvé kotvení, drift). Ten modul **zůstává**, jen se volá nad code evidencí místo nad `anchor`. Počítej s tím jako s nejdražším krokem seznamu.
-
-**Správná formulace hranice:**
+**Správná formulace hranice** platí tak, jak ji plán napsal:
 
 > Ne „CEO nemusí mít kotvu", ale **„CEO nemusí mít code evidence — musí mít jinou ověřitelnou evidenci."**
 
-**Testy:** `test_anchor_metrics.py` a `test_replay.py` beze změny chování na review nálezech.
+**Číslo 58 bylo špatná míra.** Většina těch výskytů je slovo „anchor" jako **jméno mechanismu** — modul, drift, docstringy, `anchor: required` v politice — a to nikam nejde. Míst, která čtou samotné **pole nálezu**, bylo jedenáct, a všechna se schovala za jednu funkci. Po kroku zbyly dvě, obě uvnitř `anchor.py`; ostatní `get("anchor")` v jádru čtou řádek stopy nebo klíč manifestu, což je něco jiného. Skutečná cena kroku nebyla v jádru, ale v sedmi `SKILL.md`, které kotvu učily psát jako pole.
 
-**Hotovo, když:** review nález se chová identicky jako dnes, včetně driftu, a CEO sázka nemá `code` evidenci ani ji nepředstírá.
+**Čtyři věci, které stojí za zapsání:**
+
+1. **Dvě čtecí funkce, ne jedna.** `anchor.of()` odpovídá „kde ten output sedí" — jedno místo, a čtou ho dedup, drift a fronta. `anchor.places()` odpovídá „co má brána zkontrolovat", a to je seznam: nález může citovat tři kusy kódu a vymyslet ten třetí. Jedna funkce pro obojí by tiše nechala dva ze tří důkazů nepřečtené.
+2. **`phantom-file` si musel code locatory vzít zpátky.** Ta chyba, která byla o vlásek: kdyby vymyšlený soubor v locatoru padal dál na `unverified-evidence` (kam ho dal Krok 2), pack, který se zmigruje, by měl `phantom-file` **nula** — a vypadal by jako pack, co se zlepšil. Počítadlo halucinací si drží jméno bez ohledu na to, které pole tu chybu neslo, takže `unverified()` code evidenci pustil a brána ji kontroluje pod starým jménem. Táž zásada, jakou už měl `test_a_cited_command_reads_the_same_in_both_shapes`.
+3. **`symbol` v locatoru je podmínka, ne ozdoba.** `dedup.subject_key` bere místo outputu ze symbolu. Kdyby ho locator neuměl nést, první běh po migraci by nahlásil **celý backlog znovu** a nic by na to neupozornilo. Proto `locator` dostal `snippet`, `symbol` i `body` a proto je na to vlastní test (`test_a_pack_that_migrates_does_not_report_its_backlog_again`).
+4. **Politika se s `evidence.required` nesloučila**, i když teď obě mluví o druzích evidence. Ptají se jinak: `evidence.required` je seznam, ze kterého stačí **jeden**, `anchor: required` je druh, který tam **musí** být. Review nález potřebuje `code` **a** jeden z graph/rule, a to seznam s „nebo" neumí říct.
+
+**Tři věci spravené cestou** (všechny nalezené tím, že se do těch souborů sahalo): popis `score` ve `finding.v1` pořád tvrdil, že se nález pod prahem nepublikuje — to Krok 8 minul; fallback v `agency validate` bez `jsonschema` vyžadoval `anchor` jako povinný klíč, ačkoliv ze `required` vypadl už v Kroku 4; `verify/SKILL.md` popisoval tvar `upstream.json`, který nikdy neměl (`_view` kotvu plochá na `file`/`line`/`symbol`). A `stop_errors()` teď kontroluje i locatory — částečně tím zaniká jedna z vědomě otevřených věcí z Kroku 2.
+
+**Testy:** 6 nových, 488 celkem. Nález řečený novým tvarem projde branou stejně jako starý; typ, který má ukazovat do kódu, se nespokojí s grafovým faktem; kontroluje se **každé** citované místo, ne první; migrovaný pack nehlásí backlog znovu; čtyři vrstvy a drift čtou locator stejně jako pole; stopa si po odmítnutí pamatuje místo i u nálezu, který ho řekl nově.
+
+**Hotovo, když:** ~~review nález se chová identicky jako dnes, včetně driftu, a CEO sázka nemá `code` evidenci ani ji nepředstírá.~~ Platí obojí.
 
 ---
 
@@ -638,7 +648,7 @@ To je jediná ochrana před frameworkem, který půl roku vypadá, že se učí.
 
 ## 6. Pasti
 
-1. **Uvolnit kotvu dřív než dodat locatory** (§0.2). Brána spadne na nulu kontrol a nikdo si toho nevšimne, protože testy na review nálezy dál projdou — ty kotvu mají.
+1. ~~**Uvolnit kotvu dřív než dodat locatory**~~ (§0.2, Krok 9) — nenastalo, pořadí kroků ji obešlo. Past, která nastala místo toho: **přejmenovat důvod zahození při stěhování pole.** Vymyšlený soubor v locatoru padal od Kroku 2 na `unverified-evidence`; kdyby to tak zůstalo, pack po migraci by měl `phantom-file` nula a vypadal by, že přestal halucinovat. Jméno chyby patří chybě, ne poli, které ji nese.
 2. **Plochá feedback mapa** (§1.3). Vyrobí číslo, které vypadá jako metrika a není žádná.
 3. **Hrubý `subject`** (Krok 5). Vypne pojistku v dedupu a začne slučovat různá tvrzení.
 4. **Nechat `scope` psát agenta** (§3.2). Nekontrolovatelné, gameable, a stejně pozdě.
