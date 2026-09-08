@@ -7,7 +7,7 @@
 // can sit on and `vscode.diff` can open.
 //
 // Anchor resolution and the drift test are NOT here. The CLI does them and
-// sends them finished in `agency findings --json`. If both sides could do
+// sends them finished in `agency outputs --json`. If both sides could do
 // them, there would be two answers to the same question — and the deciding one
 // would be whichever happened to run.
 

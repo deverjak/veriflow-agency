@@ -8,7 +8,7 @@
   "graph": false,
   "prompt": "required",
   "needs": [
-    "agency packs", "agency doctor", "agency knowledge", "agency findings",
+    "agency packs", "agency doctor", "agency knowledge", "agency outputs", "agency findings",
     "git", "rg",
     "gh repo view", "gh issue list", "gh project list", "gh label list"
   ],

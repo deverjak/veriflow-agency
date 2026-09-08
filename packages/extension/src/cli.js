@@ -91,7 +91,7 @@ const status = (cwd) => read(cwd, ['status', '--limit', '25'], { project: null, 
 const metrics = (cwd) => read(cwd, ['metrics'], null);
 
 /** Findings across runs — with anchor, drift and history. Those are `--json` only. */
-const findings = (cwd) => read(cwd, ['findings', '--all'], []);
+const findings = (cwd) => read(cwd, ['outputs', '--all'], []);
 
 /** PRs to review, open and past. Backs the clickable picker. */
 const prs = (cwd, { state = 'all', limit = 30 } = {}) =>

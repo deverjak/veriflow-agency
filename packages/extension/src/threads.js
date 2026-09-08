@@ -8,7 +8,7 @@
 // input to a metric, a note is free text; mixing them breaks either the
 // measurement or the usability — the spike tried it and broke both.
 //
-// Where a thread goes is the CLI's answer: `agency findings --json` sends
+// Where a thread goes is the CLI's answer: `agency outputs --json` sends
 // `resolved` (the anchor after drift) and `drift`. The extension does not
 // compute it again.
 

@@ -3,7 +3,7 @@
 **Datum:** 2026-09-06
 **Navazuje na:** [`agency-v1.md`](agency-v1.md) (pack je skill v projektu, žádná konfigurace), [`harness.md`](harness.md) (provenience tool callů, brána, metriky, revize packu), [`findings-ownership.md`](findings-ownership.md) (board je stav, lokál je brána a stopa), [`teams.md`](teams.md) (řetěz), [`shared-memory.md`](shared-memory.md) (paměť patří projektu)
 **Řeší:** jádro dnes umí evidovat jediný druh výstupu — nález s kotvou na soubor a řádek. PO a CEO produkují rozhodnutí, odpovědi, sázky a drafty, a **oba už jádro kvůli tomu obcházejí**. Plán zobecňuje mechanismy, které v jádru fungují (brána, dedup, sinky, paměť, metriky), tak aby přestaly předpokládat code-review nález — a nedělá z Agency univerzální platformu.
-**Stav k 8. 9. 2026:** Kroky 1–10 hotové a commitnuté (testy 499 zelených). Svislý řez `bet` prošel u Kroku 4 a **přeskládal zbytek plánu**; Krok 5 dal outputu `subject` a běhu `scope`, Krok 6 nahradil `sinks` akcemi a cestou opravil dvě místa, kde `agency ingest` nebyl idempotentní, Krok 7 zúžil fold událostí na jeden na lifecycle a oživil `requires`, Krok 8 vyndal `score` z brány a nahradil ho stropem, Krok 9 přestěhoval kotvu do `evidence.kind = code` a Krok 10 provedl přejímku: PO a CEO přestaly jádro obcházet. Živé packy v obou cizích repozitářích jsou dorovnané a `agency doctor` je v nich čistý — čeká se na první ostrý běh. Zbývá Krok 11 (rename `finding` → `output`).
+**Stav k 8. 9. 2026:** **Plán je hotový** — Kroky 1–11 commitnuté, 501 testů zelených, přejímka §7 splněná. Svislý řez `bet` prošel u Kroku 4 a **přeskládal zbytek plánu**; Krok 5 dal outputu `subject` a běhu `scope`, Krok 6 nahradil `sinks` akcemi a cestou opravil dvě místa, kde `agency ingest` nebyl idempotentní, Krok 7 zúžil fold událostí na jeden na lifecycle a oživil `requires`, Krok 8 vyndal `score` z brány a nahradil ho stropem, Krok 9 přestěhoval kotvu do `evidence.kind = code` a Krok 10 provedl přejímku: PO a CEO přestaly jádro obcházet. Živé packy v obou cizích repozitářích jsou dorovnané a `agency doctor` je v nich čistý — čeká se na první ostrý běh. Krok 11 přejmenoval příkaz na `agency outputs` (`findings` zůstává aliasem napořád). Co zbývá, je ostrý provoz — viz „Co může říct jen ostrý provoz“ níž.
 
 **Nedělá:** nový generický agent framework. Žádný plugin systém metrik, žádný registr typů, žádná doménová znalost v jádru. Přibývají přesně dvě abstrakce — `TypePolicy` a `Run.scope`.
 
@@ -30,20 +30,20 @@ python .claude\skills\agency-ceo\scripts\scope.py   # tři živé sázky, ne pr�
 agency doctor --json                                # žádné „pack ceo scope" ani „pack ceo outputs"
 ```
 
-Stav k 8. 9. 2026: Kroky 1–10 hotové, 499 testů, živé packy dorovnané. **Zbývá Krok 11** (rename `finding` → `output`).
+Stav k 8. 9. 2026: **hotovo, všech jedenáct kroků**, 501 testů, živé packy dorovnané. Zbývá ostrý provoz, ne kód.
 
-### První pohyb v Kroku 11
+### Co dělat teď, když je plán hotový
 
-Krok 11 je poslední a je to **přejmenování, ne změna chování**. Přesně proto stojí až tady: rename na začátku by vyrobil generický název nad review sémantikou a vypadal by jako pokrok.
+Kód je hotový a přejímka §7 platí. **Co zbývá, není další krok — je to provoz**, a jsou to přesně ty čtyři věci ze seznamu „co může říct jen ostrý provoz" níž. Kdo tenhle plán otevře příště, ať začne tam a ne v kódu.
 
-1. **Co se přejmenovává je slovník, ne data.** `findings.json`, `finding.v1`, klíč `findingId` v událostech a `anchor`/`sinks` jako superseded pole **zůstávají** — je v nich committed historie tří repozitářů a přepsat ji nejde. Mění se povrch, který čte člověk: `agency outputs` jako hlavní příkaz, `agency findings` jako alias, a jazyk v nápovědě.
-2. **Alias není dočasnost.** Uživatel review packu má dál vidět „nálezy"; `agency findings` a `agency triage accept` zůstávají napořád, ne do příště.
-3. **A při té příležitosti `dispatchErrors`** — od Kroku 6 je odvoditelné z `actions[]` a je to poslední zdvojený zápis téhož faktu.
-4. **Past, kterou tenhle krok má:** přejmenovat i tam, kde slovo `finding` znamená review nález a ne obecný output. `FINDING_POLICY`, `FINDING_REASONS`, `DEFAULT_TYPE = "finding"` jsou správně pojmenované a zůstávají — typ se doopravdy jmenuje `finding`.
+1. **Pusť CEO nad Kvesterosem a PO nad main-panelem.** Obojí je dorovnané a doktor je čistý; co se nikdy nespustilo, není hotové, jen otestované.
+2. **První ostrý běh PO je ten důležitější**, protože poprvé posílá rozhodnutí na board přes jádro. Sleduj `actions[]` na outputu: úspěch nese packovo `kind` (`decide`, `draft`), neúspěch nese `error` a output zůstane `candidate` na další pokus.
+3. **Až board odpoví, zapiš to.** `agency feedback <id> upheld|overridden|reverted` — bez toho je `upheld_rate` prázdná a §5 „derived" je pořád jen tvrzení. Totéž platí pro `selection_rate` u sázek: dokud zakladatel nevybere, není jmenovatel.
+4. **Neopravuj čísla, oprav metodu.** `agency metrics --for-author <pack>` je na to postavené a od Kroku 3 zná i `byLifecycle`. Pack, který má precision 0.4, se nemá přeskórovat — má se přepsat.
 
 ### Co chybí — inventura k 8. 9. 2026
 
-**Zbývající kroky**, s tím, co je na každém z nich to podstatné:
+**Zbývající kroky:** žádné. Tabulka zůstává jako záznam toho, kde odhad seděl a kde ne.
 
 | krok | odhad | co je na tom podstatné |
 |---|---|---|
@@ -51,7 +51,7 @@ Krok 11 je poslední a je to **přejmenování, ne změna chování**. Přesně 
 | ~~**8** — `score` přestane být branou~~ | ~~0,5 dne~~ · **hotovo** | náhrada existovala, ale platila jen packu, který si ji vyžádal — a to byl jeden ze sedmi. Strop dostal backstop (25, změřený z `baseline.md`) a score se z brány přesunulo do řazení nad stropem |
 | ~~**9** — kotva jako `evidence.kind = code`~~ | ~~2 dny~~ · **hotovo** | 58 výskytů byla špatná míra: většina je slovo „anchor" jako jméno mechanismu. Čtenářů pole bylo jedenáct a schovali se za `anchor.of()`. Drahá byla dokumentace packů, ne jádro |
 | ~~**10** — migrace PO a CEO na jádro~~ | ~~1,5 dne~~ · **hotovo** | přejímka prošla, a otevřela dvě mezery, které mohl najít jen ostrý typ se sinkem: typ, který smí jednat, neměl kam zapsat, že jednal, a `agency feedback` odmítal každý typ se sinkem. Stará cesta je zavřená přes `needs`, ne přes prosbu v SKILL.md |
-| **11** — rename `finding` → `output` | ~0,5 dne | úplně nakonec, a při tom uklidit `dispatchErrors` (od Kroku 6 odvoditelné z `actions`) |
+| ~~**11** — rename `finding` → `output`~~ | ~~0,5 dne~~ · **hotovo** | `agency outputs` hlavní, `findings` alias napořád. Data (`findings.json`, `finding.v1`, `findingId`) se nepřejmenovala — je v nich committed historie tří repozitářů. `dispatchErrors` zůstává: inventura si tu odporovala s Krokem 6 a pravdu měl Krok 6 |
 
 **Vědomě otevřené věci, které nepatří k žádnému kroku** — každá byla rozhodnutá, ne zapomenutá:
 
@@ -631,11 +631,19 @@ Vedle ní `read_events()` (jediné místo, které log čte) a `decisions()` pře
 
 ---
 
-### Krok 11 — rename `finding` → `output` (~0,5 dne)
+### Krok 11 — rename `finding` → `output` (~0,5 dne) — **hotovo**
 
 Úplně nakonec, v okamžiku, kdy to skutečně nejsou jen nálezy. Rename na začátku by vyrobil generický název nad review sémantikou — nejhorší z obou světů, a přitom by vypadal jako pokrok.
 
-`agency findings` a `agency triage accept` zůstávají jako aliasy. Uživatel review packu klidně může dál vidět „nálezy".
+**Co se přejmenovalo:** `agency outputs` je hlavní příkaz, `agency findings` jeho alias — **napořád, ne do příště**. Nálezy revizora *jsou* findings, od toho to slovo je; co rename kupuje, je zakladatel, který čte `agency outputs --type bet` a neptá se, která z jeho tří sázek je nález. Packy mají v `needs` obě jména, protože obě jsou pravdivá.
+
+**Co se schválně nepřejmenovalo, a proč:**
+
+* **`findings.json`, `finding.v1`, `findingId` v událostech.** V těch souborech je committed historie tří repozitářů. Přejmenovat je znamená buď migrovat cizí repa, nebo mít dvě jména na totéž — a to druhé je přesně ta past, kterou plán řešil u `sinks` a `anchor`.
+* **`FINDING_POLICY`, `FINDING_REASONS`, `DEFAULT_TYPE = "finding"`.** Ta jména nejsou pozůstatek, jsou správná: typ se doopravdy jmenuje `finding` a ta politika je jeho. Zobecnit je by znamenalo tvrdit, že `finding` je něco obecného, což je opak toho, co plán udělal.
+* **`dispatchErrors` v `run.json`.** Tohle je jediné místo, kde si plán odporoval sám se sebou: inventura psala „při tom uklidit, je to od Kroku 6 odvoditelné z `actions`", ale retrospektiva Kroku 6 už dřív rozhodla, že **zůstává**, a měla pro to důvod. Platí ten důvod: `actions[]` je append-only a odpovídá „co se s tímhle outputem kdy stalo", `dispatchErrors` se přepočítá při každém ingestu a odpovídá „co tenhle **běh** neodeslal". Druhý ingest ho vyprázdní, akce z prvního zůstane — jsou to dvě otázky, ne jeden zdvojený zápis.
+
+**Testy:** 2 nové, 501 celkem. Obě hláskování míří na tentýž příkaz; `--type decision` vrátí rozhodnutí a ne nálezy téhož běhu, a to rozhodnutí nemá místo ve zdrojáku.
 
 ---
 

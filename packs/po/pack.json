@@ -8,7 +8,7 @@
   "graph": false,
   "prompt": "required",
   "needs": [
-    "agency triage", "agency note", "agency findings", "agency feedback",
+    "agency triage", "agency note", "agency outputs", "agency findings", "agency feedback",
     "git", "gh issue view",
     "python .claude/skills/agency-po/scripts/backlog.py snapshot",
     "python .claude/skills/agency-po/scripts/backlog.py comment"

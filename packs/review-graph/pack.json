@@ -8,7 +8,7 @@
   "graph": { "required": ["changes", "impact"], "optional": [] },
   "prompt": "optional",
   "needs": [
-    "agency triage", "agency note", "agency findings",
+    "agency triage", "agency note", "agency outputs", "agency findings",
     "code-review-graph", "git",
     "gh pr view", "gh pr diff", "gh pr comment", "gh issue view",
     "npx vitest", "npm test"

@@ -1124,3 +1124,37 @@ def test_the_disposition_travels_in_the_packs_own_text(project):
     assert "Trigger: první" in prose, \
         "the block ends at the blank line — a colon in the prose is not a header"
     assert head["disposition"] in backlog.DISPOSITIONS
+
+
+# --------------------------------------------------------- the command's name
+
+def test_the_command_is_outputs_and_findings_stays_an_alias(project):
+    """Eleven steps of generalising the core, and the last one renames the
+    command a reviewer types every day.
+
+    `findings` stays an alias for good, not until the next release: a
+    reviewer's outputs ARE findings, and that is what the word is for. What
+    the new name buys is a founder reading `agency outputs --type bet`
+    without having to wonder which of their three bets is a finding."""
+    parser = cli.build_parser()
+
+    assert parser.parse_args(["outputs"]).fn is cli.cmd_outputs
+    assert parser.parse_args(["findings"]).fn is cli.cmd_outputs,         "the old spelling has to keep working — people have it in scripts"
+
+
+def test_outputs_can_be_asked_for_one_kind(project, make_run, capsys):
+    """One run now writes more than one kind of thing, and a product owner
+    looking at what was decided does not want it among the queue's findings.
+    This is the whole reason the type exists at the CLI at all."""
+    run = _po_run(project, make_run,
+                  [_decision(project), make_finding(project, "x", pack="po")])
+    ingest.ingest(project, run)
+    capsys.readouterr()
+
+    assert cli.main(["findings", "--run", run.id, "--type", "decision", "--json",
+                     "--repo", str(project.root)]) == 0
+
+    rows = json.loads(capsys.readouterr().out)
+    assert [r["type"] for r in rows] == ["decision"]
+    assert rows[0]["file"] is None, "a decision does not sit in the source"
+

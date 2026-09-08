@@ -8,7 +8,7 @@
   "graph": false,
   "prompt": "required",
   "needs": [
-    "agency triage", "agency note", "agency findings",
+    "agency triage", "agency note", "agency outputs", "agency findings",
     "git", "npx playwright test", "curl", "gh project item-list"
   ],
   "sink": "python .claude/skills/agency-po/scripts/backlog.py dispatch --output {id} --run-dir {runDir}",

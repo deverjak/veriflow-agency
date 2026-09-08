@@ -473,7 +473,7 @@ def session_name(pack_name: str, run_id: str) -> str:
 
     The pack and the run are both in it because the app shows a list of names
     and nothing else: `agency-po-01k5m2rr` says which specialist is asking and
-    which run it belongs to, and `agency findings --run 01k5m2rr` finds the
+    which run it belongs to, and `agency outputs --run 01k5m2rr` finds the
     rest. A hostname-prefixed default would say only which computer it is.
     """
     return f"agency-{pack_name}-{run_id[:8].lower()}"

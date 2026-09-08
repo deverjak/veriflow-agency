@@ -8,7 +8,7 @@
   "graph": false,
   "prompt": "optional",
   "needs": [
-    "agency triage", "agency note", "agency findings", "agency knowledge",
+    "agency triage", "agency note", "agency outputs", "agency findings", "agency knowledge",
     "git",
     "WebSearch", "WebFetch"
   ],

@@ -8,7 +8,7 @@
   "graph": true,
   "prompt": "none",
   "needs": [
-    "agency triage", "agency note", "agency findings", "agency graph",
+    "agency triage", "agency note", "agency outputs", "agency findings", "agency graph",
     "git"
   ],
   "budget": { "turns": 50, "minutes": 20 },

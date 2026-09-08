@@ -434,7 +434,7 @@ def cmd_run(args, chain: dict | None = None, pinned: dict | None = None) -> int:
                 f"least {metrics.REVISE_MINIMUM}.\nA method rewritten against fewer is "
                 f"differently random, not better — and it would replace the one whose "
                 f"numbers you already know.\nRun the pack, decide what it finds "
-                f"(`agency findings`), come back.")
+                f"(`agency outputs`), come back.")
         prompt_text = prompt_text or (
             f"Revise the {revise} pack against its own record. The brief is in "
             f"RUN_DIR/evidence/for-author.md.")
@@ -1478,7 +1478,7 @@ def _ingest_report(run, data: dict) -> None:
         print(f"  {out.dim('knowledge')}  {touched} file{'' if touched == 1 else 's'} "
               f"updated in {out.dim(b['path'])}\n")
     if c["kept"]:
-        print(f"  Next: {out.bold('agency findings')}  or the Agency panel in VS Code\n")
+        print(f"  Next: {out.bold('agency outputs')}  or the Agency panel in VS Code\n")
 
 
 def cmd_ingest(args) -> int:
@@ -1655,7 +1655,7 @@ def cmd_metrics(args) -> int:
 
 # ---------------------------------------------------------------- findings
 
-def cmd_findings(args) -> int:
+def cmd_outputs(args) -> int:
     project = _project(args)
     selected = runs.load_runs(project) if args.all else (
         [r] if (r := runs.find_run(project, args.run)) else [])
@@ -2378,11 +2378,18 @@ def build_parser() -> argparse.ArgumentParser:
                    help="discard even a run that carries decisions")
     s.set_defaults(fn=cmd_cleanup)
 
-    s = sub.add_parser("findings", parents=[common], help="findings and their decisions")
+    # `findings` is an alias and stays one — permanently, not until the next
+    # release. A reviewer's outputs ARE findings, that is what the word is for,
+    # and eleven steps of generalising the core is no reason to make somebody
+    # relearn the command they type every day. What the rename buys is the
+    # founder reading `agency outputs --type bet` and not wondering which of
+    # their three bets is a finding.
+    s = sub.add_parser("outputs", parents=[common], aliases=["findings"],
+                       help="outputs and the verdicts on them")
     s.add_argument("--run")
     s.add_argument("--all", action="store_true", help="across all runs")
     s.add_argument("--type", help="only outputs of this type (`bet`, `decision`, …)")
-    s.set_defaults(fn=cmd_findings)
+    s.set_defaults(fn=cmd_outputs)
 
     s = sub.add_parser("feedback", parents=[common],
                        help="what happened to an output, in its own type's words")
@@ -2394,7 +2401,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="who says so — `hire:<id>` for a specialist, `human` for a person")
     s.set_defaults(fn=cmd_feedback)
 
-    s = sub.add_parser("triage", parents=[common], help="decide on a finding — an agent calls this too")
+    s = sub.add_parser("triage", parents=[common], help="accept or reject an output — an agent calls this too")
     s.add_argument("action", choices=["accept", "reject"])
     s.add_argument("finding")
     # No `choices`: which reasons are allowed depends on the output's type
@@ -2406,7 +2413,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="who decides — `hire:<id>` for a specialist (ready-made in context.json), `human` for a person")
     s.set_defaults(fn=cmd_triage)
 
-    s = sub.add_parser("note", parents=[common], help="a note on a finding — free text, not a decision")
+    s = sub.add_parser("note", parents=[common], help="a note on an output — free text, not a verdict")
     s.add_argument("finding")
     s.add_argument("text")
     s.add_argument("--by", default=runs.HUMAN,

@@ -32,7 +32,7 @@ done, `agency ingest` runs the gate and sends what passes it straight to the
 board through the pack's `sink`:
 
 ```
-agency findings                     # what happened to each one — sent, or why not
+agency outputs                      # what happened to each one — sent, or why not
 ```
 
 The same thing in the editor: findings sit next to the line of code,
@@ -348,7 +348,7 @@ with a bucket full of unknowns. The table names the default instead
   "worktree": false,
   "graph": false,
   "prompt": "required",
-  "needs": ["agency triage", "agency note", "agency findings",
+  "needs": ["agency triage", "agency note", "agency outputs",
             "git", "gh issue view",
             "python .claude/skills/agency-po/scripts/backlog.py"],
   "minScore": 75,

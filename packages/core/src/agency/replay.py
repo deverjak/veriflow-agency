@@ -93,7 +93,7 @@ def pin(project: Project, run, name: str) -> dict:
     if not gold:
         raise SystemExit(
             f"Run {run.id[:10]} has no decided findings, so there is no answer key in "
-            f"it.\nDecide some (`agency findings`, or a `verify` member) and pin it "
+            f"it.\nDecide some (`agency outputs`, or a `verify` member) and pin it "
             f"afterwards.")
 
     fixture = {
