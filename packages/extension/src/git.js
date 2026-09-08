@@ -1,14 +1,15 @@
-// Kód v den analýzy.
+// The code as it was on the day of the analysis.
 //
-// Nález vznikl na commitu, který ve tvojí pracovní kopii dávno není. Bez
-// možnosti podívat se na TEN kód se retrospektivní audit nedá odbavit: díváš
-// se na dnešek a hádáš, co tam bylo. Proto vlastní scheme `agency:` — VS Code
-// z něj udělá plnohodnotný read-only dokument, na který jde posadit vlákno
-// i pustit `vscode.diff`.
+// A finding was made on a commit that has long since left your working tree.
+// Without a way to look at THAT code a retrospective audit cannot be worked
+// through: you look at today and guess what used to be there. Hence the custom
+// `agency:` scheme — VS Code turns it into a full read-only document a thread
+// can sit on and `vscode.diff` can open.
 //
-// Rozlišení kotvy a test driftu tady NEJSOU. Dělá je CLI a posílá je hotové
-// v `agency findings --json`. Kdyby je uměly obě strany, byly by dvě odpovědi
-// na tutéž otázku — a ta rozhodující by byla ta, která se zrovna spustila.
+// Anchor resolution and the drift test are NOT here. The CLI does them and
+// sends them finished in `agency findings --json`. If both sides could do
+// them, there would be two answers to the same question — and the deciding one
+// would be whichever happened to run.
 
 const vscode = require('vscode');
 const cp = require('child_process');
@@ -34,7 +35,7 @@ async function commitExists(repo, commit) {
   return r.ok;
 }
 
-/** `agency:/<cesta>?repo=<abs>&commit=<sha>` */
+/** `agency:/<path>?repo=<abs>&commit=<sha>` */
 function commitUri(repo, commit, relPath) {
   return vscode.Uri.from({
     scheme: SCHEME,
@@ -53,9 +54,9 @@ class CommitContentProvider {
     const content = await showAtCommit(repo, commit, rel);
     if (content !== null) return content;
 
-    // Squash-merge se smazanou větví je na GitHubu default, takže commit
-    // v klonu chybět MŮŽE. Záchranná síť je `anchor.body` v nálezu; tenhle
-    // text je poslední instance, kdy ani ta není.
+    // A squash-merge with a deleted branch is the GitHub default, so the
+    // commit CAN be missing from the clone. The safety net is `anchor.body` on
+    // the finding; this text is the last resort when even that is gone.
     return [
       `// Commit ${String(commit).slice(0, 8)} is not in this clone.`,
       `//`,

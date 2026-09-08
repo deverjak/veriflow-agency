@@ -1,4 +1,4 @@
-"""Drobnosti, které používá zbytek balíčku."""
+"""The small things the rest of the package uses."""
 
 from __future__ import annotations
 
@@ -15,10 +15,10 @@ _CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
 
 def ulid() -> str:
-    """ULID: 48 bitů času + 80 bitů náhody, lexikograficky řaditelné.
+    """ULID: 48 bits of time + 80 bits of randomness, lexicographically sortable.
 
-    Ne autoincrement — konvence 1 z plánu. Bez toho vzniknou při slučování
-    dvou historií (tvoje a agentova) kolize ID.
+    Not an autoincrement — convention 1 of the plan. Without it, merging two
+    histories (yours and an agent's) collides on ids.
     """
     ms = int(time.time() * 1000)
     rnd = random.getrandbits(80)
@@ -32,9 +32,9 @@ def ulid() -> str:
 
 # ---------------------------------------------------------------- JSON
 
-# Rozliší „default se nepředal" od „default je None". Bez toho se
-# `read_json(p, default=None)` chová jako bez defaultu a vyhodí výjimku —
-# a `agency init` spadne na projektu, který prostě nemá package.json.
+# Tells "no default was passed" apart from "the default is None". Without it
+# `read_json(p, default=None)` behaves as if it had no default and raises —
+# and `agency init` falls over on a project that simply has no package.json.
 _NO_DEFAULT = object()
 
 
@@ -58,7 +58,7 @@ def write_json(path: Path, data: Any) -> None:
 
 
 def strip_comments(obj: Any) -> Any:
-    """Vyhodí klíče `$comment*` — šablony konfigurace je používají na vysvětlivky."""
+    """Drops `$comment*` keys — config templates use them for explanations."""
     if isinstance(obj, dict):
         return {k: strip_comments(v) for k, v in obj.items() if not k.startswith("$comment")}
     if isinstance(obj, list):
@@ -66,16 +66,17 @@ def strip_comments(obj: Any) -> Any:
     return obj
 
 
-# ---------------------------------------------------------------- cesty
+# ---------------------------------------------------------------- paths
 
 def posix(p: str | Path) -> str:
-    """Cesty v záznamech jsou vždy POSIX a relativní. Absolutní cesta v run
-    recordu znamená, že se nedá sdílet ani commitovat — konvence 3 z plánu."""
+    """Paths in records are always POSIX and relative. An absolute path in a
+    run record means it can be neither shared nor committed — convention 3 of
+    the plan."""
     return str(p).replace("\\", "/")
 
 
 def bundled(*parts: str) -> Path:
-    """Packs a schemas — buď z wheelu, nebo z repozitáře při vývoji."""
+    """Packs and schemas — from the wheel, or from the repository in development."""
     here = Path(__file__).resolve().parent
     inside = here / "_bundled"
     if inside.is_dir():

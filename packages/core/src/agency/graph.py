@@ -1,16 +1,18 @@
-"""Grafová vrstva — otázky, které recenze klade.
+"""The graph layer — the questions a review asks.
 
-Verby jsou pojmenované podle **otázek**, ne podle příkazů nástroje: obtisk
-současného CLI vypadá jako abstrakce a při druhé implementaci praskne. Volající
-nikdy nevidí stdout — parsing bydlí tady a ven jde typovaný dict.
+The verbs are named after the **questions**, not after the tool's commands: an
+imprint of the current CLI looks like an abstraction and breaks on the second
+implementation. The caller never sees stdout — parsing lives here and a typed
+dict goes out.
 
-Tenhle modul **je** dnes driver `code-review-graph`. Rozdělit ho do `drivers/`
-má smysl v den, kdy vzniká druhý soubor; do té doby je registr driverů mrtvý
-kód (`docs/plans/graph-abstraction.md`, Krok 3).
+Today this module **is** the `code-review-graph` driver. Splitting it into
+`drivers/` makes sense on the day a second file appears; until then a driver
+registry is dead code (`docs/plans/graph-abstraction.md`, Step 3).
 
-Chybějící schopnost není chyba. Dvě z osmi otázek umí dnes jedině CRG
-(`unreferenced`, `tests-for`) a každá z nich nese celou dimenzi packu — po
-výměně driveru se dimenze přeskočí a zapíše se to, místo aby běh spadl.
+A missing capability is not an error. Two of the eight questions are answered
+today only by CRG (`unreferenced`, `tests-for`) and each carries a whole pack
+dimension — after a driver swap the dimension is skipped and that is recorded,
+instead of the run falling over.
 """
 
 from __future__ import annotations
@@ -23,33 +25,35 @@ from typing import Any
 from . import proc
 from .util import posix
 
-#: Id driveru. Jde do run recordu, aby po výměně šlo poznat, jestli nálezů
-#: ubylo kvůli horšímu nástroji, nebo jen proto, že zmizela schopnost.
+#: The driver's id. It goes into the run record so that after a swap it can be
+#: told whether findings dropped because the tool is worse, or only because a
+#: capability disappeared.
 DRIVER = "code-review-graph"
 
 DB_PATH = ".code-review-graph/graph.db"
 
-#: Otázky, které klade každá recenze.
+#: The questions every review asks.
 CORE = ("state", "refresh", "changes", "impact", "locate", "neighbors")
-#: Otázky, které nemá každý nástroj — GitNexus ani Graphify neumí ani jednu.
+#: The questions not every tool has — neither GitNexus nor Graphify answers one.
 EXTENDED = ("unreferenced", "tests-for")
 
-#: Jak se index dostane do jednorázového worktree. CRG umí kopii souboru
-#: a přírůstkový update; jiný driver bude muset reindexovat nebo přestavět.
+#: How the index reaches a throwaway worktree. CRG can do a file copy and an
+#: incremental update; another driver will have to reindex or rebuild.
 WORKSPACE_STRATEGY = "copy-db"
 
-#: Směr v grafu voláním. „Kdo mě volá" je otázka, „callers_of" je příkaz.
+#: Direction in the call graph. "Who calls me" is a question, "callers_of" is a
+#: command.
 DIRECTIONS = {"in": "callers_of", "out": "callees_of"}
 
 
 @dataclass
 class Answer:
-    """Odpověď driveru: normalizovaná data, a vedle nich to, co skutečně řekl.
+    """A driver's answer: normalised data, and beside it what it actually said.
 
-    `data` je kontrakt — na ten se volající smí spolehnout a přežije výměnu
-    driveru. `raw` je evidence: ukládá se do běhu, aby šlo dohledat, z čeho
-    nález vznikl, a po výměně driveru se změní. Kdyby existovalo jen jedno
-    z toho, buď by nešlo vyměnit, nebo by nešlo doložit.
+    `data` is the contract — that is what a caller may rely on, and it survives
+    a driver swap. `raw` is evidence: it is stored with the run so a finding can
+    be traced back to what it came from, and it changes when the driver does. If
+    only one of the two existed, either swapping or evidencing would be lost.
     """
     ok: bool
     data: Any = None
@@ -58,7 +62,7 @@ class Answer:
 
 
 def capabilities() -> list[str]:
-    """Co tenhle driver umí. Volající se ptá předem, ne až podle výjimky."""
+    """What this driver can do. A caller asks up front, not from an exception."""
     return [*CORE, *EXTENDED]
 
 
@@ -78,7 +82,8 @@ def _parsed(r: proc.Result) -> Answer:
 
 
 def _rel(repo: str | Path, path: str | None) -> str | None:
-    """Cesta relativně k repu. Driver vrací absolutní, kotva potřebuje krátkou."""
+    """A path relative to the repo. The driver returns absolute, the anchor
+    needs short."""
     if not path:
         return None
     p = Path(path)
@@ -89,7 +94,7 @@ def _rel(repo: str | Path, path: str | None) -> str | None:
 
 
 def _node(repo: str | Path, n: dict) -> dict:
-    """Uzel grafu tak, jak ho potřebuje volající: kde to je a co to je."""
+    """A graph node the way the caller needs it: where it is and what it is."""
     return {
         "name": n.get("name"),
         "kind": n.get("kind"),
@@ -103,11 +108,12 @@ def _node(repo: str | Path, n: dict) -> dict:
 # ------------------------------------------------------------------- core
 
 def state(repo: str | Path) -> Answer:
-    """Stav a čerstvost indexu.
+    """The index's state and freshness.
 
-    Chybějící index není chyba — je to odpověď „ještě se nestavěl". Čerstvost
-    se pozná porovnáním commitu, na kterém se stavělo, s tím dnešním: index
-    z jiné hlavičky umí nález opřít o kód, který na téhle větvi neexistuje.
+    A missing index is not an error — it is the answer "it has not been built
+    yet". Freshness is told by comparing the commit it was built on with
+    today's: an index from another head can rest a finding on code that does
+    not exist on this branch.
     """
     db = Path(repo) / DB_PATH
     base = {"driver": DRIVER, "exists": db.is_file(), "path": str(db)}
@@ -133,10 +139,10 @@ def state(repo: str | Path) -> Answer:
 
 
 def refresh(repo: str | Path) -> Answer:
-    """Doindexuj pro tenhle běh.
+    """Top the index up for this run.
 
-    `build` se tudy nespouští nikdy — přestavěl by celé repo kvůli stavu, který
-    se za chvíli zahodí.
+    `build` is never run from here — it would rebuild the whole repo for a
+    state that is thrown away shortly after.
     """
     r = proc.crg("update", "--repo", str(repo))
     if not r.ok:
@@ -145,11 +151,11 @@ def refresh(repo: str | Path) -> Answer:
 
 
 def changes(repo: str | Path, base: str) -> Answer:
-    """Co se změnilo proti base — v číslech, ne ve větě.
+    """What changed against base — in numbers, not in a sentence.
 
-    `functionsTruncated` je tam proto, že driver seznam ořezává a ten strop
-    hlásí ve svém shrnutí jako výsledek; bez příznaku by se do záznamu zapsalo
-    „500 změněných funkcí" jako fakt, ne jako dolní odhad.
+    `functionsTruncated` is there because the driver truncates the list and
+    reports that ceiling in its summary as a result; without the flag the record
+    would carry "500 changed functions" as a fact rather than a lower bound.
     """
     a = _parsed(proc.crg("detect-changes", "--repo", str(repo), "--base", base))
     if not a.ok:
@@ -167,7 +173,7 @@ def changes(repo: str | Path, base: str) -> Answer:
 
 def impact(repo: str | Path, files: list[str], depth: int = 2,
            max_results: int = 30) -> Answer:
-    """Blast radius: co ještě se těch souborů dotýká."""
+    """Blast radius: what else touches those files."""
     if not files:
         return Answer(True, data={"changedNodes": 0, "impacted": 0, "impactedFiles": 0})
     a = _parsed(proc.crg("impact", "--repo", str(repo), "--files", *files[:40],
@@ -186,7 +192,7 @@ def impact(repo: str | Path, files: list[str], depth: int = 2,
 
 def locate(repo: str | Path, symbol: str, kind: str | None = None,
            limit: int = 5) -> Answer:
-    """Symbol → `file:line`. Vrstva kotvy, která přežije refaktor."""
+    """Symbol → `file:line`. The anchor layer that survives a refactor."""
     args = ["search", symbol, "--repo", str(repo), "--limit", str(limit)]
     if kind:
         args += ["--kind", kind]
@@ -198,7 +204,7 @@ def locate(repo: str | Path, symbol: str, kind: str | None = None,
 
 
 def neighbors(repo: str | Path, symbol: str, direction: str = "in") -> Answer:
-    """Kdo mě volá (`in`), koho volám já (`out`)."""
+    """Who calls me (`in`), whom I call (`out`)."""
     pattern = DIRECTIONS.get(direction)
     if pattern is None:
         raise SystemExit(f"Unknown direction “{direction}”. Use in or out.")
@@ -213,7 +219,7 @@ def neighbors(repo: str | Path, symbol: str, direction: str = "in") -> Answer:
 
 def unreferenced(repo: str | Path, path_glob: str | None = None,
                  kind: str | None = None, limit: int | None = None) -> Answer:
-    """Kód, na který nikdo neukazuje. Na tomhle stojí dimenze `reuse`."""
+    """Code nothing points at. The `reuse` dimension rests on this."""
     args = ["dead-code", "--repo", str(repo), "--json"]
     if limit is not None:
         args += ["--limit", str(limit)]
@@ -229,7 +235,7 @@ def unreferenced(repo: str | Path, path_glob: str | None = None,
 
 
 def tests_for(repo: str | Path, symbol: str) -> Answer:
-    """Které testy se toho symbolu týkají. Na tomhle stojí dimenze `tests`."""
+    """Which tests concern that symbol. The `tests` dimension rests on this."""
     a = _parsed(proc.crg("query", "tests_for", symbol, "--repo", str(repo)))
     if not a.ok:
         return a
@@ -240,11 +246,12 @@ def tests_for(repo: str | Path, symbol: str) -> Answer:
 # -------------------------------------------------------------- workspace
 
 def prepare(src_db: Path, wt: Path, on_stale: str = "update") -> dict:
-    """Dostaň index do jednorázového worktree — strategie `copy-db`.
+    """Get the index into a throwaway worktree — the `copy-db` strategy.
 
-    Tohle je nejvíc driver-specifická věc v celém modulu: GitNexus drží index
-    jinde a jinak, Graphify ho neumí aktualizovat přírůstkově vůbec. Proto to
-    není sdílená implementace v `runs.py`, ale strategie driveru.
+    This is the most driver-specific thing in the whole module: GitNexus keeps
+    its index elsewhere and differently, Graphify cannot update one
+    incrementally at all. Which is why this is a driver strategy rather than a
+    shared implementation in `runs.py`.
     """
     info: dict = {"tool": version(), "action": "missing"}
     if not Path(src_db).is_file():
@@ -254,9 +261,10 @@ def prepare(src_db: Path, wt: Path, on_stale: str = "update") -> dict:
     if Path(src_db).resolve() != dst.resolve():
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src_db, dst)
-    # Běh bez worktree pracuje v projektu samotném — index už je na místě.
-    # Kopie sebe na sebe je na Windows tvrdá chyba (soubor drží jiný proces)
-    # a jinde nesmysl; doindexovat se ale pořád má.
+    # A run without a worktree works in the project itself — the index is
+    # already in place. Copying a file onto itself is a hard error on Windows
+    # (another process holds it) and nonsense elsewhere; topping it up is still
+    # right, though.
 
     if on_stale == "ignore":
         info["action"] = "reused"

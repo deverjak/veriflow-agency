@@ -1,9 +1,10 @@
-"""Šev nad grafem: otázky, ne příkazy nástroje.
+"""The seam over the graph: questions, not a tool's commands.
 
-Volání grafu bylo rozeseté v pěti modulech a ve dvou SKILL.md, takže výměna
-nástroje začínala grepem, ne kontraktem. Testy tady hlídají to, co po výměně
-musí platit dál: verby vracejí typovaný tvar, cesty jsou relativní k repu,
-chybějící schopnost je odpověď, ne výjimka — a pack umí říct, na čem stojí.
+Graph calls were scattered across five modules and two SKILL.md files, so
+swapping the tool began with a grep rather than a contract. The tests here
+guard what must still hold after a swap: the verbs return a typed shape, paths
+are relative to the repo, a missing capability is an answer rather than an
+exception — and a pack can say what it stands on.
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ def canned(payload) -> proc.Result:
 
 @pytest.fixture
 def fake_crg(monkeypatch):
-    """Podstrčí odpovědi driveru podle příkazu. Co se nestubuje, selže."""
+    """Stubs the driver's answers per command. What is not stubbed fails."""
     def _install(**by_command: proc.Result):
         def crg(*args: str, cwd=None, timeout: int = 1800) -> proc.Result:
             key = args[0].replace("-", "_")
@@ -32,21 +33,22 @@ def fake_crg(monkeypatch):
 
 # ---------------------------------------------------------- schopnosti
 
-def test_pack_nechce_po_driveru_nic_vymysleneho(project):
-    """Politika packu je seznam verbů, ne volný text. Kdyby si pack vyžádal
-    `tests_for` místo `tests-for`, doctor by hlásil chybějící schopnost
-    u driveru, který ji umí — a nikdo by nepoznal proč."""
+def test_a_pack_asks_the_driver_for_nothing_invented(project):
+    """A pack's policy is a list of verbs, not free text. Were a pack to ask for
+    `tests_for` instead of `tests-for`, the doctor would report a missing
+    capability on a driver that has it — and nobody would see why."""
     known = set(graph.capabilities())
     for pack in packs.available(project):
         policy = pack.run_policy["graph"]
         if not policy:
             continue
         unknown = [v for v in policy["required"] + policy["optional"] if v not in known]
-        assert not unknown, f"{pack.name} chce neznámé verby: {unknown}"
+        assert not unknown, f"{pack.name} asks for unknown verbs: {unknown}"
 
 
-def test_politika_grafu_snese_stary_boolean():
-    """Starší manifest říkal jen ano/ne. Nesmí se rozbít — jen neurčuje verby."""
+def test_the_graph_policy_tolerates_the_old_boolean():
+    """An older manifest said only yes/no. It must not break — it simply names
+    no verbs."""
     assert packs.graph_policy(True) == {"required": [], "optional": []}
     assert packs.graph_policy(False) is None
     assert packs.graph_policy(None) is None
@@ -56,18 +58,19 @@ def test_politika_grafu_snese_stary_boolean():
 
 # ---------------------------------------------------------------- verby
 
-def test_chybejici_index_neni_chyba(project):
-    """„Ještě se nestavěl" je odpověď. Výjimka by z legitimního stavu udělala
-    selhání a doctor by nemohl poradit, co s tím."""
+def test_a_missing_index_is_not_an_error(project):
+    """"It has not been built yet" is an answer. An exception would turn a
+    legitimate state into a failure and the doctor could not advise on it."""
     answer = graph.state(project.root)
 
     assert answer.ok is True
     assert answer.data["exists"] is False
 
 
-def test_stav_pozna_index_z_jine_hlavicky(project, fake_crg):
-    """Index postavený na jiném commitu umí nález opřít o kód, který na téhle
-    větvi neexistuje. Z lidského panelu se to dalo jen přečíst očima."""
+def test_the_state_notices_an_index_from_another_head(project, fake_crg):
+    """An index built at another commit can rest a finding on code that does not
+    exist on this branch. Off a human-readable panel that could only be spotted
+    by eye."""
     (project.root / ".code-review-graph").mkdir(parents=True, exist_ok=True)
     (project.root / graph.DB_PATH).write_bytes(b"x")
     fake_crg(status=canned({"nodes": 12, "edges": 30, "files": 4,
@@ -79,9 +82,9 @@ def test_stav_pozna_index_z_jine_hlavicky(project, fake_crg):
     assert data["stale"] is True
 
 
-def test_zmeny_jsou_cisla_z_dat_ne_z_vety(project, fake_crg):
-    """Shrnutí driveru je psané pro člověka a mění se s formulací. Kontrakt
-    stojí na tvaru dat."""
+def test_changes_are_numbers_from_data_not_from_a_sentence(project, fake_crg):
+    """The driver's summary is written for a person and changes with its
+    wording. The contract stands on the shape of the data."""
     fake_crg(detect_changes=canned({
         "summary": "Analyzed 1 changed file(s):\n  - 1 changed function(s)",
         "risk_score": 0.8,
@@ -96,9 +99,10 @@ def test_zmeny_jsou_cisla_z_dat_ne_z_vety(project, fake_crg):
                  "testGaps": 1, "riskScore": 0.8}
 
 
-def test_locate_vraci_cestu_relativni_k_repu(project, fake_crg):
-    """Kotva potřebuje `src/auth.ts`, driver vrací absolutní cestu. Do 1. 9. 2026
-    se to spravovalo regexem nad stdoutem přímo v `anchor.py`."""
+def test_locate_returns_a_path_relative_to_the_repo(project, fake_crg):
+    """The anchor needs `src/auth.ts`, the driver returns an absolute path.
+    Until 1 September 2026 that was fixed by a regex over stdout inside
+    `anchor.py`."""
     fake_crg(search=canned({"results": [{
         "name": "getUser", "kind": "Function",
         "file_path": str(project.root / "src" / "auth.ts"),
@@ -111,9 +115,9 @@ def test_locate_vraci_cestu_relativni_k_repu(project, fake_crg):
     assert found[0]["line"] == 1
 
 
-def test_selhani_driveru_je_odpoved_ne_vyjimka(project, fake_crg):
-    """Běh bez grafového signálu je legitimní výsledek. Volající si vybere, co
-    s tím — spadnout smí jen tam, kde na tom nález stojí."""
+def test_a_driver_failure_is_an_answer_not_an_exception(project, fake_crg):
+    """A run with no graph signal is a legitimate result. The caller picks what
+    to do about it — falling over is allowed only where a finding rests on it."""
     fake_crg()
 
     answer = graph.changes(project.root, "b" * 40)
@@ -123,15 +127,15 @@ def test_selhani_driveru_je_odpoved_ne_vyjimka(project, fake_crg):
     assert answer.data is None
 
 
-def test_neznamy_smer_se_neptaame_grafu(project):
-    """Překlep ve směru je chyba volajícího, ne odpověď grafu."""
+def test_an_unknown_direction_is_not_asked_of_the_graph(project):
+    """A typo in the direction is the caller's mistake, not the graph's answer."""
     with pytest.raises(SystemExit):
         graph.neighbors(project.root, "getUser", direction="sideways")
 
 
 # ------------------------------------------------------------ worktree
 
-def test_priprava_bez_indexu_nic_nekopiruje(project, tmp_path, fake_crg):
+def test_preparing_with_no_index_copies_nothing(project, tmp_path, fake_crg):
     fake_crg()
     wt = tmp_path / "wt"
     wt.mkdir()
@@ -142,9 +146,9 @@ def test_priprava_bez_indexu_nic_nekopiruje(project, tmp_path, fake_crg):
     assert not (wt / graph.DB_PATH).exists()
 
 
-def test_priprava_zkopiruje_index_a_doindexuje(project, tmp_path, fake_crg):
-    """Strategie `copy-db`: `build` se ve worktree nespouští nikdy — přestavěl by
-    celé repo kvůli stavu, který se za chvíli zahodí."""
+def test_preparing_copies_the_index_and_tops_it_up(project, tmp_path, fake_crg):
+    """The `copy-db` strategy: `build` is never run in a worktree — it would
+    rebuild the whole repo for a state that is thrown away shortly after."""
     fake_crg(update=proc.Result(True, 0, "ok", ""), __version__=None)
     src = project.root / graph.DB_PATH
     src.parent.mkdir(parents=True, exist_ok=True)
@@ -158,9 +162,10 @@ def test_priprava_zkopiruje_index_a_doindexuje(project, tmp_path, fake_crg):
     assert (wt / graph.DB_PATH).read_bytes() == b"index"
 
 
-def test_priprava_v_projektu_samotnem_nekopiruje_index_na_sebe(project, fake_crg):
-    """Pack s grafem a bez worktree pracuje v projektu — index je už na místě.
-    Kopie sebe na sebe je na Windows tvrdá chyba, ne hraniční případ."""
+def test_preparing_in_the_project_itself_does_not_copy_the_index_onto_itself(project, fake_crg):
+    """A pack with a graph and no worktree works in the project — the index is
+    already in place. Copying a file onto itself is a hard error on Windows, not
+    an edge case."""
     fake_crg(update=proc.Result(True, 0, "ok", ""))
     src = project.root / graph.DB_PATH
     src.parent.mkdir(parents=True, exist_ok=True)
@@ -172,7 +177,7 @@ def test_priprava_v_projektu_samotnem_nekopiruje_index_na_sebe(project, fake_crg
     assert src.read_bytes() == b"index"
 
 
-def test_priprava_neaktualizuje_kdyz_si_to_projekt_neprejeje(project, tmp_path, fake_crg):
+def test_preparing_does_not_update_when_the_project_does_not_want_it(project, tmp_path, fake_crg):
     fake_crg()
     src = project.root / graph.DB_PATH
     src.parent.mkdir(parents=True, exist_ok=True)
@@ -187,9 +192,10 @@ def test_priprava_neaktualizuje_kdyz_si_to_projekt_neprejeje(project, tmp_path, 
 
 # ----------------------------------------------------------------- CLI
 
-def test_agency_graph_rekne_co_driver_umi(project, capsys):
-    """Půlka použití grafu žije v promptu a Python fasáda ji nepokryje. Tohle
-    jsou ty dveře — a jsou zároveň místo, kde se šev testuje každým během."""
+def test_agency_graph_says_what_the_driver_can_do(project, capsys):
+    """Half of the graph's use lives in the prompt and the Python facade does
+    not cover it. This is that door — and it is also where the seam gets tested
+    on every run."""
     assert cli.main(["graph", "capabilities", "--repo", str(project.root)]) == 0
 
     data = json.loads(capsys.readouterr().out)
@@ -198,7 +204,7 @@ def test_agency_graph_rekne_co_driver_umi(project, capsys):
     assert data["workspaceStrategy"] == "copy-db"
 
 
-def test_agency_graph_vraci_nenulovy_kod_kdyz_se_nezeptal(project, capsys, fake_crg):
+def test_agency_graph_returns_a_non_zero_code_when_it_could_not_ask(project, capsys, fake_crg):
     fake_crg()
 
     code = cli.main(["graph", "changes", "--base", "b" * 40, "--repo", str(project.root)])

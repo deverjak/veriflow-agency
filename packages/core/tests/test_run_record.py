@@ -1,10 +1,10 @@
-"""Záznam běhu proti vlastnímu kontraktu.
+"""The run record against its own contract.
 
-`run.v1` do 1. 9. 2026 nekontroloval nikdo — `agency validate` četlo jen
-`finding.v1` — a záznam se se svým schématem stihl rozejít na třech místech:
-paměť slitá do `graph`, stav `gated-out` mimo enum, `slug: null` v repozitáři
-bez remote. Dvě z toho byly chyby schématu, jedna chyba zápisu. Společné měly
-to, že je nemělo co ohlásit.
+Until 1 September 2026 nobody checked `run.v1` — `agency validate` read only
+`finding.v1` — and the record had drifted from its schema in three places:
+memory folded into `graph`, the `gated-out` state outside the enum, `slug: null`
+in a repository with no remote. Two of those were schema bugs, one a writing
+bug. What they had in common was that nothing existed to report them.
 """
 
 from __future__ import annotations
@@ -19,9 +19,9 @@ def _validate(project, run, capsys) -> tuple[int, dict]:
     return code, json.loads(capsys.readouterr().out)
 
 
-def test_zaznam_behu_sedi_na_kontrakt(project, make_run, capsys):
-    """Běžný běh projde. Kdyby neprošel, je validace k ničemu — hlásila by
-    chybu na všechno a nikdo by ji nečetl."""
+def test_a_run_record_fits_its_contract(project, make_run, capsys):
+    """An ordinary run passes. If it did not, the validation would be useless —
+    it would report an error on everything and nobody would read it."""
     run = make_run()
 
     code, data = _validate(project, run, capsys)
@@ -30,9 +30,9 @@ def test_zaznam_behu_sedi_na_kontrakt(project, make_run, capsys):
     assert code == 0
 
 
-def test_pamet_slita_do_grafu_se_ohlasi(project, make_run, capsys):
-    """Přesně ta chyba, se kterou se běhy zapisovaly do 1. 9. 2026: `graph` má
-    zavřený seznam klíčů a `knownFindings` mezi ně nepatří."""
+def test_memory_folded_into_the_graph_is_reported(project, make_run, capsys):
+    """Exactly the bug runs were written with until 1 September 2026: `graph`
+    has a closed list of keys and `knownFindings` is not one of them."""
     run = make_run()
     rec = run.record()
     rec["graph"] = {"tool": "code-review-graph 2.3.7", "action": "update",
@@ -45,9 +45,10 @@ def test_pamet_slita_do_grafu_se_ohlasi(project, make_run, capsys):
     assert any("knownFindings" in e["message"] for e in data["recordErrors"])
 
 
-def test_gated_out_je_platny_stav(project, make_run, capsys):
-    """Běh, kterému brána zahodila všechno, není běh bez nálezů — a extension
-    pro ten stav odjakživa má vlastní ikonu. Chybělo jen ve schématu."""
+def test_gated_out_is_a_valid_state(project, make_run, capsys):
+    """A run whose findings the gate dropped entirely is not a run with no
+    findings — and the extension has always had its own icon for that state. It
+    was only missing from the schema."""
     run = make_run()
     rec = run.record()
     rec["status"] = "gated-out"
@@ -59,10 +60,10 @@ def test_gated_out_je_platny_stav(project, make_run, capsys):
     assert code == 0
 
 
-def test_projekt_bez_remote_je_platny(project, make_run, capsys):
-    """Doctor říká „no remote — the hired specialists do not need one“. Schéma
-    přesto chtělo `slug` jako string, takže každý běh v takovém repu psal
-    neplatný záznam."""
+def test_a_project_with_no_remote_is_valid(project, make_run, capsys):
+    """The doctor says "no remote — the hired specialists do not need one". The
+    schema nevertheless wanted `slug` as a string, so every run in such a repo
+    wrote an invalid record."""
     run = make_run()
     rec = run.record()
     rec["project"] = {"slug": None, "defaultBranch": "main"}

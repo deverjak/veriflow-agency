@@ -1,9 +1,9 @@
-"""Brána a dedup.
+"""The gate and dedup.
 
-Brána nekontroluje, jestli je nález chytrý. Kontroluje, jestli MŮŽE být
-pravdivý — a nález ukazující na soubor, který na tom commitu neexistuje,
-pravdivý být nemůže. Je to nejlevnější obrana proti tomu, aby se zvýšený objem
-propsal do zvýšeného odpadu.
+The gate does not check whether a finding is clever. It checks whether it CAN
+be true — and a finding pointing at a file that does not exist at that commit
+cannot be. It is the cheapest defence against raised volume turning straight
+into raised waste.
 """
 
 from __future__ import annotations
@@ -19,76 +19,77 @@ RUN_A = "01AAAAAAAAAAAAAAAAAAAAAAAA"
 RUN_B = "01BBBBBBBBBBBBBBBBBBBBBBBB"
 
 
-def test_projde_poctivy_nalez(project, make_run):
+def test_an_honest_finding_gets_through(project, make_run):
     run = make_run()
-    vysledek = ingest.ingest(project, run)
-    assert vysledek["counts"]["kept"] == 1
-    assert vysledek["dropped"] == []
+    result = ingest.ingest(project, run)
+    assert result["counts"]["kept"] == 1
+    assert result["dropped"] == []
 
 
-def test_vyradi_nalez_na_neexistujici_soubor(project, make_run):
-    """Halucinovaná cesta je nejčastější tvar odpadu a pozná se bez modelu."""
+def test_a_finding_on_a_file_that_does_not_exist_is_dropped(project, make_run):
+    """A hallucinated path is the most common shape of waste, and it is
+    recognisable without a model."""
     run = make_run()
     f = make_finding(project, run.id, anchor={"file": "src/neexistuje.ts"})
     write_json(run.findings_path, [f])
 
-    vysledek = ingest.ingest(project, run)
+    result = ingest.ingest(project, run)
 
-    assert vysledek["counts"]["kept"] == 0
-    assert vysledek["dropped"][0]["reason"] == "phantom-file"
-    # Nic se neztratilo — vyřazený nález je i s důvodem k přezkoumání.
+    assert result["counts"]["kept"] == 0
+    assert result["dropped"][0]["reason"] == "phantom-file"
+    # Nothing was lost — a dropped finding is kept with its reason, for review.
     assert (run.dir / "gated.json").is_file()
     assert run.record()["gatedBy"] == {"phantom-file": 1}
 
 
-def test_vyradi_radek_za_koncem_souboru(project, make_run):
+def test_a_line_past_the_end_of_the_file_is_dropped(project, make_run):
     run = make_run()
     write_json(run.findings_path, [make_finding(project, run.id, anchor={"line": 900})])
 
-    vysledek = ingest.ingest(project, run)
+    result = ingest.ingest(project, run)
 
-    assert vysledek["dropped"][0]["reason"] == "phantom-line"
+    assert result["dropped"][0]["reason"] == "phantom-line"
 
 
-def test_vyradi_nalez_bez_evidence(project, make_run):
-    """Kontrakt to řeší sám — `evidence` má minItems 1. Není to filtr kvality
-    textu, je to schéma."""
+def test_a_finding_with_no_evidence_is_dropped(project, make_run):
+    """The contract handles this itself — `evidence` has minItems 1. It is not
+    a filter on the quality of the text, it is the schema."""
     run = make_run()
     f = make_finding(project, run.id)
     f["evidence"] = []
     write_json(run.findings_path, [f])
 
-    vysledek = ingest.ingest(project, run)
+    result = ingest.ingest(project, run)
 
-    assert vysledek["dropped"][0]["reason"] == "schema"
+    assert result["dropped"][0]["reason"] == "schema"
 
 
-def test_vyradi_pod_prahem_skore(project, make_run):
+def test_a_finding_below_the_score_threshold_is_dropped(project, make_run):
     run = make_run()
     write_json(run.findings_path, [make_finding(project, run.id, score=40)])
 
-    vysledek = ingest.ingest(project, run)
+    result = ingest.ingest(project, run)
 
-    assert vysledek["dropped"][0]["reason"] == "below-score"
+    assert result["dropped"][0]["reason"] == "below-score"
     assert run.record()["counts"]["belowScore"] == 1
 
 
-def test_brana_je_idempotentni(project, make_run):
-    """Druhé spuštění dá tentýž výsledek — vychází se z findings.raw.json,
-    ne z už profiltrovaného souboru."""
+def test_the_gate_is_idempotent(project, make_run):
+    """A second run gives the same result — it starts from findings.raw.json,
+    not from the already filtered file."""
     run = make_run()
-    prvni = ingest.ingest(project, run)
-    druhe = ingest.ingest(project, run)
+    first = ingest.ingest(project, run)
+    second = ingest.ingest(project, run)
 
-    assert prvni["counts"] == druhe["counts"]
+    assert first["counts"] == second["counts"]
     assert (run.dir / "findings.raw.json").is_file()
 
 
 # ------------------------------------------------------------------ dedup
 
-def test_otisk_neni_zavisly_na_cisle_radku(project, make_run):
-    """Číslo řádku se posune při každém commitu nad souborem. Kdyby bylo
-    v otisku, dedup by nechytil nic."""
+def test_the_fingerprint_does_not_depend_on_the_line_number(project, make_run):
+    """The line number shifts on every commit over the file. Were it in the
+    fingerprint, dedup would catch nothing."""
     run = make_run()
     a = make_finding(project, run.id)
     b = make_finding(project, run.id, anchor={"line": 47, "endLine": 48})
@@ -96,9 +97,9 @@ def test_otisk_neni_zavisly_na_cisle_radku(project, make_run):
     assert dedup.fingerprint(a) == dedup.fingerprint(b)
 
 
-def test_otisk_neni_zavisly_na_titulku(project, make_run):
-    """Titulek přežije korekci diagnózy, obsah ne — párovat podle titulku je
-    chyba, na kterou baseline.md §7.2 doplatil ručně."""
+def test_the_fingerprint_does_not_depend_on_the_title(project, make_run):
+    """A title survives a corrected diagnosis, the content does not — matching
+    by title is the mistake baseline.md §7.2 paid for by hand."""
     run = make_run()
     a = make_finding(project, run.id)
     b = make_finding(project, run.id, title="Relace se nekontroluje a profil unikne odhlášenému")
@@ -106,7 +107,7 @@ def test_otisk_neni_zavisly_na_titulku(project, make_run):
     assert dedup.fingerprint(a) == dedup.fingerprint(b)
 
 
-def test_jiny_nalez_ma_jiny_otisk(project, make_run):
+def test_a_different_finding_has_a_different_fingerprint(project, make_run):
     run = make_run()
     a = make_finding(project, run.id)
     b = make_finding(project, run.id,
@@ -117,84 +118,86 @@ def test_jiny_nalez_ma_jiny_otisk(project, make_run):
     assert dedup.fingerprint(a) != dedup.fingerprint(b)
 
 
-def test_opakovany_beh_oznaci_duplicitu(project, make_run):
-    """Druhý běh nad týmž kódem najde totéž. Bez dedupu roste fronta rychleji,
-    než se stíhá odbavovat."""
-    stary = make_run(run_id="01AAAAAAAAAAAAAAAAAAAAAAAA")
-    ingest.ingest(project, stary)
+def test_a_repeated_run_marks_the_duplicate(project, make_run):
+    """A second run over the same code finds the same things. Without dedup the
+    queue grows faster than it can be worked through."""
+    older = make_run(run_id="01AAAAAAAAAAAAAAAAAAAAAAAA")
+    ingest.ingest(project, older)
 
-    novy = make_run(run_id="01BBBBBBBBBBBBBBBBBBBBBBBB")
-    write_json(novy.findings_path, [make_finding(project, novy.id)])
-    vysledek = ingest.ingest(project, novy)
+    newer = make_run(run_id="01BBBBBBBBBBBBBBBBBBBBBBBB")
+    write_json(newer.findings_path, [make_finding(project, newer.id)])
+    result = ingest.ingest(project, newer)
 
-    assert len(vysledek["duplicates"]) == 1
-    assert vysledek["counts"]["kept"] == 0
-    ulozene = read_json(novy.findings_path)
-    assert ulozene[0]["state"] == "duplicate"
-    assert ulozene[0]["duplicateOf"] == stary.findings()[0]["id"]
+    assert len(result["duplicates"]) == 1
+    assert result["counts"]["kept"] == 0
+    saved = read_json(newer.findings_path)
+    assert saved[0]["state"] == "duplicate"
+    assert saved[0]["duplicateOf"] == older.findings()[0]["id"]
 
 
-def test_preformulovany_nalez_je_taky_duplicita(project, make_run):
-    """Jiný model napíše totéž jinými slovy. Otisk to nechytí, podobnost ano."""
-    stary = make_run(run_id="01AAAAAAAAAAAAAAAAAAAAAAAA")
-    ingest.ingest(project, stary)
+def test_a_reworded_finding_is_a_duplicate_too(project, make_run):
+    """Another model writes the same thing in other words. The fingerprint does
+    not catch it, similarity does."""
+    older = make_run(run_id="01AAAAAAAAAAAAAAAAAAAAAAAA")
+    ingest.ingest(project, older)
 
-    novy = make_run(run_id="01BBBBBBBBBBBBBBBBBBBBBBBB")
-    write_json(novy.findings_path, [make_finding(
-        project, novy.id,
+    newer = make_run(run_id="01BBBBBBBBBBBBBBBBBBBBBBBB")
+    write_json(newer.findings_path, [make_finding(
+        project, newer.id,
         title="Neplatná relace pořád vrátí uživatele z repository",
         body="Funkce `getUser` nekontroluje relaci a vrátí uživatele. Odhlášený "
              "klient s uloženým id dostane profil zpátky, findUserById se zavolá vždy.")])
 
-    vysledek = ingest.ingest(project, novy)
+    result = ingest.ingest(project, newer)
 
-    assert len(vysledek["duplicates"]) == 1, "přeformulovaná duplicita neprošla"
-    assert "similarity" in vysledek["duplicates"][0]["how"]
-
-
-def test_nalez_v_jine_funkci_neni_duplicita(project, make_run):
-    """Dva různé nálezy ve stejném souboru se nesmí slepit — jinak dedup
-    zahazuje práci místo šumu."""
-    stary = make_run(run_id="01AAAAAAAAAAAAAAAAAAAAAAAA")
-    ingest.ingest(project, stary)
-
-    novy = make_run(run_id="01BBBBBBBBBBBBBBBBBBBBBBBB")
-    write_json(novy.findings_path, [make_finding(
-        project, novy.id, anchor={"symbol": {"name": "deleteUser", "range": [10, 20]}})])
-
-    vysledek = ingest.ingest(project, novy)
-
-    assert vysledek["duplicates"] == []
-    assert vysledek["counts"]["kept"] == 1
+    assert len(result["duplicates"]) == 1, "the reworded duplicate did not register"
+    assert "similarity" in result["duplicates"][0]["how"]
 
 
-def test_dva_ruzne_nalezy_v_teze_funkci_se_neslepi(project, make_run):
-    """Nesymetrické riziko: falešná duplicita ZAHODÍ práci, zmeškaná jen
-    prodlouží frontu. Tenhle test hlídá tu dražší stranu."""
-    stary = make_run(run_id="01AAAAAAAAAAAAAAAAAAAAAAAA")
-    ingest.ingest(project, stary)
+def test_a_finding_in_another_function_is_not_a_duplicate(project, make_run):
+    """Two different findings in the same file must not be merged — otherwise
+    dedup throws work away instead of noise."""
+    older = make_run(run_id="01AAAAAAAAAAAAAAAAAAAAAAAA")
+    ingest.ingest(project, older)
 
-    novy = make_run(run_id="01BBBBBBBBBBBBBBBBBBBBBBBB")
-    write_json(novy.findings_path, [make_finding(
-        project, novy.id,
+    newer = make_run(run_id="01BBBBBBBBBBBBBBBBBBBBBBBB")
+    write_json(newer.findings_path, [make_finding(
+        project, newer.id, anchor={"symbol": {"name": "deleteUser", "range": [10, 20]}})])
+
+    result = ingest.ingest(project, newer)
+
+    assert result["duplicates"] == []
+    assert result["counts"]["kept"] == 1
+
+
+def test_two_different_findings_in_the_same_function_do_not_merge(project, make_run):
+    """The risk is asymmetric: a false duplicate THROWS work away, a missed one
+    only lengthens the queue. This test guards the expensive side."""
+    older = make_run(run_id="01AAAAAAAAAAAAAAAAAAAAAAAA")
+    ingest.ingest(project, older)
+
+    newer = make_run(run_id="01BBBBBBBBBBBBBBBBBBBBBBBB")
+    write_json(newer.findings_path, [make_finding(
+        project, newer.id,
         title="Chybí index nad sloupcem created_at, dotaz projde celou tabulkou",
         body="Načtení uživatele skenuje celou tabulku objednávek. Scénář: dvě stě "
              "tisíc řádků, výpis se načítá osm sekund a databáze vytíží procesor.")])
 
-    vysledek = ingest.ingest(project, novy)
+    result = ingest.ingest(project, newer)
 
-    assert vysledek["duplicates"] == [], "dva různé nálezy v téže funkci se slepily"
-    assert vysledek["counts"]["kept"] == 1
+    assert result["duplicates"] == [], "two different findings in one function were merged"
+    assert result["counts"]["kept"] == 1
 
 
-def test_inline_kod_se_pri_porovnani_nezahazuje(project, make_run):
-    """`getUser` je nejnosnější slovo nálezu. Kdyby ho čistič markdownu smazal
-    s apostrofy, dedup by porovnával jen spojovací text."""
+def test_inline_code_is_not_thrown_away_when_comparing(project, make_run):
+    """`getUser` is the most load-bearing word of the finding. Were the markdown
+    cleaner to delete it along with the backticks, dedup would be comparing
+    connective text only."""
     assert "getuser" in dedup.tokens("Funkce `getUser` vrátí uživatele i bez relace")
     assert "prikaz" not in dedup.tokens("```\nprikaz --ktery-je-jen-citace\n```")
 
 
-# ------------------------------------------------------------------ dispatch (stopa)
+# ------------------------------------------------------------ dispatch (trail)
 
 def _sink(project, body: str) -> None:
     (project.root / "sink.py").write_text(body, encoding="utf-8")
@@ -203,28 +206,29 @@ def _sink(project, body: str) -> None:
 SINK_TEMPLATE = "python sink.py --finding {id} --run-dir {runDir}"
 
 
-def test_bez_sinku_zustane_nalez_candidate(project, make_run):
-    """Pack bez `sink` — kanál je git, ne board. Nic se neposílá, stopa mlčí."""
+def test_with_no_sink_a_finding_stays_candidate(project, make_run):
+    """A pack with no `sink` — the channel is git, not a board. Nothing is
+    dispatched and the trail stays silent."""
     run = make_run()
 
-    vysledek = ingest.ingest(project, run)
+    result = ingest.ingest(project, run)
 
     assert run.findings()[0]["state"] == "candidate"
-    assert vysledek["sent"] == 0
+    assert result["sent"] == 0
     assert runs.read_trail(project) == {}
 
 
-def test_se_sinkem_nalez_dojde_na_board(project, make_run):
-    """Úspěšný sink: `state` se stane `sent`, akce nese, co se doopravdy stalo,
-    a stopa dostane řádek."""
+def test_with_a_sink_a_finding_reaches_the_board(project, make_run):
+    """A successful sink: `state` becomes `sent`, the action carries what really
+    happened, and the trail gets a row."""
     install_pack(project, "review-graph", {"sink": SINK_TEMPLATE})
     _sink(project, 'print(\'{"item": "PVTI_X", "url": "https://example.com/PVTI_X"}\')\n')
     run = make_run()
     fid = run.findings()[0]["id"]
 
-    vysledek = ingest.ingest(project, run)
+    result = ingest.ingest(project, run)
 
-    assert vysledek["sent"] == 1
+    assert result["sent"] == 1
     saved = run.findings()[0]
     assert saved["state"] == "sent"
     assert runs.acted_ref(saved) == "PVTI_X"
@@ -235,42 +239,42 @@ def test_se_sinkem_nalez_dojde_na_board(project, make_run):
     assert trail[fid]["ref"] == "PVTI_X"
 
 
-def test_selhany_sink_necha_nalez_candidate_a_druhy_ingest_to_zkusi_znovu(project, make_run):
-    """Nenulový exit = selhání dispatch, ne selhání brány: nález zůstane
-    `candidate`, chyba se zapíše do `dispatchErrors` a opakovaný `agency
-    ingest` to zkusí znovu — jako by se nic nestalo poprvé."""
+def test_a_failed_sink_leaves_the_finding_candidate_and_a_second_ingest_retries(project, make_run):
+    """A non-zero exit is a dispatch failure, not a gate failure: the finding
+    stays `candidate`, the error is written to `dispatchErrors`, and a repeated
+    `agency ingest` tries again — as if nothing had happened the first time."""
     install_pack(project, "review-graph", {"sink": SINK_TEMPLATE})
     _sink(project, "import sys\nprint('boom', file=sys.stderr)\nsys.exit(1)\n")
     run = make_run()
     fid = run.findings()[0]["id"]
 
-    prvni = ingest.ingest(project, run)
+    first = ingest.ingest(project, run)
 
     assert run.findings()[0]["state"] == "candidate"
-    assert prvni["dispatchErrors"] == [{"id": fid, "error": "boom"}]
+    assert first["dispatchErrors"] == [{"id": fid, "error": "boom"}]
     assert runs.read_trail(project) == {}
-    # Pokus, který se nepovedl, je pořád pokus — bez něj žije „board to
-    # třikrát odmítl" jen ve třech různých záznamech běhů.
+    # An attempt that failed is still an attempt — without it, "the board turned
+    # this down three times" lives only in three separate run records.
     assert [a["result"] for a in run.findings()[0]["actions"]] == ["error"]
 
     _sink(project, 'print(\'{"item": "PVTI_Y"}\')\n')
-    druhe = ingest.ingest(project, run)
+    second = ingest.ingest(project, run)
 
-    assert druhe["sent"] == 1
-    assert druhe["dispatchErrors"] == []
+    assert second["sent"] == 1
+    assert second["dispatchErrors"] == []
     saved = run.findings()[0]
     assert saved["state"] == "sent"
-    # Obojí se přidává, nepřepisuje: sink, který v úterý selhal a ve čtvrtek
-    # prošel, jsou dvě události, a jen ta druhá je horší odpověď na otázku,
-    # jak často ten board vůbec odpoví.
+    # Both are appended, not overwritten: a sink that failed on Tuesday and
+    # passed on Thursday is two events, and only the second is a worse answer to
+    # the question of how often that board answers at all.
     assert [a["result"] for a in saved["actions"]] == ["error", "success"]
-    assert runs.acted_ref(saved) == "PVTI_Y", "čte se poslední úspěšná, ne první pokus"
+    assert runs.acted_ref(saved) == "PVTI_Y", "the last success is read, not the first attempt"
 
 
-def test_prvni_pozice_v_retezu_ceka_druha_dispatchuje_obe(project, make_run):
-    """Pozice 1/2: kept nález se stane `held`, nic se neposílá. Pozice 2/2:
-    dispatchuje se vlastní nález i `held` nález z upstream běhu, který nikdo
-    nerozhodl — řetěz končí, lokálně nic nečeká."""
+def test_the_first_position_in_a_chain_waits_and_the_second_dispatches_both(project, make_run):
+    """Position 1/2: a kept finding becomes `held` and nothing is dispatched.
+    Position 2/2: both its own finding and the `held` one from the upstream run
+    that nobody judged are dispatched — the chain ends, nothing waits locally."""
     install_pack(project, "review-graph", {"sink": SINK_TEMPLATE})
     _sink(project, 'print(\'{"item": "PVTI_CHAIN"}\')\n')
     chain_id = "01CHAINCHAINCHAINCHAINCHAI"
@@ -287,9 +291,9 @@ def test_prvni_pozice_v_retezu_ceka_druha_dispatchuje_obe(project, make_run):
                            "Scénář: běžný uživatel zavolá cizí export a dostane cizí data.")],
         run_id=RUN_B,
         chain={"id": chain_id, "position": 2, "of": 2, "upstream": [RUN_A]})
-    vysledek = ingest.ingest(project, second)
+    result = ingest.ingest(project, second)
 
-    assert vysledek["sent"] == 2
+    assert result["sent"] == 2
     assert runs.find_run(project, RUN_B).findings()[0]["state"] == "sent"
 
     upstream_run = runs.find_run(project, RUN_A)

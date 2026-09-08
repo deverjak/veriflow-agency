@@ -61,7 +61,7 @@ def test_every_number_carries_its_denominator(project, make_run):
 
 
 def test_it_refuses_to_look_authoritative_under_the_threshold(project, make_run):
-    """Fáze D's own condition, said in the artefact itself rather than only in
+    """Phase D's own condition, said in the artefact itself rather than only in
     the plan — the brief is what a person or an agent actually reads."""
     _decided(project, make_run, 2, 1)
 

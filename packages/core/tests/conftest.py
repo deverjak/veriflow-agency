@@ -58,7 +58,7 @@ def never_launch_an_agent(monkeypatch, request):
 
 @pytest.fixture
 def repo(tmp_path: Path) -> Path:
-    """Git repo se dvěma commity a jedním souborem, který se mezi nimi posune."""
+    """A git repo with two commits and one file that shifts between them."""
     root = tmp_path / "projekt"
     root.mkdir()
     git(root, "init", "-q", "-b", "main")
@@ -102,7 +102,7 @@ def project(repo: Path, tmp_path: Path) -> config.Project:
 
 
 def make_finding(project: config.Project, run_id: str, **over) -> dict:
-    """Nález, který projde kontraktem. Testy přepisují jen to, co zkoumají."""
+    """A finding that passes the contract. A test overrides only what it examines."""
     commit = git(project.root, "rev-parse", "HEAD")
     f = {
         "id": ulid(),
@@ -136,7 +136,7 @@ def make_finding(project: config.Project, run_id: str, **over) -> dict:
 
 @pytest.fixture
 def make_run(project: config.Project):
-    """Vyrobí běh s nálezy tak, jak by ho zanechal agent."""
+    """Produces a run with findings the way an agent would have left it."""
     def _make(findings: list[dict] | None = None, run_id: str | None = None,
               **record_over) -> runs.Run:
         rid = run_id or ulid()
@@ -145,8 +145,8 @@ def make_run(project: config.Project):
         rec = {
             "id": rid, "pack": "review-graph",
             "project": {"slug": project.slug, "defaultBranch": "main"},
-            # `headRefOid` je v run.v1 povinné — bez něj by fixture vyráběla
-            # záznam, jaký by skutečný běh nikdy nezapsal.
+            # `headRefOid` is required in run.v1 — without it the fixture would
+            # produce a record no real run would ever have written.
             "target": {"kind": "pull-request", "pr": 1, "headRefOid": git(project.root, "rev-parse", "HEAD")},
             "trigger": {"kind": "manual", "attended": True},
             "startedAt": runs.now(), "status": "running",

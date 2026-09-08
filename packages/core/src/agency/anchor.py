@@ -1,16 +1,16 @@
-"""Kotva nálezu a test driftu.
+"""A finding's anchor, and the drift test.
 
-Nález najdeš na commitu A a čteš ho o tři týdny později z pracovní kopie, která
-je o třicet commitů dál. Číslo řádku už neplatí a NIJAK TO NEPOZNÁ — komentář se
-posadí na nevinný kód, ty ho zamítneš, a tím si rozbiješ jedinou metriku, kvůli
-které celé měření vzniklo.
+A finding is made at commit A and read three weeks later from a working tree
+thirty commits further on. The line number no longer holds and NOTHING SAYS SO
+— the comment lands on innocent code, you reject it, and with that you break
+the one metric the whole measurement exists for.
 
-Čtyři vrstvy, rozlišuje se shora dolů, zastaví se na první úspěšné. Když selže
-všechno, nález se degraduje, neztratí.
+Four layers, tried top to bottom, stopping at the first that succeeds. When
+they all fail, the finding is degraded, not lost.
 
-Obě opravy, které vypadly ze spiku, jsou tady:
-  vrstva 1 se ptá na neměnnost SOUBORU, ne repozitáře,
-  vrstva 2 hledá blok, ne jediný řádek.
+Both fixes that came out of the spike are here:
+  layer 1 asks whether the FILE is unchanged, not the repository,
+  layer 2 looks for a block, not a single line.
 """
 
 from __future__ import annotations
@@ -36,11 +36,11 @@ class Resolution:
 
 
 def distinctive_line(anchor: dict) -> tuple[str, int] | None:
-    """Nejcharakterističtější řádek bloku a jeho offset od anchor.line.
+    """The block's most distinctive line, and its offset from anchor.line.
 
-    Jednořádkový snippet selže na `/**`, `}` a podobné boilerplatě — a docblock
-    začíná přesně tím. Bere se nejdelší řádek, který nese aspoň čtyři
-    alfanumerické znaky za sebou.
+    A one-line snippet fails on `/**`, `}` and boilerplate like it — and that
+    is exactly how a docblock starts. The longest line carrying at least four
+    alphanumeric characters in a row is taken.
     """
     block = (anchor.get("snippet") or anchor.get("body") or "").split("\n")
     best: tuple[str, int] | None = None
@@ -67,14 +67,14 @@ def resolve(repo: str | Path, anchor: dict) -> Resolution:
     count = len(lines)
     line = anchor.get("line") or 1
 
-    # 1. soubor se od analýzy nezměnil → čísla řádků platí doslova
+    # 1. the file has not changed since the analysis → line numbers hold literally
     commit = anchor.get("commit")
     if commit and proc.file_unchanged(repo, commit, rel):
         if line <= count:
             return Resolution(line, "exact", "file unchanged")
         return Resolution(None, "none", f"line {line} is past the end of the file ({count} lines)")
 
-    # 2. text bloku → najde posunutý kód
+    # 2. the block's text → finds code that has shifted
     d = distinctive_line(anchor)
     if d:
         needle, offset = d
@@ -89,7 +89,7 @@ def resolve(repo: str | Path, anchor: dict) -> Resolution:
             return Resolution(max(1, best - offset), "snippet (ambiguous)",
                               f"{len(hits)} matches, the closest one was picked")
 
-    # 3. symbol z grafu — přežije refaktor tam, kde text řádku ne
+    # 3. the symbol from the graph — survives a refactor where the line text does not
     sym = anchor.get("symbol") or {}
     if sym.get("name"):
         found = graph.locate(repo, sym["name"])
@@ -99,7 +99,7 @@ def resolve(repo: str | Path, anchor: dict) -> Resolution:
                     return Resolution(node["line"], "symbol",
                                       f"via {sym['name']} from the graph")
 
-    # 4. selhání — degraduj, neztrať
+    # 4. failure — degrade, do not lose
     if line > count:
         return Resolution(None, "none", f"line {line} is past the end of the file ({count} lines)")
     return Resolution(None, "none", "the block text was not found in the file, nor via the symbol")
@@ -111,9 +111,10 @@ _HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? ", re.M)
 def drift(repo: str | Path, anchor: dict) -> str:
     """`untouched` | `touched` | `deleted` | `unknown`.
 
-    Pozor na výklad: `untouched` znamená, že se na ten ROZSAH nesáhlo — i když
-    se soubor jinde přepsal a řádek se posunul. To rozlišení („přepsáno, koukni
-    na diff" vs. „platí doslova“) je přesně to, co předtřídí frontu.
+    Read it carefully: `untouched` means that RANGE was not touched — even if
+    the file was rewritten elsewhere and the line has shifted. That distinction
+    ("rewritten, look at the diff" vs. "holds literally") is exactly what
+    pre-sorts the queue.
     """
     commit = anchor.get("commit")
     if not commit or not proc.commit_exists(repo, commit):

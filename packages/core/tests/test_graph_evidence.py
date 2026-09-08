@@ -1,10 +1,12 @@
-"""Grafový signál se čte strojově, ne z panelu psaného pro člověka.
+"""The graph signal is read by machine, not off a panel written for a person.
 
-Do 1. 9. 2026 se `changedFunctions` a spol. tahaly regexem z Rich panelu
-`detect-changes --brief`. Až by CRG přeformuloval větu, čísla by tiše zmizela
-z run recordu — nic by nespadlo, jen by se začaly zapisovat prázdná pole.
-Proto tenhle soubor hlídá tvar dat, ne text, a shrnutí v podstrčených
-odpovědích schválně lže: kdyby se někdo vrátil ke čtení vět, testy to poznají.
+Until 1 September 2026 `changedFunctions` and friends were pulled by regex out
+of the Rich panel of `detect-changes --brief`. The day CRG reworded that
+sentence, the numbers would have quietly vanished from the run record — nothing
+would fall over, empty fields would simply start being written. So this file
+guards the shape of the data, not the text, and the summary in the stubbed
+answers lies on purpose: should anyone go back to reading sentences, the tests
+will say so.
 """
 
 from __future__ import annotations
@@ -18,7 +20,8 @@ from agency import proc, runs
 
 SCHEMA = Path(__file__).resolve().parents[3] / "schemas" / "run.v1.json"
 
-# Tvar `detect-changes` bez `--brief`, ověřený proti code-review-graph 2.3.7.
+# The shape of `detect-changes` without `--brief`, verified against
+# code-review-graph 2.3.7.
 DETECT = {
     "summary": "Analyzed 1 changed file(s):\n  - 1 changed function(s)\n  - 0 test gap(s)",
     "risk_score": 0.8,
@@ -35,7 +38,7 @@ def canned(payload) -> proc.Result:
 
 @pytest.fixture
 def fake_crg(monkeypatch):
-    """Podstrčí odpovědi grafu podle příkazu. Co se nestubuje, selže."""
+    """Stubs the graph's answers per command. What is not stubbed fails."""
     def _install(**by_command: proc.Result):
         def crg(*args: str, cwd=None, timeout: int = 1800) -> proc.Result:
             key = args[0].replace("-", "_")
@@ -49,8 +52,8 @@ def _all_stubbed(fake_crg, detect=None):
              impact=canned({"status": "ok"}), dead_code=canned([]))
 
 
-def test_statistiky_vznikaji_z_json_ne_z_vety_v_panelu(project, make_run, fake_crg):
-    """Shrnutí hlásí jednu funkci, data jich mají 82. Platí data."""
+def test_the_stats_come_from_json_not_from_a_sentence_in_a_panel(project, make_run, fake_crg):
+    """The summary reports one function, the data has 82. The data wins."""
     _all_stubbed(fake_crg)
     run = make_run(findings=[])
 
@@ -66,12 +69,13 @@ def test_statistiky_vznikaji_z_json_ne_z_vety_v_panelu(project, make_run, fake_c
     saved = json.loads((run.dir / "evidence" / "detect-changes.json")
                        .read_text(encoding="utf-8"))
     assert len(saved["test_gaps"]) == 50, \
-        "dimenze `tests` čte test_gaps[] — dřív to byl seznam „Untested:“ ve větě"
+        "the `tests` dimension reads test_gaps[] — it used to be an \"Untested:\" list in a sentence"
 
 
-def test_pocet_souboru_je_z_bezu_ne_z_grafu(project, make_run, fake_crg):
-    """`files[]` je seznam po `skipPatterns`. Graf počítá svůj diff a o filtru
-    neví, takže jeho číslo popisuje jinou množinu, než jakou běh recenzuje."""
+def test_the_file_count_comes_from_the_run_not_from_the_graph(project, make_run, fake_crg):
+    """`files[]` is the list after `skipPatterns`. The graph computes its own
+    diff and knows nothing of the filter, so its number describes a different
+    set than the one the run is reviewing."""
     _all_stubbed(fake_crg)
     run = make_run(findings=[])
 
@@ -81,10 +85,11 @@ def test_pocet_souboru_je_z_bezu_ne_z_grafu(project, make_run, fake_crg):
     assert stats["changedFiles"] == 2
 
 
-def test_orizly_seznam_se_zapise_jako_orizly(project, make_run, fake_crg):
-    """CRG řeže na `CRG_MAX_CHANGED_FUNCS` a ten strop hlásí i ve shrnutí jako
-    výsledek. Bez příznaku by v záznamu stálo „500 změněných funkcí“ jako fakt,
-    ne jako dolní odhad — a rozdíl mezi velkým a uříznutým PR by zmizel."""
+def test_a_truncated_list_is_recorded_as_truncated(project, make_run, fake_crg):
+    """CRG cuts at `CRG_MAX_CHANGED_FUNCS` and reports that ceiling in its
+    summary as a result. Without the flag the record would say "500 changed
+    functions" as a fact rather than a lower bound — and the difference between
+    a large PR and a truncated one would disappear."""
     _all_stubbed(fake_crg, dict(DETECT, functions_truncated=True,
                                 changed_functions=[{"name": f"f{i}"} for i in range(500)]))
     run = make_run(findings=[])
@@ -96,9 +101,9 @@ def test_orizly_seznam_se_zapise_jako_orizly(project, make_run, fake_crg):
     assert stats["changedFunctionsTruncated"] is True
 
 
-def test_chyba_grafu_nekonci_v_json_souboru(project, make_run, fake_crg):
-    """Běh bez grafového signálu je legitimní výsledek, takže se nepadá. Ale
-    chybová hláška uložená jako `.json` by dimenzi vypadala jako data."""
+def test_a_graph_error_does_not_end_up_in_a_json_file(project, make_run, fake_crg):
+    """A run with no graph signal is a legitimate result, so nothing falls over.
+    But an error message stored as `.json` would look like data to a dimension."""
     fake_crg()
     run = make_run(findings=[])
 
@@ -110,12 +115,13 @@ def test_chyba_grafu_nekonci_v_json_souboru(project, make_run, fake_crg):
     assert not (ev / "dead-code.json").exists()
     assert "not stubbed" in (ev / "detect-changes.error.txt").read_text(encoding="utf-8")
     assert "changedFunctions" not in stats
-    assert stats["changedFiles"] == 1, "co jádro ví samo, přežije výpadek grafu"
+    assert stats["changedFiles"] == 1, "what the core knows by itself survives a graph outage"
 
 
-def test_beh_zapise_na_co_se_driver_umi_zeptat(project, make_run, fake_crg):
-    """Pack podle toho pozná, kterou dimenzi má přeskočit. Co driver neumí, se
-    nedokládá — a bez tohohle souboru by to musel hádat z prázdné evidence."""
+def test_a_run_records_what_the_driver_can_be_asked(project, make_run, fake_crg):
+    """This is how a pack knows which dimension to skip. What the driver cannot
+    do is not evidenced — and without this file the pack would have to guess it
+    from empty evidence."""
     _all_stubbed(fake_crg)
     run = make_run(findings=[])
 
@@ -127,9 +133,10 @@ def test_beh_zapise_na_co_se_driver_umi_zeptat(project, make_run, fake_crg):
     assert "tests-for" in caps["capabilities"]
 
 
-def test_statistiky_se_vejdou_do_run_v1(project, make_run, fake_crg):
-    """`graph` má v `run.v1` zavřený seznam klíčů. Nový statistický klíč bez
-    zápisu do schématu nespadne tady, ale až při validaci hotového běhu."""
+def test_the_stats_fit_into_run_v1(project, make_run, fake_crg):
+    """`graph` has a closed list of keys in `run.v1`. A new stat key with no
+    entry in the schema does not fail here but at the validation of a finished
+    run."""
     _all_stubbed(fake_crg, dict(DETECT, functions_truncated=True))
     run = make_run(findings=[])
 
@@ -139,9 +146,10 @@ def test_statistiky_se_vejdou_do_run_v1(project, make_run, fake_crg):
 
     allowed = set(json.loads(SCHEMA.read_text(encoding="utf-8"))
                   ["properties"]["graph"]["properties"])
-    # Paměť se sbírá při téže přípravě, ale do `graph` ji jádro nepíše.
+    # Memory is collected in the same preparation, but the core does not write
+    # it into `graph`.
     graph_keys = (set(stats) | set(ginfo)) - set(runs.MEMORY_STATS)
-    assert graph_keys <= allowed, f"neznámé pro schéma: {sorted(graph_keys - allowed)}"
-    assert set(runs.MEMORY_STATS) & set(stats), "paměť se pořád sbírá, jen bydlí jinde"
+    assert graph_keys <= allowed, f"unknown to the schema: {sorted(graph_keys - allowed)}"
+    assert set(runs.MEMORY_STATS) & set(stats), "memory is still collected, it just lives elsewhere"
     assert ginfo["driver"] and ginfo["capabilities"], \
-        "bez driveru a schopností nejde výměnu vyhodnotit"
+        "without the driver and its capabilities a swap cannot be evaluated"

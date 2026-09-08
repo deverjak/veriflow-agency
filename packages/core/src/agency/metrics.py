@@ -1,16 +1,19 @@
-"""Čísla, která v baseline.md vznikala ručně.
+"""The numbers that used to be produced by hand in baseline.md.
 
-Jedna otázka je nadřazená všem ostatním: **kolik z toho, co pack najde, je
-pravda?** Bez ní se nedá rozhodnout ani o modelu, ani o tom, jestli má nástroj
-žít dál — a přesně proto je krok 0 (stav `Rejected`) první v plánu.
+One question outranks all the others: **how much of what a pack finds is
+true?** Without it there is no deciding on a model, nor on whether the tool
+should live on — which is exactly why step 0 (the `Rejected` state) came first
+in the plan.
 
-Precision se počítá jen z ROZHODNUTÝCH nálezů. Nerozhodnutý nález není ani
-pravda, ani lež; kdyby padal do jmenovatele, každý nový běh by precision
-zředil a číslo by měřilo rychlost triage, ne kvalitu nálezů.
+Precision is computed from DECIDED findings only. An undecided finding is
+neither true nor false; putting it in the denominator would let every new run
+dilute precision, and the number would measure the speed of triage rather than
+the quality of the findings.
 
-Rozpady (dimenze, severita, model) jsou tu proto, že souhrnné číslo neřekne,
-co s tím. `precision 0.55` je k ničemu; `dimenze reuse 0.2, correctness 0.9`
-je pokyn vypnout jednu dimenzi.
+The breakdowns (dimension, severity, model) are here because the aggregate
+number does not say what to do about it. `precision 0.55` is useless;
+`dimension reuse 0.2, correctness 0.9` is an instruction to switch one
+dimension off.
 """
 
 from __future__ import annotations
@@ -35,18 +38,19 @@ def _parse(ts: str | None) -> datetime | None:
 
 
 def _ratio(hit: int, total: int) -> float | None:
-    """Poměr, nebo None. Nula z nuly není nula procent — je to „nevím",
-    a zaokrouhlit „nevím" na 0.0 je nejlevnější způsob, jak si zalhat."""
+    """A ratio, or None. Zero out of zero is not zero percent — it is "I do not
+    know", and rounding "I do not know" to 0.0 is the cheapest way to lie."""
     return round(hit / total, 3) if total else None
 
 
 class Tally:
-    """Přijato / zamítnuto / odloženo pro jeden řez daty.
+    """Accepted / rejected / deferred for one slice of the data.
 
-    Do precision se počítá jen rozhodnutí dalšího člena řetězu — `by`
-    začínající `hire:`. Rozhodnutí online na boardu se lokálně neukládá a
-    neexistuje; `human` v datech je historie z doby před stopou, a `chain`
-    je právě to, že nikdo nerozhodl. Ani jedno nemá být čitatelem precision.
+    Only a decision by another chain member counts into precision — a `by`
+    starting with `hire:`. A decision made online on the board is not stored
+    locally and does not exist here; `human` in the data is history from before
+    the trail, and `chain` is precisely nobody having decided. Neither belongs
+    in precision's numerator.
     """
 
     def __init__(self) -> None:
@@ -635,10 +639,10 @@ def collect(project: Project, runs: list[Run] | None = None) -> dict:
         "runs": len(selected),
         "findings": {
             "raw": raw, "kept": kept, "duplicates": duplicates,
-            # Kolik práce dedup ušetřil. Roste s počtem běhů nad týmž kódem —
-            # a když neroste, dedup nefunguje.
+            # How much work dedup saved. It grows with the number of runs over
+            # the same code — and when it does not, dedup is not working.
             "dedupRatio": _ratio(duplicates, raw),
-            # Kolik z toho, co agent napsal, vůbec prošlo bránou.
+            # How much of what the agent wrote got through the gate at all.
             "gateYield": _ratio(kept, raw),
             "gatedBy": dict(gated_by) or None,
         },
@@ -670,8 +674,8 @@ def collect(project: Project, runs: list[Run] | None = None) -> dict:
         "queue": {
             "undecided": overall.undecided,
             "medianAgeDays": median_age,
-            # Nejstarší nerozhodnutý nález. Zácpa se pozná dřív z tohohle čísla
-            # než z průměru — průměr se schová za čerstvé běhy.
+            # The oldest undecided finding. A backlog shows up in this number
+            # sooner than in the average — an average hides behind fresh runs.
             "oldestDays": round(ages[-1], 1) if ages else None,
         },
         "cost": {

@@ -1,7 +1,8 @@
-"""Obálky nad git, gh a code-review-graph.
+"""Wrappers over git, gh and code-review-graph.
 
-Všechno, co sahá ven, jde přes tenhle soubor — aby šlo v testech podstrčit
-jedno místo a aby se windowsí zvláštnosti (kódování) řešily jednou.
+Everything that reaches outside goes through this file — so a test has one
+place to substitute, and so the Windows peculiarities (encoding) are handled
+once.
 """
 
 from __future__ import annotations
@@ -39,9 +40,9 @@ def run(
     timeout: int = 900,
 ) -> Result:
     full_env = {**os.environ, **(env or {})}
-    # code-review-graph kreslí Rich panely rámečkovými znaky, které v cp1250
-    # konzoli padají na UnicodeEncodeError. Nastavit to globálně je levnější
-    # než si pamatovat, u kterého volání to hrozí.
+    # code-review-graph draws Rich panels with box-drawing characters, which
+    # die on UnicodeEncodeError in a cp1250 console. Setting this globally is
+    # cheaper than remembering which call is at risk.
     full_env.setdefault("PYTHONIOENCODING", "utf-8")
     try:
         p = subprocess.run(
@@ -62,7 +63,7 @@ def which(tool: str) -> str | None:
 
 def attend(args: Sequence[str], cwd: str | Path | None = None,
            env: dict[str, str] | None = None) -> int:
-    """Spustit a počkat — s terminálem, ne s rourou. Vrací exit code.
+    """Run and wait — with a terminal, not a pipe. Returns the exit code.
 
     `run()` collects output because its caller reads it. An agent is the
     opposite: it talks to the user and waits for an answer. A pipe would turn an
@@ -87,7 +88,7 @@ def attend(args: Sequence[str], cwd: str | Path | None = None,
 def stream(args: Sequence[str], cwd: str | Path | None = None,
            env: dict[str, str] | None = None,
            on_line=None, timeout: float | None = None) -> int:
-    """Spustit, číst řádky, jak přicházejí, a vrátit exit code.
+    """Run, read lines as they arrive, and return the exit code.
 
     The difference from `attend()` is who the audience is. `attend` gives the
     agent a terminal, because a person is talking to it. Here nobody is — it is
@@ -221,7 +222,7 @@ def default_branch(cwd: str | Path) -> str | None:
 
 
 def remote_slug(cwd: str | Path) -> str | None:
-    """owner/repo z origin, ať už je to ssh nebo https."""
+    """owner/repo from origin, whether it is ssh or https."""
     r = git("remote", "get-url", "origin", cwd=cwd)
     if not r.ok:
         return None
@@ -237,10 +238,11 @@ def remote_slug(cwd: str | Path) -> str | None:
 
 
 def file_unchanged(cwd: str | Path, commit: str, path: str) -> bool:
-    """Nezměnil se ten SOUBOR mezi commitem a HEAD?
+    """Has that FILE not changed between the commit and HEAD?
 
-    Pozor: rozhoduje neměnnost souboru, ne to, jestli commit == HEAD. Kdyby se
-    testoval celý repozitář, propadne kotva i u nálezu na netknutém souboru.
+    Note: what decides is the file being unchanged, not whether commit == HEAD.
+    Testing the whole repository would fail the anchor even for a finding on an
+    untouched file.
     """
     return git("diff", "--quiet", f"{commit}..HEAD", "--", path, cwd=cwd).ok
 
@@ -255,11 +257,11 @@ def commit_exists(cwd: str | Path, commit: str) -> bool:
 
 
 def browser_cache() -> str | None:
-    """Kam Playwright stahuje prohlížeče, pokud tam už něco je.
+    """Where Playwright downloads browsers, if something is already there.
 
-    Prohlížeče nejsou v projektu, ale v uživatelském cache — proto se na ně
-    `agency doctor` ptá zvlášť. Chybí typicky na čerstvém stroji a chyba, kterou
-    to vyrobí, přijde až uprostřed sezení.
+    The browsers are not in the project but in the user's cache — which is why
+    `agency doctor` asks about them separately. They are typically missing on a
+    fresh machine, and the error that causes arrives mid-session.
     """
     from pathlib import Path as _P
 
@@ -282,11 +284,11 @@ def browser_cache() -> str | None:
 
 
 def reachable(url: str, timeout: float = 2.0) -> tuple[bool, str]:
-    """Odpovídá ta adresa?
+    """Does that address answer?
 
-    QA sezení proti nedostupné aplikaci je vyhozený běh — a pozná se to
-    dopředu, jedním dotazem. 401 a 403 jsou v pořádku: aplikace běží a jen
-    chce přihlášení, což je přesně to, co se v sezení řeší.
+    A QA session against an unreachable app is a wasted run — and one request
+    ahead of time says so. 401 and 403 are fine: the app is up and only wants a
+    login, which is exactly what the session is there to work through.
     """
     import urllib.error
     import urllib.request
@@ -297,7 +299,7 @@ def reachable(url: str, timeout: float = 2.0) -> tuple[bool, str]:
             return 200 <= r.status < 400, f"{url} → HTTP {r.status}"
     except urllib.error.HTTPError as e:
         return e.code < 500, f"{url} → HTTP {e.code}"
-    except Exception as e:  # síť, DNS, TLS, timeout — pro doktora jeden případ
+    except Exception as e:  # network, DNS, TLS, timeout — one case for the doctor
         return False, f"{url} unreachable — {type(e).__name__}"
 
 
@@ -362,5 +364,5 @@ def crg_version() -> str | None:
     return r.stdout.strip() if r.ok else None
 
 
-# Na stav grafu se ptá `graph.state()` — tenhle soubor je obálka nad procesem,
-# ne místo, kde se rozhoduje, co je čerstvý index.
+# The graph's state is asked for by `graph.state()` — this file is a wrapper
+# over a process, not the place that decides what a fresh index is.

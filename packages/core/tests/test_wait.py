@@ -1,13 +1,14 @@
-"""`agency run --wait`: běh, který má rodiče.
+"""`agency run --wait`: a run with a parent.
 
-`teams.md` Krok 2. Do teď jádro agenta vytisklo a rozloučilo se s ním —
-`cmd_cleanup` to říká výslovně: *„no pid to watch and no exit code to catch"*.
-Běh proto zůstal `running`, dokud si na `agency ingest` někdo nevzpomněl, a
-nevzpomenout si nestálo nic.
+`teams.md` Step 2. Until now the core printed the agent and said goodbye to it —
+`cmd_cleanup` says so outright: *"no pid to watch and no exit code to catch"*.
+So a run stayed `running` until somebody remembered `agency ingest`, and
+forgetting cost nothing.
 
-Tady se zamyká to, co se s vlastnictvím procesu dá poprvé tvrdit — a hlavně to,
-co se u toho nesmí ztratit: agent, který spadl, není agent bez nálezů; co stihl
-zapsat, se nezahazuje; a přerušení není pád.
+What is locked down here is what owning the process lets us assert for the
+first time — and above all what must not be lost along the way: an agent that
+crashed is not an agent with no findings; what it managed to write is not
+thrown away; and an interruption is not a crash.
 """
 
 from __future__ import annotations
@@ -20,9 +21,9 @@ import pytest
 from agency import cli, metrics, proc, runs
 from agency.util import write_json
 
-#: Skutečná `proc.attend`, uložená před tím, než ji conftest nahradí pojistkou.
-#: Dva testy dole zkoumají ji samotnou — jak sestaví argv a co udělá s chybějící
-#: binárkou — a ty ji potřebují zpátky.
+#: The real `proc.attend`, saved before conftest replaces it with a guard. Two
+#: tests below examine it directly — how it assembles argv and what it does with
+#: a missing binary — and they need it back.
 real_attend = proc.attend
 
 #: The same, for `proc.stream`. The guard in `conftest.py` stays in place — it
@@ -33,8 +34,8 @@ real_stream = proc.stream
 
 
 def agent(monkeypatch, code: int = 0, leaves=None):
-    """Agent, ze kterého je vidět jen to podstatné: co po sobě nechal a jak
-    skončil. Skutečné spuštění je jediná věc, kterou test pustit nemůže."""
+    """An agent showing only what matters: what it left behind and how it
+    ended. Actually launching one is the single thing a test cannot do."""
     def fake(args, cwd=None, env=None):
         if leaves is not None:
             leaves()
@@ -46,22 +47,24 @@ def wait(project, run, wt_owned: bool = False) -> int:
     return cli._wait_for_agent(project, run, ["claude", "prompt"], project.root, wt_owned)
 
 
-# Agent, který nezapsal nic, je od 2. 9. 2026 `failed`, ne `no-findings` — brána
-# za něj prázdné pole nevyrábí. Testy, které zkoumají chování po PÁDU, proto
-# musí nechat `findings.json` na místě, jinak by měřily tuhle novou větev.
+# Since 2 September 2026 an agent that wrote nothing is `failed`, not
+# `no-findings` — the gate does not invent an empty array for it. So tests that
+# examine behaviour after a CRASH must leave `findings.json` in place, or they
+# would be measuring this new branch instead.
 
 
 def nothing_written(run) -> None:
-    """Agent, který nezapsal findings.json. Fixture ho zakládá vždycky, skutečný
-    spadlý běh po sobě ale nenechá nic."""
+    """An agent that wrote no findings.json. The fixture always creates one, but
+    a real crashed run leaves nothing behind."""
     run.findings_path.unlink(missing_ok=True)
 
 
-# ------------------------------------------------------------------ doběhnutí
+# --------------------------------------------------------------- finishing
 
-def test_beh_se_zavre_sam_bez_druheho_prikazu(project, make_run, monkeypatch, capsys):
-    """Kontrola hotovosti z `teams.md`: doběhne, ingest proběhl bez druhého
-    příkazu, běh není `running` a záznam má `agent.exitCode`."""
+def test_a_run_closes_itself_with_no_second_command(project, make_run, monkeypatch, capsys):
+    """The done-check from `teams.md`: it finishes, the ingest happened without
+    a second command, the run is not `running` and the record has
+    `agent.exitCode`."""
     run = make_run()
     agent(monkeypatch, code=0)
 
@@ -72,17 +75,18 @@ def test_beh_se_zavre_sam_bez_druheho_prikazu(project, make_run, monkeypatch, ca
     assert code == 0
     assert rec["status"] == "ok"
     assert rec["agent"]["exitCode"] == 0
-    assert rec["counts"]["kept"] == 1, "brána proběhla bez `agency ingest`"
+    assert rec["counts"]["kept"] == 1, "the gate ran without `agency ingest`"
     assert runs.unfinished(project) == []
 
 
-def test_hodiny_na_stopkach_maji_konecne_kdo_zmeri(project, make_run, monkeypatch, capsys):
-    """`cost.wallClockSeconds` je v `run.v1` od začátku a nikdy ho nic
-    nevyplnilo — nebyl proces, který by měřil. Metriky ho přitom čtou a
-    `s per candidate` kvůli tomu bylo vždycky prázdné."""
+def test_the_wall_clock_finally_has_somebody_to_measure_it(project, make_run, monkeypatch, capsys):
+    """`cost.wallClockSeconds` has been in `run.v1` from the start and nothing
+    ever filled it in — there was no process to do the measuring. The metrics
+    read it, which is why `s per candidate` was always empty."""
     run = make_run()
-    # Stopky, ne skutečné čekání: měří se rozdíl dvou čtení, a test má tvrdit
-    # o tom čísle něco přesného, ne že „je to float".
+    # A stopwatch, not real waiting: what is measured is the difference between
+    # two readings, and the test should assert something exact about that
+    # number, not that "it is a float".
     tick = iter([1000.0, 1272.4])
     monkeypatch.setattr(runs.time, "monotonic", lambda: next(tick, 1272.4))
     agent(monkeypatch, code=0)
@@ -92,13 +96,14 @@ def test_hodiny_na_stopkach_maji_konecne_kdo_zmeri(project, make_run, monkeypatc
     cost = run.record()["cost"]
 
     assert cost["wallClockSeconds"] == 272.4
-    assert cost["credential"] == "subscription", "attended běh jede na předplatném"
+    assert cost["credential"] == "subscription", "an attended run goes on the subscription"
     assert cost["provider"] == "claude"
     assert metrics.collect(project)["cost"]["secondsPerKeptFinding"] == 272
 
 
-def test_zaznam_s_exit_codem_sedi_na_kontrakt(project, make_run, monkeypatch, capsys):
-    """`agent.exitCode` a `cost` jsou nová pole v už validovaném dokumentu."""
+def test_a_record_with_an_exit_code_fits_the_contract(project, make_run, monkeypatch, capsys):
+    """`agent.exitCode` and `cost` are new fields in an already validated
+    document."""
     run = make_run()
     agent(monkeypatch, code=0)
     wait(project, run)
@@ -110,12 +115,12 @@ def test_zaznam_s_exit_codem_sedi_na_kontrakt(project, make_run, monkeypatch, ca
     assert data["recordErrors"] == []
 
 
-# ------------------------------------------------------------------ selhání
+# ---------------------------------------------------------------- failures
 
-def test_agent_ktery_spadl_neni_beh_bez_nalezu(project, make_run, monkeypatch, capsys):
-    """Brána bez findings.json napíše `no-findings` — což je tvrzení „díval se
-    a nic nenašel". U agenta, co skončil jedničkou, je to nepravda, a přesně tu
-    exit code umí odhalit."""
+def test_an_agent_that_crashed_is_not_a_run_with_no_findings(project, make_run, monkeypatch, capsys):
+    """With no findings.json the gate writes `no-findings` — which is the claim
+    "it looked and found nothing". For an agent that exited with 1 that is
+    untrue, and the exit code is exactly what exposes it."""
     run = make_run()
     agent(monkeypatch, code=1, leaves=lambda: nothing_written(run))
 
@@ -123,16 +128,16 @@ def test_agent_ktery_spadl_neni_beh_bez_nalezu(project, make_run, monkeypatch, c
     capsys.readouterr()
     rec = run.record()
 
-    assert code == 1, "chain se má o co zastavit"
+    assert code == 1, "the chain has something to stop on"
     assert rec["status"] == "failed"
     assert "1" in rec["exitReason"]
-    assert "counts" not in rec, "brána nad ničím neběžela, takže ani nic netvrdí"
+    assert "counts" not in rec, "the gate ran over nothing, so it claims nothing"
 
 
-def test_co_agent_stihl_zapsat_se_nezahazuje(project, make_run, monkeypatch, capsys):
-    """Chyba na konci sezení není důvod zahodit hotové nálezy. Projdou branou
-    jako vždycky — jen běh u toho zůstane `failed`, aby se na něj někdo šel
-    podívat."""
+def test_what_the_agent_managed_to_write_is_not_thrown_away(project, make_run, monkeypatch, capsys):
+    """An error at the end of a session is no reason to throw away finished
+    findings. They go through the gate as always — the run merely stays
+    `failed`, so somebody goes and looks at it."""
     run = make_run()
     agent(monkeypatch, code=2)
 
@@ -145,10 +150,11 @@ def test_co_agent_stihl_zapsat_se_nezahazuje(project, make_run, monkeypatch, cap
     assert rec["status"] == "failed" and "2" in rec["exitReason"]
 
 
-def test_preruseni_je_opusteny_beh_a_uklidi_po_sobe(project, make_run, monkeypatch, capsys):
-    """Ctrl-C v terminálu zabije agenta i tenhle proces. Rozdíl proti `--launch`
-    je, že tenhle proces ještě žije a stihne běh zavřít — včetně worktree, na
-    který by uživatel jinak musel přijít sám."""
+def test_an_interruption_is_an_abandoned_run_and_cleans_up_after_itself(project, make_run, monkeypatch, capsys):
+    """Ctrl-C in the terminal kills the agent and this process too. The
+    difference from `--launch` is that this process is still alive and gets to
+    close the run — worktree included, which the user would otherwise have to
+    find on their own."""
     run = make_run()
     wt = project.root.parent / "worktree"
     wt.mkdir()
@@ -169,52 +175,54 @@ def test_preruseni_je_opusteny_beh_a_uklidi_po_sobe(project, make_run, monkeypat
     assert "worktree" not in rec
 
 
-# ------------------------------------------------------------------ spuštění
+# ---------------------------------------------------------------- launching
 
-def test_binarka_se_hleda_pres_which(monkeypatch):
-    """Windows si k příkazu domyslí jen `.exe`. `codex` je fakticky `codex.CMD`
-    a bez rozvinutí PATHEXT skončí jako FileNotFoundError — ověřeno na skutečné
-    instalaci, ne odvozeno."""
+def test_the_binary_is_looked_up_through_which(monkeypatch):
+    """Windows fills in only `.exe` for a command. `codex` is really `codex.CMD`
+    and without expanding PATHEXT it ends as FileNotFoundError — verified on a
+    real installation, not inferred."""
     seen: list = []
     monkeypatch.setattr(proc, "which", lambda tool: r"C:\npm\codex.CMD")
     monkeypatch.setattr(subprocess, "call",
                         lambda args, cwd=None, env=None: seen.append(args) or 0)
-    # Přes skutečnou funkci, ne přes pojistku z conftestu: tenhle test zkoumá
-    # právě to, co pojistka jinak zakazuje — jak se sestaví spouštěcí příkaz.
+    # Through the real function, not conftest's guard: this test examines
+    # exactly what the guard otherwise forbids — how the launch command is
+    # assembled.
     monkeypatch.setattr(proc, "attend", real_attend)
 
     assert proc.attend(["codex", "--model", "gpt"], cwd="/tmp") == 0
     assert seen[0] == [r"C:\npm\codex.CMD", "--model", "gpt"]
 
 
-def test_chybejici_binarka_neni_pad(monkeypatch):
-    """Nespustitelný příkaz je 127, stejně jako u `proc.run` a stejně jako
-    v shellu — jádro z toho nedělá výjimku, kterou by musel chytat volající."""
+def test_a_missing_binary_is_not_a_crash(monkeypatch):
+    """An unrunnable command is 127, the same as in `proc.run` and the same as
+    in a shell — the core does not turn it into an exception the caller would
+    have to catch."""
     monkeypatch.setattr(proc, "which", lambda tool: None)
 
     def missing(args, cwd=None, env=None):
-        raise FileNotFoundError(2, "nenalezeno")
+        raise FileNotFoundError(2, "not found")
     monkeypatch.setattr(subprocess, "call", missing)
     monkeypatch.setattr(proc, "attend", real_attend)
 
-    assert proc.attend(["neni-tam"]) == 127
+    assert proc.attend(["not-there"]) == 127
 
 
-# ------------------------------------------------------------------ přepínače
+# ------------------------------------------------------------------- flags
 
-def test_wait_a_json_se_vylucuji(project):
-    """Agent píše do téhož stdout. Kontrakt „na výstupu je jeden JSON dokument"
-    se u toho nedá slíbit — a slib, který rozbije cizí výpis, je horší než
-    chybějící kombinace přepínačů."""
+def test_wait_and_json_are_mutually_exclusive(project):
+    """The agent writes to the same stdout. The contract "the output is one JSON
+    document" cannot be promised alongside that — and a promise that breaks
+    somebody else's output is worse than a missing combination of flags."""
     with pytest.raises(SystemExit) as e:
         cli.main(["run", "review-graph", "--wait", "--json", "--repo", str(project.root)])
 
     assert "--json" in str(e.value)
 
 
-def test_wait_a_launch_se_vylucuji(project, capsys):
-    """Dvě odpovědi na „kdo drží agenta". Argparse to odmítne dřív, než se
-    cokoli připraví."""
+def test_wait_and_launch_are_mutually_exclusive(project, capsys):
+    """Two answers to "who holds the agent". Argparse refuses it before
+    anything is prepared."""
     with pytest.raises(SystemExit):
         cli.main(["run", "review-graph", "--wait", "--launch", "--repo", str(project.root)])
 

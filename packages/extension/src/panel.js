@@ -41,9 +41,10 @@ function esc(s) {
 }
 
 /**
- * Minimální markdown. Záměrně neúplný: nálezy píše pack podle skillu, takže
- * repertoár je známý — tučné, kód, odrážky, odstavce. Plnohodnotný parser by
- * znamenal závislost, kterou by CSP stejně nepustila.
+ * Minimal markdown. Deliberately incomplete: findings are written by a pack
+ * following its skill, so the repertoire is known — bold, code, bullets,
+ * paragraphs. A full parser would mean a dependency the CSP would not let
+ * through anyway.
  */
 function md(text) {
   const lines = esc(text).split('\n');
@@ -157,7 +158,7 @@ ${script ? `<script nonce="${nonce}">${script}</script>` : ''}
 </body></html>`;
 }
 
-// ------------------------------------------------------------ detail nálezu
+// ----------------------------------------------------------- finding detail
 
 function findingHtml(f) {
   const sev = f.severity || 'low';

@@ -1,15 +1,16 @@
-// Nálezy jako inline review komentáře u řádku.
+// Findings as inline review comments at the line.
 //
-// Tohle je jediná věc, kterou desktopová aplikace fyzicky neumí a kvůli které
-// UI Agency žije ve VS Code (ui-surface-decision.md §2.2). Vlákno sedí přímo
-// u kódu, hlavička nese rozhodnutí, pole odpovědi poznámku.
+// This is the one thing a desktop app physically cannot do, and the reason
+// Agency's UI lives in VS Code (ui-surface-decision.md §2.2). The thread sits
+// right by the code, its header carries the decision, its reply box the note.
 //
-// Rozhodnutí a poznámka NESMÍ sdílet tlačítko. Rozhodnutí je strukturovaný
-// vstup metriky, poznámka volný text; smíchat je znamená rozbít buď měření,
-// nebo použitelnost — ve spiku to bylo zkoušené a rozbilo to obojí.
+// A decision and a note MUST NOT share a button. A decision is structured
+// input to a metric, a note is free text; mixing them breaks either the
+// measurement or the usability — the spike tried it and broke both.
 //
-// Kam vlákno umístit, říká CLI: `agency findings --json` posílá `resolved`
-// (kotva po driftu) a `drift`. Extension to nepočítá znovu.
+// Where a thread goes is the CLI's answer: `agency findings --json` sends
+// `resolved` (the anchor after drift) and `drift`. The extension does not
+// compute it again.
 
 const vscode = require('vscode');
 const path = require('path');
@@ -31,12 +32,13 @@ class Threads {
   constructor(log) {
     this.log = log;
     this.controller = vscode.comments.createCommentController(CONTROLLER_ID, 'Agency — findings');
-    // Uživatel nezakládá vlastní vlákna — komentář bez nálezu by neměl kam patřit.
+    // The user does not start threads of their own — a comment with no finding
+    // would have nowhere to belong.
     this.controller.commentingRangeProvider = { provideCommentingRanges: () => [] };
     this.threads = [];
-    /** Generace: build je asynchronní a dá se spustit dvakrát naráz. Bez čítače
-     *  druhý běh uklidí vlákna prvního, ale ta rozdělaná vzniknou AŽ PO úklidu
-     *  a přežijí jako duplikáty. */
+    /** Generation: a build is async and can be started twice at once. Without
+     *  the counter the second run clears the first one's threads, but the ones
+     *  already in flight appear AFTER that cleanup and survive as duplicates. */
     this.generation = 0;
   }
 
@@ -47,26 +49,27 @@ class Threads {
 
   clear() {
     for (const t of this.threads) {
-      try { t.dispose(); } catch (_) { /* už zaniklo */ }
+      try { t.dispose(); } catch (_) { /* already gone */ }
     }
     this.threads = [];
   }
 
-  /** Vlákno pro jeden nález. Vrací, kam se posadilo — nebo že nikam. */
+  /** The thread for one finding. Returns where it landed — or that it did not. */
   async place(repo, f) {
     const a = f.anchor || {};
     if (!a.file) return null;
     const resolved = f.resolved || {};
 
-    // A — do pracovní kopie, když kotva něco našla
+    // A — into the working tree, when the anchor found something
     if (resolved.line) {
       const abs = path.join(repo, a.file);
       if (fs.existsSync(abs)) {
         return { uri: vscode.Uri.file(abs), line: resolved.line, placed: 'working-tree' };
       }
     }
-    // B — na read-only dokument z commitu analýzy. Tohle drží retrospektivní
-    //     audit: soubor už nemusí existovat a nález se pořád dá přečíst.
+    // B — onto the read-only document from the analysis commit. This is what
+    //     holds a retrospective audit up: the file need not exist any more and
+    //     the finding can still be read.
     if (await gitx.commitExists(repo, a.commit)) {
       const content = await gitx.showAtCommit(repo, a.commit, a.file);
       if (content !== null && a.line <= content.split('\n').length) {
@@ -112,14 +115,14 @@ class Threads {
     });
   }
 
-  /** Postaví vlákna ze snímku nálezů. Vrací, kolik se jich kam posadilo. */
+  /** Builds the threads from a snapshot of findings. Returns how many landed where. */
   async build(repo, findings) {
     const gen = ++this.generation;
     this.clear();
     const stats = { 'working-tree': 0, 'at-commit': 0, none: 0 };
 
     for (const f of findings) {
-      if (f.state === 'duplicate') continue;   // duplicita nepatří ke kódu podruhé
+      if (f.state === 'duplicate') continue;   // a duplicate does not belong at the code twice
       const spot = await this.place(repo, f);
       if (gen !== this.generation) return { stats, cancelled: true };
       if (!spot) { stats.none += 1; continue; }
@@ -133,9 +136,10 @@ class Threads {
         spot.uri, new vscode.Range(line, 0, line, 0), [head, ...this.history(f)]);
       thread.collapsibleState = vscode.CommentThreadCollapsibleState.Collapsed;
       thread.canReply = true;
-      // Kontext řídí, které akce se nabídnou. U nezměněného souboru je diff
-      // proti pracovní kopii bezcenný — ukázal by tentýž obsah dvakrát.
-      // Přítomnost toho tlačítka je tím pádem tentýž signál jako test driftu.
+      // The context decides which actions are offered. On an unchanged file a
+      // diff against the working tree is worthless — it would show the same
+      // content twice. The presence of that button is therefore the same
+      // signal as the drift test.
       thread.contextValue = f.drift === 'touched' ? 'agencyFinding.drifted'
         : f.drift === 'deleted' ? 'agencyFinding.deleted' : 'agencyFinding';
       const mark = f.state === 'sent' ? `→ ${f.ref || 'board'} ` : f.state === 'rejected' ? '✘ ' : '';
@@ -156,7 +160,8 @@ class Threads {
   }
 }
 
-/** Vlákno z argumentu příkazu — přichází ze dvou různých menu s jiným tvarem. */
+/** The thread from a command argument — it arrives from two different menus
+ *  in two different shapes. */
 function threadOf(arg) {
   if (!arg) return null;
   if (arg.thread) return arg.thread;      // CommentReply (comments/commentThread/context)
@@ -164,7 +169,8 @@ function threadOf(arg) {
   return null;
 }
 
-/** Text z pole odpovědi. VS Code ho předá jen s rozbaleným editorem — bonus, ne vstup. */
+/** The text from the reply box. VS Code hands it over only with the editor
+ *  expanded — a bonus, not an input. */
 function replyTextOf(arg) {
   if (!arg || typeof arg.text !== 'string') return null;
   const t = arg.text.trim();
