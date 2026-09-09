@@ -28,112 +28,112 @@
 <div class="frame">
 <p class="eyebrow">Flowchart · VeriFlow Agency</p>
 <h1>Where an output sits, and how dedup finds out</h1>
-<svg id="dg-sits" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 648" role="img" aria-labelledby="sits-title sits-desc">
+<svg id="dg-sits" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 710" role="img" aria-labelledby="sits-title sits-desc">
 <title id="sits-title">Where an output sits, and how dedup finds out</title>
 <desc id="sits-desc">Three questions are asked in order to give an output a place: the subject the pack declared, then a symbol from the anchor, then a file; the first that answers wins, and an output that answers none has no place rather than a shared placeholder.</desc>
 <style>
-  #dg-sits{--paper:#fbfaf7;--paper2:#ffffff;--ink:#1b1a17;--muted:#6d6a62;--soft:#8f8c83;
-    --rule:rgba(27,26,23,0.12);--rule-solid:#e6e3dc;--accent:#1f6f4a;--accent-tint:rgba(31,111,74,0.08);
-    --wash:rgba(27,26,23,0.02);--wash2:rgba(27,26,23,0.05);
+  #dg-sits{--paper:#fbfaf7;--paper2:#ffffff;--ink:#1b1a17;--muted:#504d45;--soft:#6b675e;
+    --rule:rgba(27,26,23,0.16);--rule-solid:#cbc7be;--accent:#1a6743;--accent-tint:rgba(26,103,67,0.10);
+    --wash:rgba(27,26,23,0.03);--wash2:rgba(27,26,23,0.06);
     --sans:'Geist',ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
     --mono:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
     --serif:'Instrument Serif',Georgia,'Times New Roman',serif}
-  @media (prefers-color-scheme:dark){#dg-sits{--paper:#14140f;--paper2:#1b1b15;--ink:#eceae3;--muted:#97948a;
-    --soft:#7d7a71;--rule:rgba(236,234,227,0.12);--rule-solid:#2b2a24;--accent:#6cba8e;
-    --accent-tint:rgba(108,186,142,0.12);--wash:rgba(236,234,227,0.03);--wash2:rgba(236,234,227,0.06)}}
+  @media (prefers-color-scheme:dark){#dg-sits{--paper:#14140f;--paper2:#1e1e17;--ink:#f0eee7;--muted:#bab7ac;
+    --soft:#9d9a90;--rule:rgba(240,238,231,0.18);--rule-solid:#403e34;--accent:#7fd0a3;
+    --accent-tint:rgba(127,208,163,0.14);--wash:rgba(240,238,231,0.045);--wash2:rgba(240,238,231,0.08)}}
   #dg-sits text{font-family:var(--sans);fill:var(--ink)}
-  #dg-sits .zn{font-family:var(--mono);font-size:7px;letter-spacing:.14em;fill:var(--soft)}
-  #dg-sits .nm{font-size:12px;font-weight:600}
-  #dg-sits .sub{font-family:var(--mono);font-size:9px;fill:var(--muted)}
-  #dg-sits .key{font-family:var(--mono);font-size:12px;font-weight:600;fill:var(--ink)}
-  #dg-sits .al{font-family:var(--mono);font-size:8px;letter-spacing:.06em;fill:var(--soft)}
-  #dg-sits .aside{font-family:var(--serif);font-style:italic;font-size:14px;fill:var(--muted)}
+  #dg-sits .zn{font-family:var(--mono);font-size:10px;letter-spacing:.12em;fill:var(--soft)}
+  #dg-sits .nm{font-size:16px;font-weight:600}
+  #dg-sits .sub{font-family:var(--mono);font-size:12px;fill:var(--muted)}
+  #dg-sits .key{font-family:var(--mono);font-size:15px;font-weight:600;fill:var(--ink)}
+  #dg-sits .al{font-family:var(--mono);font-size:11px;letter-spacing:.06em;fill:var(--muted)}
+  #dg-sits .aside{font-family:var(--serif);font-style:italic;font-size:19px;fill:var(--muted)}
   #dg-sits .mask{fill:var(--paper)}
-  #dg-sits .box{fill:var(--paper2);stroke:var(--ink);stroke-width:1}
-  #dg-sits .oval{fill:var(--wash2);stroke:var(--muted);stroke-width:1}
-  #dg-sits .dia{fill:var(--paper2);stroke:var(--ink);stroke-width:1}
-  #dg-sits .focal{fill:var(--accent-tint);stroke:var(--accent);stroke-width:1}
-  #dg-sits .opt{fill:var(--wash);stroke:var(--rule-solid);stroke-width:1;stroke-dasharray:4 3}
-  #dg-sits .ln{fill:none;stroke:var(--muted);stroke-width:1.2}
+  #dg-sits .box{fill:var(--paper2);stroke:var(--ink);stroke-width:1.2}
+  #dg-sits .oval{fill:var(--wash2);stroke:var(--muted);stroke-width:1.2}
+  #dg-sits .dia{fill:var(--paper2);stroke:var(--ink);stroke-width:1.2}
+  #dg-sits .focal{fill:var(--accent-tint);stroke:var(--accent);stroke-width:1.6}
+  #dg-sits .opt{fill:var(--wash);stroke:var(--rule-solid);stroke-width:1.2;stroke-dasharray:5 4}
+  #dg-sits .ln{fill:none;stroke:var(--muted);stroke-width:1.6}
   #dg-sits .mk{fill:var(--muted)}
 </style>
 <defs>
-  <marker id="sits-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
-    <polygon class="mk" points="0 0, 8 3, 0 6"/>
+  <marker id="sits-arrow" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+    <polygon class="mk" points="0 0, 10 4, 0 8"/>
   </marker>
 </defs>
 
 <rect width="100%" height="100%" fill="var(--paper)"/>
 
-<text class="zn" x="160" y="52">DEDUP.SUBJECT_KEY — ASKED IN THIS ORDER</text>
+<text class="zn" x="136" y="48">DEDUP.SUBJECT_KEY — ASKED IN THIS ORDER</text>
 
 <!-- connectors -->
-<line class="ln" x1="260" y1="120" x2="260" y2="150" marker-end="url(#sits-arrow)"/>
-<line class="ln" x1="360" y1="192" x2="518" y2="192" marker-end="url(#sits-arrow)"/>
-<line class="ln" x1="260" y1="232" x2="260" y2="270" marker-end="url(#sits-arrow)"/>
-<line class="ln" x1="360" y1="312" x2="518" y2="312" marker-end="url(#sits-arrow)"/>
-<line class="ln" x1="260" y1="352" x2="260" y2="390" marker-end="url(#sits-arrow)"/>
-<line class="ln" x1="360" y1="432" x2="518" y2="432" marker-end="url(#sits-arrow)"/>
-<line class="ln" x1="260" y1="472" x2="260" y2="510" marker-end="url(#sits-arrow)"/>
+<line class="ln" x1="260" y1="128" x2="260" y2="146" marker-end="url(#sits-arrow)"/>
+<line class="ln" x1="384" y1="200" x2="518" y2="200" marker-end="url(#sits-arrow)"/>
+<line class="ln" x1="260" y1="252" x2="260" y2="282" marker-end="url(#sits-arrow)"/>
+<line class="ln" x1="384" y1="336" x2="518" y2="336" marker-end="url(#sits-arrow)"/>
+<line class="ln" x1="260" y1="388" x2="260" y2="418" marker-end="url(#sits-arrow)"/>
+<line class="ln" x1="384" y1="472" x2="518" y2="472" marker-end="url(#sits-arrow)"/>
+<line class="ln" x1="260" y1="524" x2="260" y2="550" marker-end="url(#sits-arrow)"/>
 
-<rect class="mask" x="424" y="172" width="28" height="12"/><text class="al" x="438" y="181" text-anchor="middle">YES</text>
-<rect class="mask" x="424" y="292" width="28" height="12"/><text class="al" x="438" y="301" text-anchor="middle">YES</text>
-<rect class="mask" x="424" y="412" width="28" height="12"/><text class="al" x="438" y="421" text-anchor="middle">YES</text>
-<rect class="mask" x="268" y="245" width="24" height="12"/><text class="al" x="268" y="254">NO</text>
-<rect class="mask" x="268" y="365" width="24" height="12"/><text class="al" x="268" y="374">NO</text>
-<rect class="mask" x="268" y="485" width="24" height="12"/><text class="al" x="268" y="494">NO</text>
+<rect class="mask" x="434" y="176" width="34" height="16"/><text class="al" x="451" y="189" text-anchor="middle">YES</text>
+<rect class="mask" x="434" y="312" width="34" height="16"/><text class="al" x="451" y="325" text-anchor="middle">YES</text>
+<rect class="mask" x="434" y="448" width="34" height="16"/><text class="al" x="451" y="461" text-anchor="middle">YES</text>
+<rect class="mask" x="270" y="259" width="28" height="16"/><text class="al" x="270" y="272">NO</text>
+<rect class="mask" x="270" y="395" width="28" height="16"/><text class="al" x="270" y="408">NO</text>
+<rect class="mask" x="270" y="523" width="28" height="16"/><text class="al" x="270" y="536">NO</text>
 
 <!-- start -->
-<rect class="mask" x="160" y="72" width="200" height="48" rx="24"/>
-<rect class="oval" x="160" y="72" width="200" height="48" rx="24"/>
-<text class="nm" x="260" y="102" text-anchor="middle">An output</text>
+<rect class="mask" x="136" y="72" width="248" height="56" rx="28"/>
+<rect class="oval" x="136" y="72" width="248" height="56" rx="28"/>
+<text class="nm" x="260" y="106" text-anchor="middle">An output</text>
 
 <!-- Q1 -->
-<path class="mask" d="M 260,152 L 360,192 L 260,232 L 160,192 Z"/>
-<path class="dia" d="M 260,152 L 360,192 L 260,232 L 160,192 Z"/>
-<text class="nm" x="260" y="190" text-anchor="middle">A subject?</text>
-<text class="sub" x="260" y="206" text-anchor="middle">{ kind, ref }</text>
+<path class="mask" d="M 260,148 L 384,200 L 260,252 L 136,200 Z"/>
+<path class="dia" d="M 260,148 L 384,200 L 260,252 L 136,200 Z"/>
+<text class="nm" x="260" y="198" text-anchor="middle">A subject?</text>
+<text class="sub" x="260" y="220" text-anchor="middle">{ kind, ref }</text>
 
 <!-- Q2 -->
-<path class="mask" d="M 260,272 L 360,312 L 260,352 L 160,312 Z"/>
-<path class="dia" d="M 260,272 L 360,312 L 260,352 L 160,312 Z"/>
-<text class="nm" x="260" y="310" text-anchor="middle">A symbol?</text>
-<text class="sub" x="260" y="326" text-anchor="middle">from the anchor</text>
+<path class="mask" d="M 260,284 L 384,336 L 260,388 L 136,336 Z"/>
+<path class="dia" d="M 260,284 L 384,336 L 260,388 L 136,336 Z"/>
+<text class="nm" x="260" y="334" text-anchor="middle">A symbol?</text>
+<text class="sub" x="260" y="356" text-anchor="middle">from the anchor</text>
 
 <!-- Q3 -->
-<path class="mask" d="M 260,392 L 360,432 L 260,472 L 160,432 Z"/>
-<path class="dia" d="M 260,392 L 360,432 L 260,472 L 160,432 Z"/>
-<text class="nm" x="260" y="430" text-anchor="middle">A file?</text>
-<text class="sub" x="260" y="446" text-anchor="middle">from the anchor</text>
+<path class="mask" d="M 260,420 L 384,472 L 260,524 L 136,472 Z"/>
+<path class="dia" d="M 260,420 L 384,472 L 260,524 L 136,472 Z"/>
+<text class="nm" x="260" y="470" text-anchor="middle">A file?</text>
+<text class="sub" x="260" y="492" text-anchor="middle">from the anchor</text>
 
 <!-- nowhere -->
-<rect class="mask" x="160" y="512" width="200" height="48" rx="24"/>
-<rect class="oval" x="160" y="512" width="200" height="48" rx="24"/>
-<text class="nm" x="260" y="542" text-anchor="middle">No place at all</text>
+<rect class="mask" x="136" y="552" width="248" height="56" rx="28"/>
+<rect class="oval" x="136" y="552" width="248" height="56" rx="28"/>
+<text class="nm" x="260" y="586" text-anchor="middle">No place at all</text>
 
 <!-- answers -->
-<rect class="mask" x="520" y="168" width="400" height="48" rx="6"/>
-<rect class="focal" x="520" y="168" width="400" height="48" rx="6"/>
-<text class="key" x="536" y="190" fill="var(--accent)">kind:ref</text>
-<text class="sub" x="536" y="206">the pack said what this is about — a bet on a market, a board item</text>
+<rect class="mask" x="520" y="168" width="420" height="64" rx="8"/>
+<rect class="focal" x="520" y="168" width="420" height="64" rx="8"/>
+<text class="key" x="540" y="196" fill="var(--accent)">kind:ref</text>
+<text class="sub" x="540" y="218">the pack said what this is about — a bet, a board item</text>
 
-<rect class="mask" x="520" y="288" width="400" height="48" rx="6"/>
-<rect class="box" x="520" y="288" width="400" height="48" rx="6"/>
-<text class="key" x="536" y="310">sym:&lt;name&gt;</text>
-<text class="sub" x="536" y="326">survives a moved block and a refactor</text>
+<rect class="mask" x="520" y="304" width="420" height="64" rx="8"/>
+<rect class="box" x="520" y="304" width="420" height="64" rx="8"/>
+<text class="key" x="540" y="332">sym:&lt;name&gt;</text>
+<text class="sub" x="540" y="354">survives a moved block and a refactor</text>
 
-<rect class="mask" x="520" y="408" width="400" height="48" rx="6"/>
-<rect class="box" x="520" y="408" width="400" height="48" rx="6"/>
-<text class="key" x="536" y="430">file:&lt;path&gt;</text>
-<text class="sub" x="536" y="446">weaker, but still independent of the line</text>
+<rect class="mask" x="520" y="440" width="420" height="64" rx="8"/>
+<rect class="box" x="520" y="440" width="420" height="64" rx="8"/>
+<text class="key" x="540" y="468">file:&lt;path&gt;</text>
+<text class="sub" x="540" y="490">weaker, but still independent of the line</text>
 
-<rect class="mask" x="520" y="512" width="400" height="48" rx="6"/>
-<rect class="opt" x="520" y="512" width="400" height="48" rx="6"/>
-<text class="key" x="536" y="534" fill="var(--muted)">""</text>
-<text class="sub" x="536" y="550">empty — and that is a place of its own</text>
+<rect class="mask" x="520" y="540" width="420" height="64" rx="8"/>
+<rect class="opt" x="520" y="540" width="420" height="64" rx="8"/>
+<text class="key" x="540" y="568" fill="var(--muted)">""</text>
+<text class="sub" x="540" y="590">empty — and that is a place of its own</text>
 
-<text class="aside" x="160" y="608">Empty is not <tspan font-family="var(--mono)" font-size="12px" font-style="normal">file:?</tspan> — one shared placeholder would put every anchorless output in the same place,</text>
-<text class="aside" x="160" y="630">and turn “two claims in two places are two claims” into its exact opposite.</text>
+<text class="aside" x="60" y="654">Empty is not <tspan font-family="var(--mono)" font-size="16px" font-style="normal">file:?</tspan> — one shared placeholder would put every anchorless output in one place,</text>
+<text class="aside" x="60" y="682">and turn “two claims in two places are two claims” into its exact opposite.</text>
 </svg>
 <p class="colophon">docs/diagrams/where-it-sits.svg — regenerate with docs/diagrams/build.py</p>
 </div>
