@@ -36,7 +36,11 @@
      the comparison tables are 540px wide — without this they push the whole
      page sideways instead of scrolling inside their own container. */
   nav, main { min-width: 0; }
-  main { padding: 34px 0 120px; max-width: 74ch; }
+  /* The measure lives on the blocks, not on `main`, so a figure can use the
+     whole column while the prose stays at 74ch. */
+  main { padding: 34px 0 120px; }
+  main > header, main > footer, main > section > * { max-width: 74ch; }
+  main > section > .fig { max-width: none; }
   @media (max-width: 900px) {
     .wrap { grid-template-columns: minmax(0, 1fr); gap: 0; }
     nav { position: static; height: auto; padding-bottom: 8px;
@@ -47,6 +51,17 @@
        make the lines too long to fit. */
     h1 br { display: none; }
   }
+
+  /* ------------------------------------------------------------ figures */
+  /* A diagram is inlined, not linked: the page has to work off a USB stick.
+     Each svg carries its own palette and its own prefers-color-scheme block,
+     so it follows the theme without anything here. */
+  .fig { margin: 28px 0 32px; overflow-x: auto; }
+  .fig svg { display: block; width: 100%; min-width: 720px; height: auto; }
+  .figcap { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 10px;
+            color: var(--dim); font-size: 13.5px; line-height: 1.5; }
+  .figcap a { color: var(--accent); text-decoration: none; border-bottom: 1px solid transparent; }
+  .figcap a:hover { border-bottom-color: var(--accent); }
 
   /* ------------------------------------------------------------ nav */
   .brand { font-weight: 640; letter-spacing: -.015em; font-size: 15px; }
@@ -148,6 +163,7 @@
 
     <div class="grouplabel"><span lang="cs">Jak</span><span lang="en">How</span></div>
     <a href="#run"><span lang="cs">Průběh běhu</span><span lang="en">How a run works</span></a>
+    <a href="#outputs"><span lang="cs">Co pack vyrábí</span><span lang="en">What a pack produces</span></a>
     <a href="#gate"><span lang="cs">Brána a paměť</span><span lang="en">Gate and memory</span></a>
     <a href="#packs"><span lang="cs">Referenční packy</span><span lang="en">Reference packs</span></a>
     <a href="#build"><span lang="cs">Vlastní pack</span><span lang="en">Writing a pack</span></a>
@@ -228,6 +244,134 @@
     <p>The second part is the <code>agency</code> command, which starts a pack, watches the run and records the result. It does not replace Claude Code but drives it, so the model stays the same and only what surrounds the run changes.</p>
   </div>
 
+  <figure class="fig">
+    <!-- diagram:shape -->
+  <svg id="dg-shape" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 760" role="img" aria-labelledby="shape-title shape-desc">
+  <title id="shape-title">Where the three parts of Agency live</title>
+  <desc id="shape-desc">The VS Code extension and the paired phone read the runner only through its JSON contract; the runner reads the pack, which is a committed skill inside the target project alongside the project's committed memory and its gitignored run records.</desc>
+  <style>
+    #dg-shape{--paper:#fbfaf7;--paper2:#ffffff;--ink:#1b1a17;--muted:#6d6a62;--soft:#8f8c83;
+      --rule:rgba(27,26,23,0.12);--rule-solid:#e6e3dc;--accent:#1f6f4a;--accent-tint:rgba(31,111,74,0.08);
+      --wash:rgba(27,26,23,0.02);--wash2:rgba(27,26,23,0.05);--wash3:rgba(27,26,23,0.03);
+      --sans:'Geist',ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+      --mono:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+    @media (prefers-color-scheme:dark){#dg-shape{--paper:#14140f;--paper2:#1b1b15;--ink:#eceae3;--muted:#97948a;
+      --soft:#7d7a71;--rule:rgba(236,234,227,0.12);--rule-solid:#2b2a24;--accent:#6cba8e;
+      --accent-tint:rgba(108,186,142,0.12);--wash:rgba(236,234,227,0.03);--wash2:rgba(236,234,227,0.06);
+      --wash3:rgba(236,234,227,0.04)}}
+    #dg-shape text{font-family:var(--sans);fill:var(--ink)}
+    #dg-shape .eb{font-family:var(--mono);font-size:7px;letter-spacing:.08em;fill:var(--muted)}
+    #dg-shape .zn{font-family:var(--mono);font-size:7px;letter-spacing:.14em;fill:var(--soft)}
+    #dg-shape .nm{font-size:12px;font-weight:600}
+    #dg-shape .sub{font-family:var(--mono);font-size:9px;fill:var(--muted)}
+    #dg-shape .al{font-family:var(--mono);font-size:8px;letter-spacing:.06em;fill:var(--soft)}
+    #dg-shape .lg{font-family:var(--mono);font-size:8px;letter-spacing:.06em;fill:var(--muted)}
+    #dg-shape .mask{fill:var(--paper)}
+    #dg-shape .box{fill:var(--paper2);stroke:var(--ink);stroke-width:1}
+    #dg-shape .store{fill:var(--wash2);stroke:var(--muted);stroke-width:1}
+    #dg-shape .opt{fill:var(--wash);stroke:var(--rule-solid);stroke-width:1;stroke-dasharray:4 3}
+    #dg-shape .focal{fill:var(--accent-tint);stroke:var(--accent);stroke-width:1}
+    #dg-shape .zone{fill:var(--wash);stroke:var(--rule);stroke-width:.8}
+    #dg-shape .tag{fill:none;stroke-width:.8}
+    #dg-shape .ln{fill:none;stroke:var(--muted);stroke-width:1.2}
+    #dg-shape .bnd{fill:none;stroke:var(--accent);stroke-width:1;stroke-dasharray:4 4;opacity:.55}
+    #dg-shape .hair{stroke:var(--rule);stroke-width:.8}
+    #dg-shape .mk{fill:var(--muted)}
+  </style>
+  <defs>
+    <marker id="shape-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon class="mk" points="0 0, 8 3, 0 6"/>
+    </marker>
+  </defs>
+
+  <rect width="100%" height="100%" fill="var(--paper)"/>
+
+  <!-- zone: the target project -->
+  <rect class="zone" x="40" y="456" width="920" height="184" rx="8"/>
+  <rect class="mask" x="60" y="460" width="252" height="12"/>
+  <text class="zn" x="68" y="469">TARGET PROJECT — VERSIONED WITH THE CODE</text>
+
+  <!-- the one boundary -->
+  <line class="bnd" x1="40" y1="252" x2="960" y2="252"/>
+  <rect class="mask" x="316" y="244" width="368" height="14"/>
+  <text class="zn" x="500" y="255" text-anchor="middle">AGENCY … --JSON · RUN.V1 · FINDING.V1</text>
+
+  <!-- connectors, drawn before the boxes -->
+  <path class="ln" d="M 260,180 V 264 Q 260,272 268,272 H 432 Q 440,272 440,280 V 310" marker-end="url(#shape-arrow)"/>
+  <path class="ln" d="M 740,180 V 264 Q 740,272 732,272 H 568 Q 560,272 560,280 V 310" marker-end="url(#shape-arrow)"/>
+  <path class="ln" d="M 500,388 V 508" marker-end="url(#shape-arrow)"/>
+  <rect class="mask" x="510" y="428" width="62" height="12"/>
+  <text class="al" x="516" y="437">PACK.JSON</text>
+
+  <!-- VIEWER -->
+  <rect class="mask" x="136" y="104" width="248" height="76" rx="6"/>
+  <rect class="box" x="136" y="104" width="248" height="76" rx="6"/>
+  <rect class="tag" x="148" y="114" width="40" height="12" rx="2" stroke="var(--ink)" opacity=".45"/>
+  <text class="eb" x="168" y="123" text-anchor="middle">VIEWER</text>
+  <text class="nm" x="260" y="150" text-anchor="middle">VS Code extension</text>
+  <text class="sub" x="260" y="168" text-anchor="middle">read-only</text>
+
+  <!-- REMOTE -->
+  <rect class="mask" x="616" y="104" width="248" height="76" rx="6"/>
+  <rect class="box" x="616" y="104" width="248" height="76" rx="6"/>
+  <rect class="tag" x="628" y="114" width="40" height="12" rx="2" stroke="var(--ink)" opacity=".45"/>
+  <text class="eb" x="648" y="123" text-anchor="middle">REMOTE</text>
+  <text class="nm" x="740" y="150" text-anchor="middle">A paired phone</text>
+  <text class="sub" x="740" y="168" text-anchor="middle">agency serve · tailnet</text>
+
+  <!-- RUNNER -->
+  <rect class="mask" x="376" y="312" width="248" height="76" rx="6"/>
+  <rect class="box" x="376" y="312" width="248" height="76" rx="6"/>
+  <rect class="tag" x="388" y="322" width="40" height="12" rx="2" stroke="var(--ink)" opacity=".45"/>
+  <text class="eb" x="408" y="331" text-anchor="middle">RUNNER</text>
+  <text class="nm" x="500" y="358" text-anchor="middle">agency</text>
+  <text class="sub" x="500" y="376" text-anchor="middle">run · gate · dedup · memory</text>
+
+  <!-- THE PACK (focal) -->
+  <rect class="mask" x="352" y="512" width="296" height="88" rx="6"/>
+  <rect class="focal" x="352" y="512" width="296" height="88" rx="6"/>
+  <rect class="tag" x="364" y="522" width="36" height="12" rx="2" stroke="var(--accent)" opacity=".6"/>
+  <text class="eb" x="382" y="531" text-anchor="middle" fill="var(--accent)">SKILL</text>
+  <text class="nm" x="500" y="562" text-anchor="middle">The specialist</text>
+  <text class="sub" x="500" y="580" text-anchor="middle">.claude/skills/agency-&lt;name&gt;/</text>
+
+  <!-- MEMORY -->
+  <rect class="mask" x="72" y="512" width="248" height="88" rx="6"/>
+  <rect class="store" x="72" y="512" width="248" height="88" rx="6"/>
+  <rect class="tag" x="84" y="522" width="60" height="12" rx="2" stroke="var(--muted)" opacity=".55"/>
+  <text class="eb" x="114" y="531" text-anchor="middle">COMMITTED</text>
+  <text class="nm" x="196" y="562" text-anchor="middle">Memory</text>
+  <text class="sub" x="196" y="580" text-anchor="middle">.agency/knowledge/</text>
+
+  <!-- RUN RECORDS -->
+  <rect class="mask" x="680" y="512" width="248" height="88" rx="6"/>
+  <rect class="opt" x="680" y="512" width="248" height="88" rx="6"/>
+  <rect class="tag" x="692" y="522" width="64" height="12" rx="2" stroke="var(--rule-solid)"/>
+  <text class="eb" x="724" y="531" text-anchor="middle">GITIGNORED</text>
+  <text class="nm" x="804" y="562" text-anchor="middle">Run records</text>
+  <text class="sub" x="804" y="580" text-anchor="middle">.agency/runs/&lt;ULID&gt;/</text>
+
+  <!-- legend -->
+  <line class="hair" x1="40" y1="688" x2="960" y2="688"/>
+  <text class="zn" x="40" y="706">LEGEND</text>
+  <rect class="focal" x="128" y="698" width="14" height="10" rx="2"/>
+  <text class="lg" x="150" y="707">A SKILL — NOTHING HIRES IT, NOTHING CONFIGURES IT</text>
+  <rect class="store" x="512" y="698" width="14" height="10" rx="2"/>
+  <text class="lg" x="534" y="707">IN GIT</text>
+  <rect class="opt" x="612" y="698" width="14" height="10" rx="2"/>
+  <text class="lg" x="634" y="707">NOT IN GIT</text>
+  <line class="bnd" x1="740" y1="703" x2="762" y2="703"/>
+  <text class="lg" x="770" y="707">THE ONLY BOUNDARY</text>
+  </svg>
+  <!-- /diagram:shape -->
+    <figcaption class="figcap">
+      <span lang="cs">Tři programy a jedno místo. Pack, paměť i záznamy leží v projektu; klienti mluví s nástrojem jedinou cestou.</span>
+      <span lang="en">Three programs and one place. The pack, the memory and the records live in the project; the clients talk to the tool one way only.</span>
+      <a href="../diagrams/shape.html" lang="cs">Otevřít diagram</a>
+      <a href="../diagrams/shape.html" lang="en">Open the diagram</a>
+    </figcaption>
+  </figure>
+
   <div class="grid">
     <div class="card">
       <h3><span lang="cs">Commitovaná paměť</span><span lang="en">Committed memory</span></h3>
@@ -235,14 +379,14 @@
       <p lang="en">Findings, decisions and each pack's own notes live in <code>.agency/knowledge/</code> as markdown. A colleague can read them, so can a plain session, and so can someone returning to the project a year later.</p>
     </div>
     <div class="card">
-      <h3><span lang="cs">Kontrola nálezů</span><span lang="en">Checking findings</span></h3>
-      <p lang="cs">Nález odkazující na soubor, který v daném commitu neexistuje, se dál neposílá. Rozhodnutí je deterministické a nepotřebuje k němu druhý model.</p>
-      <p lang="en">A finding pointing at a file that does not exist at that commit goes no further. The decision is deterministic and needs no second model.</p>
+      <h3><span lang="cs">Kontrola výstupů</span><span lang="en">Checking outputs</span></h3>
+      <p lang="cs">Nález odkazující na soubor, který v daném commitu neexistuje, se dál neposílá. Totéž platí pro odkaz na stránku, kterou v tomhle běhu nikdo neotevřel. Rozhodnutí je deterministické a nepotřebuje k němu druhý model.</p>
+      <p lang="en">A finding pointing at a file that does not exist at that commit goes no further. Nor does a claim citing a page nobody opened during that run. The decision is deterministic and needs no second model.</p>
     </div>
     <div class="card">
       <h3><span lang="cs">Měření</span><span lang="en">Measurement</span></h3>
-      <p lang="cs">Nástroj sleduje precision, tedy podíl nálezů, které se po rozhodnutí ukázaly jako oprávněné, a člení ji podle dimenzí, modelů a verzí metody.</p>
-      <p lang="en">The tool tracks precision, the share of findings that turned out to be justified once decided, broken down by dimension, model and version of the method.</p>
+      <p lang="cs">Nástroj sleduje precision, tedy podíl nálezů, které se po rozhodnutí ukázaly jako oprávněné, a člení ji podle dimenzí, modelů a verzí metody. Každá další otázka, kterou typ výstupu deklaruje, má vlastní číslo.</p>
+      <p lang="en">The tool tracks precision, the share of findings that turned out to be justified once decided, broken down by dimension, model and version of the method. Every further question an output type declares gets a number of its own.</p>
     </div>
   </div>
 </section>
@@ -306,15 +450,15 @@
   <ol class="steps" lang="cs">
     <li><b>Příprava</b> Nástroj vytvoří jednorázový worktree nad commitem daného pull requestu, z code grafu zjistí, čeho se změna dotýká, a přiloží paměť projektu: co se v něm už dřív našlo, kde a co bylo zamítnuto.</li>
     <li><b>Běh</b> Spustí se agent. Kromě promptu dostane seznam příkazů, které smí spustit, a v system promptu i výčet nálezů, které projekt už jednou zamítl, s pokynem nehlásit je znovu.</li>
-    <li><b>Kontrola</b> Výstup agenta projde deterministickou bránou. Zahodí se nález odkazující na neexistující soubor nebo na řádek za koncem souboru, nález bez důkazu i nález citující příkaz, který ve skutečnosti neproběhl. Nic se přitom nemaže, zahozený nález zůstává v záznamu běhu i s důvodem.</li>
-    <li><b>Rozhodnutí</b> Nálezy, které branou prošly, odejdou na board, tedy do nástroje pro sledování úkolů, který projekt používá. Pokud projekt board nemá, zůstanou v commitované paměti. O každém rozhoduje člověk nebo navazující pack a u zamítnutí se vybírá jeden z pěti důvodů.</li>
+    <li><b>Kontrola</b> Výstup agenta projde deterministickou bránou. Zahodí se nález odkazující na neexistující soubor nebo na řádek za koncem souboru, nález bez důkazu i nález citující příkaz, který ve skutečnosti neproběhl. Důvodů je devět a každý má jméno. Nic se přitom nemaže, zahozený nález zůstává v záznamu běhu i s důvodem.</li>
+    <li><b>Rozhodnutí</b> Výstupy, které branou prošly, odejdou na board, tedy do nástroje pro sledování úkolů, který projekt používá — každou takovou cestu ven si pack určuje sám. Pokud projekt board nemá, zůstanou v commitované paměti. O každém rozhoduje člověk nebo navazující pack.</li>
     <li><b>Zápis do paměti</b> Rozhodnutí se uloží do commitované stopy a příští běh ho dostane na vstupu, takže se stejný nález nemusí posuzovat podruhé.</li>
   </ol>
   <ol class="steps" lang="en">
     <li><b>Preparation</b> The tool builds a throwaway worktree at that pull request's commit, reads the blast radius out of the code graph, and attaches the project's memory: what has been found before, where, and what was rejected.</li>
     <li><b>The run</b> The agent starts. Besides the prompt it receives the list of commands it may execute, and in its system prompt the findings this project has already rejected, with instructions not to report them again.</li>
-    <li><b>The gate</b> The agent's output goes through a deterministic check. A finding pointing at a missing file or a line past the end of one is dropped, as is a finding without evidence or one citing a command that never ran. Nothing is deleted in the process: a dropped finding stays in the run record together with its reason.</li>
-    <li><b>The decision</b> Findings that pass the gate go to the board, the issue tracker the project uses. If the project has no board, they rest in the committed memory. Each one is decided by a person or by a downstream pack, and a rejection picks one of five reasons.</li>
+    <li><b>The gate</b> The agent's output goes through a deterministic check. A finding pointing at a missing file or a line past the end of one is dropped, as is a finding without evidence or one citing a command that never ran. There are nine reasons and each one has a name. Nothing is deleted in the process: a dropped finding stays in the run record together with its reason.</li>
+    <li><b>The decision</b> Outputs that pass the gate go to the board, the issue tracker the project uses, along a route each pack names for itself. If the project has no board, they rest in the committed memory. Each one is decided by a person or by a downstream pack.</li>
     <li><b>Writing to memory</b> The decision is stored in a committed trail and the next run receives it as input, so the same finding does not have to be judged twice.</li>
   </ol>
 
@@ -323,6 +467,336 @@
     <p lang="cs">Ve výchozím nastavení běh probíhá pod dohledem: je vidět v terminálu a dá se do něj zasáhnout. Bez dozoru běží jen na výslovné vyžádání a i tehdy smí pack spouštět pouze příkazy vypsané v jeho <code>pack.json</code>.</p>
     <p lang="en">By default a run is attended: it is visible in the terminal and can be interrupted. It runs unattended only when explicitly asked for, and even then a pack may execute only the commands listed in its own <code>pack.json</code>.</p>
   </div>
+
+  <figure class="fig">
+    <!-- diagram:run-to-board -->
+  <svg id="dg-run" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 596" role="img" aria-labelledby="run-title run-desc">
+  <title id="run-title">From a run to a board and back</title>
+  <desc id="run-desc">Eight stages carry a specialist's work from preparing the run to the metrics: prepare, the agent, the gate, dedup, dispatch, the board and committed memory, a person's verdict, and the metrics that verdict feeds; what the gate refuses is written aside with its reason instead.</desc>
+  <style>
+    #dg-run{--paper:#fbfaf7;--paper2:#ffffff;--ink:#1b1a17;--muted:#6d6a62;--soft:#8f8c83;
+      --rule:rgba(27,26,23,0.12);--rule-solid:#e6e3dc;--accent:#1f6f4a;--accent-tint:rgba(31,111,74,0.08);
+      --wash:rgba(27,26,23,0.02);--wash2:rgba(27,26,23,0.05);
+      --sans:'Geist',ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+      --mono:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+    @media (prefers-color-scheme:dark){#dg-run{--paper:#14140f;--paper2:#1b1b15;--ink:#eceae3;--muted:#97948a;
+      --soft:#7d7a71;--rule:rgba(236,234,227,0.12);--rule-solid:#2b2a24;--accent:#6cba8e;
+      --accent-tint:rgba(108,186,142,0.12);--wash:rgba(236,234,227,0.03);--wash2:rgba(236,234,227,0.06)}}
+    #dg-run text{font-family:var(--sans);fill:var(--ink)}
+    #dg-run .eb{font-family:var(--mono);font-size:7px;letter-spacing:.08em;fill:var(--muted)}
+    #dg-run .zn{font-family:var(--mono);font-size:7px;letter-spacing:.14em;fill:var(--soft)}
+    #dg-run .nm{font-size:12px;font-weight:600}
+    #dg-run .sub{font-family:var(--mono);font-size:9px;fill:var(--muted)}
+    #dg-run .al{font-family:var(--mono);font-size:8px;letter-spacing:.06em;fill:var(--soft)}
+    #dg-run .lg{font-family:var(--mono);font-size:8px;letter-spacing:.06em;fill:var(--muted)}
+    #dg-run .mask{fill:var(--paper)}
+    #dg-run .box{fill:var(--paper2);stroke:var(--ink);stroke-width:1}
+    #dg-run .store{fill:var(--wash2);stroke:var(--muted);stroke-width:1}
+    #dg-run .opt{fill:var(--wash);stroke:var(--rule-solid);stroke-width:1;stroke-dasharray:4 3}
+    #dg-run .focal{fill:var(--accent-tint);stroke:var(--accent);stroke-width:1}
+    #dg-run .tag{fill:none;stroke-width:.8}
+    #dg-run .ln{fill:none;stroke:var(--muted);stroke-width:1.2}
+    #dg-run .ln-a{fill:none;stroke:var(--accent);stroke-width:1.2}
+    #dg-run .ln-d{fill:none;stroke:var(--rule-solid);stroke-width:1;stroke-dasharray:4 3}
+    #dg-run .hair{stroke:var(--rule);stroke-width:.8}
+    #dg-run .mk{fill:var(--muted)}
+    #dg-run .mk-a{fill:var(--accent)}
+    #dg-run .mk-d{fill:var(--rule-solid)}
+  </style>
+  <defs>
+    <marker id="run-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon class="mk" points="0 0, 8 3, 0 6"/>
+    </marker>
+    <marker id="run-arrow-a" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon class="mk-a" points="0 0, 8 3, 0 6"/>
+    </marker>
+    <marker id="run-arrow-d" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon class="mk-d" points="0 0, 8 3, 0 6"/>
+    </marker>
+  </defs>
+
+  <rect width="100%" height="100%" fill="var(--paper)"/>
+
+  <text class="zn" x="40" y="72">THE RUN, AND THE GATE AT THE END OF IT</text>
+  <text class="zn" x="40" y="352">WHAT CAME OF IT — READ RIGHT TO LEFT</text>
+
+  <!-- connectors first -->
+  <line class="ln" x1="204" y1="180" x2="290" y2="180" marker-end="url(#run-arrow)"/>
+  <line class="ln" x1="456" y1="180" x2="542" y2="180" marker-end="url(#run-arrow)"/>
+  <line class="ln-a" x1="708" y1="180" x2="794" y2="180" marker-end="url(#run-arrow-a)"/>
+  <path class="ln" d="M 878,224 V 372" marker-end="url(#run-arrow)"/>
+  <line class="ln" x1="796" y1="420" x2="710" y2="420" marker-end="url(#run-arrow)"/>
+  <line class="ln" x1="544" y1="420" x2="458" y2="420" marker-end="url(#run-arrow)"/>
+  <line class="ln" x1="292" y1="420" x2="206" y2="420" marker-end="url(#run-arrow)"/>
+  <path class="ln-d" d="M 626,224 V 276" marker-end="url(#run-arrow-d)"/>
+
+  <!-- arrow labels: mask sits 6px clear of the stroke -->
+  <rect class="mask" x="216" y="160" width="64" height="12"/><text class="al" x="248" y="169" text-anchor="middle">PROMPT.TXT</text>
+  <rect class="mask" x="462" y="160" width="76" height="12"/><text class="al" x="500" y="169" text-anchor="middle">FINDINGS.JSON</text>
+  <rect class="mask" x="714" y="160" width="76" height="12"/><text class="al" x="752" y="169" text-anchor="middle">WHAT SURVIVED</text>
+  <rect class="mask" x="886" y="292" width="68" height="12"/><text class="al" x="886" y="301">IF NOT HELD</text>
+  <rect class="mask" x="722" y="400" width="62" height="12"/><text class="al" x="753" y="409" text-anchor="middle">ONE ACTION</text>
+  <rect class="mask" x="474" y="400" width="52" height="12"/><text class="al" x="500" y="409" text-anchor="middle">A PERSON</text>
+  <rect class="mask" x="228" y="400" width="42" height="12"/><text class="al" x="249" y="409" text-anchor="middle">EVENTS</text>
+  <rect class="mask" x="634" y="240" width="46" height="12"/><text class="al" x="636" y="249">REFUSED</text>
+
+  <!-- 1 prepare -->
+  <rect class="mask" x="40" y="136" width="164" height="88" rx="6"/>
+  <rect class="box" x="40" y="136" width="164" height="88" rx="6"/>
+  <rect class="tag" x="52" y="146" width="48" height="12" rx="2" stroke="var(--ink)" opacity=".45"/>
+  <text class="eb" x="76" y="155" text-anchor="middle">PREPARE</text>
+  <text class="nm" x="122" y="188" text-anchor="middle">agency run</text>
+  <text class="sub" x="122" y="206" text-anchor="middle">context.json</text>
+
+  <!-- 2 the agent -->
+  <rect class="mask" x="292" y="136" width="164" height="88" rx="6"/>
+  <rect class="box" x="292" y="136" width="164" height="88" rx="6"/>
+  <rect class="tag" x="304" y="146" width="32" height="12" rx="2" stroke="var(--ink)" opacity=".45"/>
+  <text class="eb" x="320" y="155" text-anchor="middle">WORK</text>
+  <text class="nm" x="374" y="188" text-anchor="middle">The agent</text>
+  <text class="sub" x="374" y="206" text-anchor="middle">claude · codex</text>
+
+  <!-- 3 the gate (focal) -->
+  <rect class="mask" x="544" y="136" width="164" height="88" rx="6"/>
+  <rect class="focal" x="544" y="136" width="164" height="88" rx="6"/>
+  <rect class="tag" x="556" y="146" width="52" height="12" rx="2" stroke="var(--accent)" opacity=".6"/>
+  <text class="eb" x="582" y="155" text-anchor="middle" fill="var(--accent)">THE GATE</text>
+  <text class="nm" x="626" y="188" text-anchor="middle">agency ingest</text>
+  <text class="sub" x="626" y="206" text-anchor="middle">nine refusals</text>
+
+  <!-- 4 dedup -->
+  <rect class="mask" x="796" y="136" width="164" height="88" rx="6"/>
+  <rect class="box" x="796" y="136" width="164" height="88" rx="6"/>
+  <rect class="tag" x="808" y="146" width="36" height="12" rx="2" stroke="var(--ink)" opacity=".45"/>
+  <text class="eb" x="826" y="155" text-anchor="middle">PLACE</text>
+  <text class="nm" x="878" y="188" text-anchor="middle">Dedup</text>
+  <text class="sub" x="878" y="206" text-anchor="middle">subject key</text>
+
+  <!-- refused -->
+  <rect class="mask" x="544" y="276" width="164" height="44" rx="6"/>
+  <rect class="opt" x="544" y="276" width="164" height="44" rx="6"/>
+  <text class="nm" x="626" y="297" text-anchor="middle">gated.json</text>
+  <text class="sub" x="626" y="312" text-anchor="middle">with the reason</text>
+
+  <!-- 5 dispatch -->
+  <rect class="mask" x="796" y="376" width="164" height="88" rx="6"/>
+  <rect class="box" x="796" y="376" width="164" height="88" rx="6"/>
+  <rect class="tag" x="808" y="386" width="28" height="12" rx="2" stroke="var(--ink)" opacity=".45"/>
+  <text class="eb" x="822" y="395" text-anchor="middle">ACT</text>
+  <text class="nm" x="878" y="428" text-anchor="middle">Dispatch</text>
+  <text class="sub" x="878" y="446" text-anchor="middle">the pack's sink</text>
+
+  <!-- 6 lands -->
+  <rect class="mask" x="544" y="376" width="164" height="88" rx="6"/>
+  <rect class="store" x="544" y="376" width="164" height="88" rx="6"/>
+  <rect class="tag" x="556" y="386" width="36" height="12" rx="2" stroke="var(--muted)" opacity=".55"/>
+  <text class="eb" x="574" y="395" text-anchor="middle">LANDS</text>
+  <text class="nm" x="626" y="428" text-anchor="middle">Board · memory</text>
+  <text class="sub" x="626" y="446" text-anchor="middle">actions[]</text>
+
+  <!-- 7 verdict -->
+  <rect class="mask" x="292" y="376" width="164" height="88" rx="6"/>
+  <rect class="box" x="292" y="376" width="164" height="88" rx="6"/>
+  <rect class="tag" x="304" y="386" width="36" height="12" rx="2" stroke="var(--ink)" opacity=".45"/>
+  <text class="eb" x="322" y="395" text-anchor="middle">JUDGE</text>
+  <text class="nm" x="374" y="428" text-anchor="middle">A verdict</text>
+  <text class="sub" x="374" y="446" text-anchor="middle">triage · feedback</text>
+
+  <!-- 8 metrics -->
+  <rect class="mask" x="40" y="376" width="164" height="88" rx="6"/>
+  <rect class="box" x="40" y="376" width="164" height="88" rx="6"/>
+  <rect class="tag" x="52" y="386" width="36" height="12" rx="2" stroke="var(--ink)" opacity=".45"/>
+  <text class="eb" x="70" y="395" text-anchor="middle">LEARN</text>
+  <text class="nm" x="122" y="428" text-anchor="middle">agency metrics</text>
+  <text class="sub" x="122" y="446" text-anchor="middle">one rate per question</text>
+
+  <!-- legend -->
+  <line class="hair" x1="40" y1="512" x2="960" y2="512"/>
+  <text class="zn" x="40" y="530">STATE</text>
+  <text class="lg" x="120" y="530">CANDIDATE → HELD · SENT · REJECTED · DUPLICATE</text>
+  <text class="lg" x="520" y="530">GATED-OUT IS NOT ONE OF THEM — IT NEVER BECAME AN OUTPUT</text>
+  </svg>
+  <!-- /diagram:run-to-board -->
+    <figcaption class="figcap">
+      <span lang="cs">Osm zastávek mezi příkazem a číslem, které z běhu nakonec zbude.</span>
+      <span lang="en">Eight stops between the command and the number the run finally leaves behind.</span>
+      <a href="../diagrams/run-to-board.html" lang="cs">Otevřít diagram</a>
+      <a href="../diagrams/run-to-board.html" lang="en">Open the diagram</a>
+    </figcaption>
+  </figure>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════ outputs -->
+<section id="outputs">
+  <h2><span lang="cs">Co pack vyrábí</span><span lang="en">What a pack produces</span></h2>
+
+  <div lang="cs">
+    <p>Nálezem to nekončí. Product owner rozhoduje o položkách boardu, strategický partner navrhuje sázky a připravuje koncepty dopisů, QA reprodukuje chybu. Jádro nástroje přesto neví, co je „sázka“ nebo „rozhodnutí“ — a vědět to nemá. Ví jen, jak se má s daným <strong>typem výstupu</strong> zacházet mechanicky.</p>
+    <p>Typ deklaruje pack sám, v <code>pack.json</code>: kolik jich smí za jeden běh vzniknout, jestli musí výstup ukazovat na řádek kódu, jaký důkaz stačí, jestli smí jednat ve světě, a jaké otázky se o něm dají později položit. Pack, který nedeklaruje nic, si ponechá přesně to chování, které nález měl vždycky.</p>
+  </div>
+  <div lang="en">
+    <p>A finding is not the end of it. A product owner decides board items, a strategy partner proposes bets and drafts outreach, QA reproduces a bug. The core still does not know what a “bet” or a “decision” is, and it is not supposed to. It knows only how a given <strong>output type</strong> is to be handled mechanically.</p>
+    <p>The pack declares the type itself, in <code>pack.json</code>: how many may come out of one run, whether the output has to point at a line of code, what evidence will do, whether it may act in the world, and which questions can be asked about it afterwards. A pack that declares nothing keeps exactly the behaviour a finding always had.</p>
+  </div>
+
+  <figure class="fig">
+    <!-- diagram:an-output -->
+  <svg id="dg-out" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 660" role="img" aria-labelledby="out-title out-desc">
+  <title id="out-title">What an output is made of</title>
+  <desc id="out-desc">An output carries a type whose policy the pack declares, a subject saying what it is about, evidence items each of which may carry a locator pointing at something the run really produced, and an append-only list of the actions it took in the world.</desc>
+  <style>
+    #dg-out{--paper:#fbfaf7;--paper2:#ffffff;--ink:#1b1a17;--muted:#6d6a62;--soft:#8f8c83;
+      --rule:rgba(27,26,23,0.12);--rule-solid:#e6e3dc;--accent:#1f6f4a;--accent-tint:rgba(31,111,74,0.08);
+      --wash:rgba(27,26,23,0.02);--wash2:rgba(27,26,23,0.05);
+      --sans:'Geist',ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+      --mono:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+    @media (prefers-color-scheme:dark){#dg-out{--paper:#14140f;--paper2:#1b1b15;--ink:#eceae3;--muted:#97948a;
+      --soft:#7d7a71;--rule:rgba(236,234,227,0.12);--rule-solid:#2b2a24;--accent:#6cba8e;
+      --accent-tint:rgba(108,186,142,0.12);--wash:rgba(236,234,227,0.03);--wash2:rgba(236,234,227,0.06)}}
+    #dg-out text{font-family:var(--sans);fill:var(--ink)}
+    #dg-out .eb{font-family:var(--mono);font-size:7px;letter-spacing:.08em;fill:var(--muted)}
+    #dg-out .zn{font-family:var(--mono);font-size:7px;letter-spacing:.14em;fill:var(--soft)}
+    #dg-out .nm{font-size:12px;font-weight:600}
+    #dg-out .fd{font-family:var(--mono);font-size:9px;fill:var(--ink)}
+    #dg-out .fdm{font-family:var(--mono);font-size:9px;fill:var(--muted)}
+    #dg-out .fda{font-family:var(--mono);font-size:9px;fill:var(--accent);font-weight:600}
+    #dg-out .card{font-family:var(--mono);font-size:8px;fill:var(--soft)}
+    #dg-out .al{font-family:var(--mono);font-size:8px;letter-spacing:.06em;fill:var(--soft)}
+    #dg-out .lg{font-family:var(--mono);font-size:8px;letter-spacing:.06em;fill:var(--muted)}
+    #dg-out .mask{fill:var(--paper)}
+    #dg-out .box{fill:var(--paper2);stroke:var(--ink);stroke-width:1}
+    #dg-out .store{fill:var(--wash2);stroke:var(--muted);stroke-width:1}
+    #dg-out .focal{fill:var(--accent-tint);stroke:var(--accent);stroke-width:1}
+    #dg-out .tag{fill:none;stroke-width:.8}
+    #dg-out .ln{fill:none;stroke:var(--muted);stroke-width:1.2}
+    #dg-out .hd{stroke:var(--rule);stroke-width:.8}
+    #dg-out .hair{stroke:var(--rule);stroke-width:.8}
+    #dg-out .mk{fill:var(--muted)}
+  </style>
+  <defs>
+    <marker id="out-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon class="mk" points="0 0, 8 3, 0 6"/>
+    </marker>
+  </defs>
+
+  <rect width="100%" height="100%" fill="var(--paper)"/>
+
+  <!-- relationships, before the boxes -->
+  <line class="ln" x1="288" y1="200" x2="374" y2="200" marker-end="url(#out-arrow)"/>
+  <line class="ln" x1="624" y1="140" x2="710" y2="140" marker-end="url(#out-arrow)"/>
+  <line class="ln" x1="836" y1="232" x2="836" y2="286" marker-end="url(#out-arrow)"/>
+  <line class="ln" x1="500" y1="344" x2="500" y2="406" marker-end="url(#out-arrow)"/>
+
+  <rect class="mask" x="308" y="180" width="46" height="12"/><text class="al" x="331" y="189" text-anchor="middle">GOVERNS</text>
+  <rect class="mask" x="654" y="120" width="26" height="12"/><text class="al" x="667" y="129" text-anchor="middle">HAS</text>
+  <text class="card" x="296" y="196">1</text><text class="card" x="364" y="196">N</text>
+  <text class="card" x="632" y="136">1</text><text class="card" x="702" y="136">N</text>
+  <text class="card" x="844" y="246">1</text><text class="card" x="844" y="282">0..1</text>
+  <text class="card" x="508" y="358">1</text><text class="card" x="508" y="400">N</text>
+
+  <!-- POLICY -->
+  <rect class="mask" x="40" y="120" width="248" height="184" rx="6"/>
+  <rect class="store" x="40" y="120" width="248" height="184" rx="6"/>
+  <rect class="tag" x="52" y="130" width="40" height="12" rx="2" stroke="var(--muted)" opacity=".55"/>
+  <text class="eb" x="72" y="139" text-anchor="middle">POLICY</text>
+  <text class="nm" x="52" y="160">The type, as the pack declares it</text>
+  <line class="hd" x1="40" y1="170" x2="288" y2="170"/>
+  <text class="fdm" x="52" y="186">pack.json → outputs.&lt;type&gt;</text>
+  <text class="fd" x="52" y="204">cardinality  one · many</text>
+  <text class="fd" x="52" y="220">limit        how many per run</text>
+  <text class="fd" x="52" y="236">anchor       required · none</text>
+  <text class="fd" x="52" y="252">dedup        true · false</text>
+  <text class="fd" x="52" y="268">evidence     required[] · min</text>
+  <text class="fd" x="52" y="284">actions      none · sink</text>
+  <text class="fd" x="52" y="300">memory       never · proposes</text>
+
+  <!-- OUTPUT (focal) -->
+  <rect class="mask" x="376" y="88" width="248" height="256" rx="6"/>
+  <rect class="focal" x="376" y="88" width="248" height="256" rx="6"/>
+  <rect class="tag" x="388" y="98" width="44" height="12" rx="2" stroke="var(--accent)" opacity=".6"/>
+  <text class="eb" x="410" y="107" text-anchor="middle" fill="var(--accent)">OUTPUT</text>
+  <text class="nm" x="388" y="128">One thing a specialist claims</text>
+  <line class="hd" x1="376" y1="138" x2="624" y2="138"/>
+  <text class="fdm" x="388" y="154">finding.v1</text>
+  <text class="fda" x="388" y="172">type</text>
+  <text class="fda" x="388" y="188">subject { kind, ref }</text>
+  <text class="fd" x="388" y="204">severity · title · body</text>
+  <text class="fd" x="388" y="220">evidence[]</text>
+  <text class="fda" x="388" y="236">actions[]</text>
+  <text class="fd" x="388" y="252">score</text>
+  <text class="fd" x="388" y="268">state · fingerprint</text>
+  <text class="fdm" x="388" y="292">anchor — superseded by an</text>
+  <text class="fdm" x="388" y="306">evidence item of kind `code`,</text>
+  <text class="fdm" x="388" y="320">still read, no longer written</text>
+
+  <!-- EVIDENCE -->
+  <rect class="mask" x="712" y="88" width="248" height="144" rx="6"/>
+  <rect class="box" x="712" y="88" width="248" height="144" rx="6"/>
+  <rect class="tag" x="724" y="98" width="56" height="12" rx="2" stroke="var(--ink)" opacity=".45"/>
+  <text class="eb" x="752" y="107" text-anchor="middle">EVIDENCE</text>
+  <text class="nm" x="724" y="128">Why anyone should believe it</text>
+  <line class="hd" x1="712" y1="138" x2="960" y2="138"/>
+  <text class="fd" x="724" y="156">kind     code · document</text>
+  <text class="fd" x="724" y="172">         web_snapshot · …</text>
+  <text class="fd" x="724" y="188">detail   what it shows</text>
+  <text class="fd" x="724" y="204">source   what produced it</text>
+  <text class="fda" x="724" y="220">locator  { … }</text>
+
+  <!-- LOCATOR -->
+  <rect class="mask" x="712" y="286" width="248" height="128" rx="6"/>
+  <rect class="box" x="712" y="286" width="248" height="128" rx="6"/>
+  <rect class="tag" x="724" y="296" width="52" height="12" rx="2" stroke="var(--ink)" opacity=".45"/>
+  <text class="eb" x="750" y="305" text-anchor="middle">LOCATOR</text>
+  <text class="nm" x="724" y="326">The exact thing it points at</text>
+  <line class="hd" x1="712" y1="336" x2="960" y2="336"/>
+  <text class="fd" x="724" y="354">file · line · commit · symbol</text>
+  <text class="fd" x="724" y="370">command</text>
+  <text class="fd" x="724" y="386">url · artifact · ref</text>
+  <text class="fdm" x="724" y="404">checked offline, against the run</text>
+
+  <!-- ACTIONS -->
+  <rect class="mask" x="376" y="406" width="248" height="128" rx="6"/>
+  <rect class="box" x="376" y="406" width="248" height="128" rx="6"/>
+  <rect class="tag" x="388" y="416" width="48" height="12" rx="2" stroke="var(--ink)" opacity=".45"/>
+  <text class="eb" x="412" y="425" text-anchor="middle">ACTIONS</text>
+  <text class="nm" x="388" y="446">What it did in the world</text>
+  <line class="hd" x1="376" y1="456" x2="624" y2="456"/>
+  <text class="fd" x="388" y="474">kind     the pack's own verb</text>
+  <text class="fd" x="388" y="490">result   success · error</text>
+  <text class="fd" x="388" y="506">target · remoteId · url · at</text>
+  <text class="fdm" x="388" y="524">append-only, failures included</text>
+
+  <!-- legend -->
+  <line class="hair" x1="40" y1="580" x2="960" y2="580"/>
+  <text class="zn" x="40" y="598">LEGEND</text>
+  <text class="fda" x="120" y="598">type · subject · actions[]</text>
+  <text class="lg" x="292" y="598">THE THREE FIELDS THE OUTPUTS SHIFT ADDED</text>
+  <text class="lg" x="640" y="598">EVERYTHING ELSE WAS ALREADY THERE</text>
+  </svg>
+  <!-- /diagram:an-output -->
+    <figcaption class="figcap">
+      <span lang="cs">Typ říká, jak se s výstupem zachází. Subject říká, o čem to je, když to není o řádku kódu.</span>
+      <span lang="en">The type says how the output is handled. The subject says what it is about when it is not about a line of code.</span>
+      <a href="../diagrams/an-output.html" lang="cs">Otevřít diagram</a>
+      <a href="../diagrams/an-output.html" lang="en">Open the diagram</a>
+    </figcaption>
+  </figure>
+
+  <div lang="cs">
+    <p>Každý důkaz může nést <code>locator</code> — přesné místo, na které ukazuje. Brána ho ověřuje <strong>offline</strong>, proti tomu, co běh skutečně uložil: soubor a řádek v daném commitu, spuštěný příkaz, stránka, která se v tom běhu opravdu stáhla. A <code>actions[]</code> zaznamenává, co výstup ve světě udělal, včetně pokusů, které selhaly, takže neúspěšné odeslání není neviditelné, ale opakovatelné.</p>
+  </div>
+  <div lang="en">
+    <p>Every piece of evidence may carry a <code>locator</code>, the exact thing it points at. The gate verifies it <strong>offline</strong>, against what the run actually stored: a file and a line at that commit, a command that ran, a page that really was fetched. And <code>actions[]</code> records what the output did in the world, failed attempts included, so a dispatch that did not land is repeatable rather than invisible.</p>
+  </div>
+
+  <div class="callout">
+    <span class="eyebrow"><span lang="cs">Dvě otázky, dvě čísla</span><span lang="en">Two questions, two numbers</span></span>
+    <p lang="cs">Jestli si zakladatel sázku vybral a jestli sázka vyšla, jsou dvě různé otázky. Počítají se odděleně a druhá se u nevybrané sázky vůbec neklade. <code>(vybrané + úspěšné) / všechno</code> není ani jedno z těch čísel — je to údaj, který vypadá jako metrika.</p>
+    <p lang="en">Whether the founder chose a bet and whether the bet worked are two different questions. They are counted apart, and the second is never asked about a bet nobody took. <code>(selected + successful) / everything</code> is neither of those numbers; it is a figure that looks like a metric.</p>
+  </div>
+
+  <div lang="cs"><p>Šest diagramů a celý výklad — včetně toho, proč je zrovna takhle — je v <code>docs/concepts.md</code>.</p></div>
+  <div lang="en"><p>Six diagrams and the whole argument, including why it is shaped this way, are in <code>docs/concepts.md</code>.</p></div>
 </section>
 
 <!-- ═══════════════════════════════════════════════════════════ gate -->
@@ -333,11 +807,148 @@
   <div lang="cs">
     <p>Brána nehodnotí, jestli je nález chytrý nebo užitečný. Ověřuje jen to, jestli vůbec může být pravdivý: zda existuje soubor, na který ukazuje, zda sedí číslo řádku a zda proběhl příkaz, o který se nález opírá. Halucinovanou cestu k souboru odhalí statická kontrola bez modelu, zatímco kontrola dalším modelem by stála dvojnásobek při nižší spolehlivosti.</p>
     <p>Výsledek je proto opakovatelný a dva lidé nad týmž během dostanou totéž. Zahozené nálezy se zároveň neztrácejí: leží vedle běhu i s důvodem zahození, takže jde zpětně posoudit, jestli brána nevyřazuje víc, než má.</p>
+    <p>Co brána <strong>neposuzuje</strong>, je kvalita. Skóre, které si model přidělí sám, o vyřazení nerozhoduje — rozhoduje jen o pořadí, a to jen tehdy, když jich přišlo víc, než kolik smí jeden běh vydat. Strop se navíc uplatňuje až úplně nakonec, nad tím, co ostatní kontroly přežilo: kdyby se jedenáctý nález posuzoval proti plné kvótě dřív, než se zeptáme, jestli je vůbec poctivý, schoval by se rozbitý pack za vlastní objem.</p>
   </div>
   <div lang="en">
     <p>The gate does not judge whether a finding is clever or useful. It only checks whether it can be true at all: whether the file it points at exists, whether the line number fits, and whether the command it rests on actually ran. A hallucinated file path is caught by a static check without a model, whereas checking with another model would cost twice as much and be less reliable.</p>
     <p>The result is therefore repeatable, and two people looking at the same run get the same answer. Dropped findings are not lost either: they sit beside the run together with the reason they were dropped, so it is possible to review whether the gate is discarding more than it should.</p>
+    <p>What the gate does <strong>not</strong> judge is quality. A score the model gives itself decides nothing about refusal; it decides an order, and only where more arrived than one run may hand over. The ceiling is applied last of all, over whatever survived the other checks: judging the eleventh finding against a full quota before asking whether it is honest would hide a broken pack behind its own volume.</p>
   </div>
+
+  <figure class="fig">
+    <!-- diagram:the-gate -->
+  <svg id="dg-gate" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 850" role="img" aria-labelledby="gate-title gate-desc">
+  <title id="gate-title">The gate, and the reason it refuses</title>
+  <desc id="gate-desc">Six checks run in a fixed order over what a specialist wrote — the contract, the declared type, a real file and line, evidence of the right kind, whether the cited work really happened, and last the ceiling for that type — and each refusal is written aside under one of nine named reasons.</desc>
+  <style>
+    #dg-gate{--paper:#fbfaf7;--paper2:#ffffff;--ink:#1b1a17;--muted:#6d6a62;--soft:#8f8c83;
+      --rule:rgba(27,26,23,0.12);--rule-solid:#e6e3dc;--accent:#1f6f4a;--accent-tint:rgba(31,111,74,0.08);
+      --wash:rgba(27,26,23,0.02);--wash2:rgba(27,26,23,0.05);
+      --sans:'Geist',ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+      --mono:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+    @media (prefers-color-scheme:dark){#dg-gate{--paper:#14140f;--paper2:#1b1b15;--ink:#eceae3;--muted:#97948a;
+      --soft:#7d7a71;--rule:rgba(236,234,227,0.12);--rule-solid:#2b2a24;--accent:#6cba8e;
+      --accent-tint:rgba(108,186,142,0.12);--wash:rgba(236,234,227,0.03);--wash2:rgba(236,234,227,0.06)}}
+    #dg-gate text{font-family:var(--sans);fill:var(--ink)}
+    #dg-gate .zn{font-family:var(--mono);font-size:7px;letter-spacing:.14em;fill:var(--soft)}
+    #dg-gate .nm{font-size:12px;font-weight:600}
+    #dg-gate .sub{font-family:var(--mono);font-size:9px;fill:var(--muted)}
+    #dg-gate .rsn{font-family:var(--mono);font-size:9px;fill:var(--ink)}
+    #dg-gate .rsx{font-family:var(--mono);font-size:9px;fill:var(--muted)}
+    #dg-gate .lg{font-family:var(--mono);font-size:8px;letter-spacing:.06em;fill:var(--muted)}
+    #dg-gate .mask{fill:var(--paper)}
+    #dg-gate .box{fill:var(--paper2);stroke:var(--ink);stroke-width:1}
+    #dg-gate .oval{fill:var(--wash2);stroke:var(--muted);stroke-width:1}
+    #dg-gate .focal{fill:var(--accent-tint);stroke:var(--accent);stroke-width:1}
+    #dg-gate .ln{fill:none;stroke:var(--muted);stroke-width:1.2}
+    #dg-gate .lead{stroke:var(--rule-solid);stroke-width:.8;stroke-dasharray:3 3}
+    #dg-gate .hair{stroke:var(--rule);stroke-width:.8}
+    #dg-gate .mk{fill:var(--muted)}
+  </style>
+  <defs>
+    <marker id="gate-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon class="mk" points="0 0, 8 3, 0 6"/>
+    </marker>
+  </defs>
+
+  <rect width="100%" height="100%" fill="var(--paper)"/>
+
+  <text class="zn" x="104" y="64">THE CHECKS, IN THE ORDER THEY RUN</text>
+  <text class="zn" x="560" y="64">THE NAME THE REFUSAL CARRIES</text>
+
+  <!-- spine -->
+  <line class="ln" x1="252" y1="136" x2="252" y2="164" marker-end="url(#gate-arrow)"/>
+  <line class="ln" x1="252" y1="224" x2="252" y2="252" marker-end="url(#gate-arrow)"/>
+  <line class="ln" x1="252" y1="312" x2="252" y2="340" marker-end="url(#gate-arrow)"/>
+  <line class="ln" x1="252" y1="400" x2="252" y2="428" marker-end="url(#gate-arrow)"/>
+  <line class="ln" x1="252" y1="488" x2="252" y2="516" marker-end="url(#gate-arrow)"/>
+  <line class="ln" x1="252" y1="576" x2="252" y2="604" marker-end="url(#gate-arrow)"/>
+  <line class="ln" x1="252" y1="664" x2="252" y2="692" marker-end="url(#gate-arrow)"/>
+
+  <!-- leaders to the reason column -->
+  <line class="lead" x1="408" y1="196" x2="548" y2="196"/>
+  <line class="lead" x1="408" y1="284" x2="548" y2="284"/>
+  <line class="lead" x1="408" y1="372" x2="548" y2="372"/>
+  <line class="lead" x1="408" y1="460" x2="548" y2="460"/>
+  <line class="lead" x1="408" y1="548" x2="548" y2="548"/>
+  <line class="lead" x1="408" y1="636" x2="548" y2="636"/>
+
+  <!-- start -->
+  <rect class="mask" x="104" y="88" width="296" height="48" rx="24"/>
+  <rect class="oval" x="104" y="88" width="296" height="48" rx="24"/>
+  <text class="nm" x="252" y="110" text-anchor="middle">What the specialist wrote</text>
+  <text class="sub" x="252" y="126" text-anchor="middle">findings.raw.json</text>
+
+  <!-- 1 -->
+  <rect class="mask" x="104" y="164" width="296" height="60" rx="6"/>
+  <rect class="box" x="104" y="164" width="296" height="60" rx="6"/>
+  <text class="nm" x="252" y="190" text-anchor="middle">The contract</text>
+  <text class="sub" x="252" y="208" text-anchor="middle">finding.v1, field by field</text>
+  <text class="rsn" x="560" y="200">schema</text>
+
+  <!-- 2 -->
+  <rect class="mask" x="104" y="252" width="296" height="60" rx="6"/>
+  <rect class="box" x="104" y="252" width="296" height="60" rx="6"/>
+  <text class="nm" x="252" y="278" text-anchor="middle">A type this pack declares</text>
+  <text class="sub" x="252" y="296" text-anchor="middle">pack.json → outputs</text>
+  <text class="rsn" x="560" y="288">unknown-type</text>
+
+  <!-- 3 -->
+  <rect class="mask" x="104" y="340" width="296" height="60" rx="6"/>
+  <rect class="box" x="104" y="340" width="296" height="60" rx="6"/>
+  <text class="nm" x="252" y="366" text-anchor="middle">A real file, a real line</text>
+  <text class="sub" x="252" y="384" text-anchor="middle">only where the type needs one</text>
+  <text class="rsn" x="560" y="360">missing-anchor</text>
+  <text class="rsn" x="560" y="376">phantom-file</text>
+  <text class="rsn" x="560" y="392">phantom-line</text>
+
+  <!-- 4 -->
+  <rect class="mask" x="104" y="428" width="296" height="60" rx="6"/>
+  <rect class="box" x="104" y="428" width="296" height="60" rx="6"/>
+  <text class="nm" x="252" y="454" text-anchor="middle">Evidence of the right kind</text>
+  <text class="sub" x="252" y="472" text-anchor="middle">the type outranks the dimension</text>
+  <text class="rsn" x="560" y="464">weak-evidence</text>
+
+  <!-- 5 -->
+  <rect class="mask" x="104" y="516" width="296" height="60" rx="6"/>
+  <rect class="box" x="104" y="516" width="296" height="60" rx="6"/>
+  <text class="nm" x="252" y="542" text-anchor="middle">It really happened, here</text>
+  <text class="sub" x="252" y="560" text-anchor="middle">checked against this run alone</text>
+  <text class="rsn" x="560" y="540">unproven-source</text>
+  <text class="rsn" x="560" y="556">unverified-evidence</text>
+
+  <!-- 6 focal -->
+  <rect class="mask" x="104" y="604" width="296" height="60" rx="6"/>
+  <rect class="focal" x="104" y="604" width="296" height="60" rx="6"/>
+  <text class="nm" x="252" y="630" text-anchor="middle">The ceiling for this type</text>
+  <text class="sub" x="252" y="648" text-anchor="middle">last, and over the survivors</text>
+  <text class="rsn" x="560" y="640" fill="var(--accent)">over-cardinality</text>
+
+  <!-- end -->
+  <rect class="mask" x="104" y="692" width="296" height="48" rx="24"/>
+  <rect class="oval" x="104" y="692" width="296" height="48" rx="24"/>
+  <text class="nm" x="252" y="714" text-anchor="middle">An output</text>
+  <text class="sub" x="252" y="730" text-anchor="middle">→ dedup → dispatch → memory</text>
+
+  <!-- the one thing score does -->
+  <text class="rsx" x="560" y="700">score never refuses an output.</text>
+  <text class="rsx" x="560" y="716">Where more came than the ceiling</text>
+  <text class="rsx" x="560" y="732">allows, it decides the order —</text>
+  <text class="rsx" x="560" y="748">which ones, never whether.</text>
+
+  <!-- legend -->
+  <line class="hair" x1="104" y1="788" x2="940" y2="788"/>
+  <text class="zn" x="104" y="806">LEGEND</text>
+  <text class="lg" x="180" y="806">EVERY CHECK ASKS WHETHER THIS CAN BE TRUE. NONE OF THEM ASKS HOW GOOD IT IS.</text>
+  </svg>
+  <!-- /diagram:the-gate -->
+    <figcaption class="figcap">
+      <span lang="cs">Šest kontrol v pevném pořadí a devět pojmenovaných důvodů, proč výstup dál nejde.</span>
+      <span lang="en">Six checks in a fixed order, and nine named reasons an output goes no further.</span>
+      <a href="../diagrams/the-gate.html" lang="cs">Otevřít diagram</a>
+      <a href="../diagrams/the-gate.html" lang="en">Open the diagram</a>
+    </figcaption>
+  </figure>
 
   <h3><span lang="cs">Paměť projektu</span><span lang="en">Project memory</span></h3>
   <div lang="cs">
@@ -610,8 +1221,8 @@ agency run &lt;name&gt;                  <span class="c">5 · run the pack</span
 </section>
 
 <footer>
-  <p lang="cs">VeriFlow Agency · přehledová dokumentace projektu. Technické detaily jsou v <code>README.md</code>, rozhodnutí a jejich zdůvodnění v <code>docs/plans/</code>.</p>
-  <p lang="en">VeriFlow Agency · overview documentation for the project. Technical detail lives in <code>README.md</code>; decisions and their reasons in <code>docs/plans/</code>.</p>
+  <p lang="cs">VeriFlow Agency · přehledová dokumentace projektu. Koncepty a diagramy jsou v <code>docs/concepts.md</code>, technické detaily v <code>README.md</code>, rozhodnutí a jejich zdůvodnění v <code>docs/plans/</code>.</p>
+  <p lang="en">VeriFlow Agency · overview documentation for the project. The concepts and the diagrams are in <code>docs/concepts.md</code>, technical detail in <code>README.md</code>, decisions and their reasons in <code>docs/plans/</code>.</p>
 </footer>
 
 </main>

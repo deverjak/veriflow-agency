@@ -191,11 +191,13 @@ and its line, and stops there. Which of the two gives is not a runner's call.
 Three things, each with one responsibility. The boundary between them is a
 contract, not configuration.
 
+![Where the three parts of Agency live](docs/diagrams/shape.svg)
+
 ```
 veriflow-agency/                     this repository
   packages/core/     → `agency`      RUNNER — run, record, gate, triage, dedup, memory, chain, providers.
                                      Knows nothing about any target project.
-  packages/extension/                VIEWER — runs, findings next to the line, read-only.
+  packages/extension/                VIEWER — runs, outputs next to the line, read-only.
                                      Talks only to `agency … --json`.
   packs/                             EXAMPLES — reference copies of main-panel's and kvesteros-platform's packs, for the next project.
                                      Not bundled, not installed — except `author/`, which is generic, ships with the
@@ -211,6 +213,7 @@ veriflow-agency/                     this repository
   .agency/
     knowledge/                       MEMORY, committed
     runs/<ULID>/                     RECORDS, gitignored (evidence, transcripts, findings.json, run.json)
+                                     `findings.json` keeps its name; what is in it is an output of some type
 ```
 
 There is no `~/.agency/`. There is no project configuration file. A pack
@@ -238,19 +241,21 @@ Attended, on your own login, with evidence-backed findings that stay.
   chain       run specialists one after another, each judging what the previous one found
   validate    check findings.json against the contract and the anchors against the code
   graph       ask the code graph — one door for the core and the agent, JSON out
-  ingest      the gate: contract, existence, threshold, dedup, dispatch — BEFORE a finding becomes a finding
+  ingest      the gate: contract, existence, evidence, dedup — BEFORE a finding becomes a finding
   knowledge   what the project knows, as committed markdown — readable without Agency
   metrics     precision, dedup, queue age — by dimension, severity and provider
+  replay      run a pack again over a commit it already judged — and refuse a change that brings back a rejected finding
   cleanup     close a run that is not coming back and remove its worktree — `--all` for every finished one
-  findings    findings and where they went
-  triage      accept (send to the board) or reject a finding — an agent calls this too
-  note        a note on a finding — free text, not a decision
+  outputs     outputs and the verdicts on them  (`findings` is a permanent alias)
+  feedback    what happened to an output, in its own type's words
+  triage      accept (send to the board) or reject an output — an agent calls this too
+  note        a note on an output — free text, not a verdict
   status      overview of the project's runs
   follow      ask the specialist of a finished run one more thing — the same session
   serve       open this project to a paired phone on the tailnet, for a while
 ```
 
-Eighteen commands. `init` is the whole of the setup and it takes no
+Twenty commands. `init` is the whole of the setup and it takes no
 decisions: it copies the one generic pack into the project and keeps run
 records out of git. There is no `add`, `hire`, `fire`, `roster`,
 `providers`, `projects`, `config`, `brief`, `backlog`, or `export` — a
@@ -260,6 +265,12 @@ prepares the run and prints the ready command; `--wait` launches the agent
 and runs the gate itself when it finishes; `--launch` hands this terminal
 over to the agent directly; `--remote-control` starts it as a session the
 Claude app can drive; `--json` only prepares, for the extension.
+
+`findings` answers to `outputs` and always will. The rename is not a
+deprecation: a reviewer's outputs **are** findings, that is what the word is
+for, and generalising the core is no reason to make anybody relearn the command
+they type every day. What the new name buys is a founder reading `agency
+outputs --type bet` without wondering which of their three bets is a finding.
 
 ### Supervised, or on its own
 
@@ -336,6 +347,42 @@ with a bucket full of unknowns. The table names the default instead
 (`claude` → `sonnet`, the ordinary run), and anything worth more says so in
 `--model`, in a preset, or in the question the extension asks.
 
+### What a specialist produces
+
+An agent produces more than findings. A product owner decides board items, a
+founder's partner proposes bets and drafts outreach, QA reproduces bugs. Until
+8 September 2026 the core knew exactly one shape — a finding with an anchor —
+so everything else either deformed itself to fit or went around the core.
+
+The way out was not to teach the core what a bet is. It is for the pack to say
+how its outputs are handled **mechanically**, and for the core to know nothing
+else: is it deduplicated, what evidence does it need, what questions can be
+asked about it, may it act, may it become memory, how many per run.
+
+![What an output is made of](docs/diagrams/an-output.svg)
+
+An output carries a `type`. A `subject` (`{kind, ref}`) says what it is about
+when it is not about a line of code. Every piece of `evidence` may carry a
+`locator`, which the gate checks **offline** against what the run actually
+stored. And `actions[]` records what the output did in the world — one entry
+per attempt, the failures included, so a dispatch that half-worked is
+recoverable rather than invisible.
+
+Pointing at source is now an evidence item of kind `code` whose locator carries
+the file, the line, the commit and the symbol. The top-level `anchor` field is
+superseded and still read, because three repositories have it in committed
+history.
+
+![From a run to a board and back](docs/diagrams/run-to-board.svg)
+
+The gate itself has nine named reasons to refuse, and the order they run in is
+deliberate — the ceiling last, over everything that survived, because a ceiling
+is a statement about how many came, not about any one of them. **Score refuses
+nothing**: where more arrived than the ceiling allows it decides which ones,
+never whether. [`docs/concepts.md`](docs/concepts.md) has the six diagrams and
+the whole argument; [`docs/plans/outputs.md`](docs/plans/outputs.md) has the
+eleven steps that got there.
+
 ### A pack — `pack.json`
 
 ```json
@@ -348,11 +395,24 @@ with a bucket full of unknowns. The table names the default instead
   "worktree": false,
   "graph": false,
   "prompt": "required",
-  "needs": ["agency triage", "agency note", "agency outputs",
+  "needs": ["agency triage", "agency note", "agency outputs", "agency feedback",
             "git", "gh issue view",
-            "python .claude/skills/agency-po/scripts/backlog.py"],
-  "minScore": 75,
-  "sink": "python .claude/skills/agency-po/scripts/backlog.py draft --finding {id} --run-dir {runDir}",
+            "python .claude/skills/agency-po/scripts/backlog.py snapshot"],
+  "needsUnattended": ["python .claude/skills/agency-po/scripts/backlog.py promote"],
+  "sink": "python .claude/skills/agency-po/scripts/backlog.py dispatch --output {id} --run-dir {runDir}",
+  "outputs": {
+    "decision": {
+      "cardinality": "many", "anchor": "none", "dedup": true,
+      "evidence": { "required": ["board_item", "document"], "min": 1 },
+      "actions": "sink", "memory": "proposes",
+      "feedback": {
+        "delivery": { "kinds": { "sent": "positive", "rejected": "negative" } },
+        "outcome":  { "metric": "upheld_rate", "requires": "delivery.sent",
+                      "kinds": { "upheld": "positive", "overridden": "negative",
+                                 "reverted": "negative" } }
+      }
+    }
+  },
   "dimensions": [{ "id": "scope", "title": "Work in flight that no commitment covers" }, "…"]
 }
 ```
@@ -361,12 +421,25 @@ Every key is read by the runner: `requires` feeds `doctor`; `target` /
 `worktree` / `graph` shape the run preparation; `prompt` (`required` |
 `optional` | `none`) validates `--prompt`; `needs` is the agent's allowlist — shell commands, or a Claude Code tool by its
 PascalCase name (`WebSearch`, `WebFetch(domain:…)`) for a pack that works on
-the web;
-`minScore` is the gate's threshold; `sink` is where a gated finding goes —
+the web; `sink` is where an output that may act goes —
 absent, it just rests as `candidate` in the committed knowledge, a project
-with no board; `dimensions` validates findings and labels the extension's
+with no board; `dimensions` validates outputs and labels the extension's
 tree. There is no version — a pack is versioned with the project's own git
 history, not separately.
+
+`outputs` is the one key that decides how the core treats what comes back, and
+a pack that omits it keeps exactly the policy a finding has always had:
+anchored, deduplicated, dispatched, triaged into `precision`. Per type:
+`cardinality` and `limit` (how many per run), `anchor` (`required` | `none`),
+`dedup`, `evidence` (`required` kinds and a `min` count), `actions`
+(`sink` | `none`), `memory` (`proposes` | `never`), and `feedback` — the
+questions that may be asked about it. A type that drops the anchor without
+naming its own evidence is refused, so nothing gets to be unfalsifiable by
+saying less.
+
+`minScore` is read by nothing. It stopped being the gate's threshold on
+8 September 2026, when a number the model gives itself stopped deciding what a
+person gets to see; `agency doctor` names it where it is still in a manifest.
 
 Facts about the project itself — which repository, which board fields,
 which staging URL, which law applies — go in `SKILL.md`, under a **Project
@@ -407,7 +480,8 @@ The only places two of these three things touch. Nothing else is shared.
 |---|---|---|
 | `pack.json` | pack → runner | above |
 | the run directory | runner → pack → runner | `context.json`, `evidence/`, `prompt.txt` in; `findings.json` (`finding.v1`), `summary.md`, `handoff.md` in a chain, back out |
-| `finding.v1`, `run.v1` | pack → gate; runner → extension | the two schemas, nothing else |
+| `finding.v1`, `run.v1` | pack → gate; runner → extension | the two schemas, nothing else — the file names predate the rename |
+| `pack.json → outputs` | pack → gate | the type policy: dedup, evidence, actions, memory, feedback |
 | `agency … --json` | runner → extension | everything the extension reads |
 
 ### Memory as committed markdown
@@ -485,7 +559,7 @@ directory, and never descending into a repository. `--save` stores that
 question (not its answer, which would go stale the day something is cloned),
 so a bare `agency serve` opens the same set next time. `--project <path>`
 adds one from outside the scanned trees, specialists or not. This is the one
-command that knows about more than one project: `run`, `findings` and the
+command that knows about more than one project: `run`, `outputs` and the
 rest still resolve from the current directory, because you are standing in a
 project when you use them — and on a phone you are not standing anywhere.
 
@@ -608,8 +682,8 @@ action, the stop is a line in `remote.jsonl` with the device that asked.
 
 ### Three rules the whole thing stands on
 
-**Truth lives in the project, not in the tool.** Runs, findings and
-decisions live in `<project>/.agency/` and are committed. They survive a
+**Truth lives in the project, not in the tool.** Runs, outputs and
+verdicts live in `<project>/.agency/` and are committed. They survive a
 reinstall of the tool and a fresh clone of the repository, and can be
 reviewed in a pull request.
 
@@ -654,6 +728,9 @@ moved to.
 
 ## Further reading
 
+[`docs/concepts.md`](docs/concepts.md) — the six concepts and the diagrams:
+where things live, what an output is, what happens to one, what the gate
+refuses, where an output sits, and how a verdict becomes a number.
 [`docs/plans/agency-v1.md`](docs/plans/agency-v1.md) — the redesign this
 version is built from, and why an earlier, more configurable version of this
 same tool was cut down rather than extended.

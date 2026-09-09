@@ -19,8 +19,21 @@ document, not a reference — it deliberately stops before the technical detail.
 | Where to send someone | For |
 |---|---|
 | `docs/site/index.html` | why this exists, what it does, how to start |
+| `docs/concepts.md` | the six concepts, with the diagrams — one step past this page |
 | `README.md` | the command surface and the exact shape on disk |
 | `docs/plans/` | every decision and the reasoning behind it (Czech) |
 
 The language switch remembers the choice in `localStorage` and otherwise
 follows the browser. Both languages are in the file; nothing is fetched.
+
+## The diagrams
+
+Four figures are **inlined**, not linked, so the single-file promise holds. The
+source of each is `docs/diagrams/<slug>.svg`, and `docs/diagrams/build.py`
+rewrites the region between `<!-- diagram:<slug> -->` and
+`<!-- /diagram:<slug> -->` from it. Run it after editing one; nothing else in
+this file is touched. Their labels stay English like the rest of the code
+surface, and the Czech is in the caption beneath.
+
+The measure is on the blocks rather than on `main`, which is what lets a figure
+use the whole column while the prose stays at 74ch.
