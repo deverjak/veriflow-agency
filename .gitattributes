@@ -1,0 +1,3 @@
+# The diagram-design marker is parsed against a strict one-line grammar; a CR
+# a Windows checkout would add lands inside the slug and the profile is refused.
+.diagram-design text eol=lf
