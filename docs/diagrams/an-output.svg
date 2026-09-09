@@ -1,0 +1,132 @@
+<svg id="dg-out" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 660" role="img" aria-labelledby="out-title out-desc">
+<title id="out-title">What an output is made of</title>
+<desc id="out-desc">An output carries a type whose policy the pack declares, a subject saying what it is about, evidence items each of which may carry a locator pointing at something the run really produced, and an append-only list of the actions it took in the world.</desc>
+<style>
+  #dg-out{--paper:#fbfaf7;--paper2:#ffffff;--ink:#1b1a17;--muted:#6d6a62;--soft:#8f8c83;
+    --rule:rgba(27,26,23,0.12);--rule-solid:#e6e3dc;--accent:#1f6f4a;--accent-tint:rgba(31,111,74,0.08);
+    --wash:rgba(27,26,23,0.02);--wash2:rgba(27,26,23,0.05);
+    --sans:'Geist',ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+    --mono:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  @media (prefers-color-scheme:dark){#dg-out{--paper:#14140f;--paper2:#1b1b15;--ink:#eceae3;--muted:#97948a;
+    --soft:#7d7a71;--rule:rgba(236,234,227,0.12);--rule-solid:#2b2a24;--accent:#6cba8e;
+    --accent-tint:rgba(108,186,142,0.12);--wash:rgba(236,234,227,0.03);--wash2:rgba(236,234,227,0.06)}}
+  #dg-out text{font-family:var(--sans);fill:var(--ink)}
+  #dg-out .eb{font-family:var(--mono);font-size:7px;letter-spacing:.08em;fill:var(--muted)}
+  #dg-out .zn{font-family:var(--mono);font-size:7px;letter-spacing:.14em;fill:var(--soft)}
+  #dg-out .nm{font-size:12px;font-weight:600}
+  #dg-out .fd{font-family:var(--mono);font-size:9px;fill:var(--ink)}
+  #dg-out .fdm{font-family:var(--mono);font-size:9px;fill:var(--muted)}
+  #dg-out .fda{font-family:var(--mono);font-size:9px;fill:var(--accent);font-weight:600}
+  #dg-out .card{font-family:var(--mono);font-size:8px;fill:var(--soft)}
+  #dg-out .al{font-family:var(--mono);font-size:8px;letter-spacing:.06em;fill:var(--soft)}
+  #dg-out .lg{font-family:var(--mono);font-size:8px;letter-spacing:.06em;fill:var(--muted)}
+  #dg-out .mask{fill:var(--paper)}
+  #dg-out .box{fill:var(--paper2);stroke:var(--ink);stroke-width:1}
+  #dg-out .store{fill:var(--wash2);stroke:var(--muted);stroke-width:1}
+  #dg-out .focal{fill:var(--accent-tint);stroke:var(--accent);stroke-width:1}
+  #dg-out .tag{fill:none;stroke-width:.8}
+  #dg-out .ln{fill:none;stroke:var(--muted);stroke-width:1.2}
+  #dg-out .hd{stroke:var(--rule);stroke-width:.8}
+  #dg-out .hair{stroke:var(--rule);stroke-width:.8}
+  #dg-out .mk{fill:var(--muted)}
+</style>
+<defs>
+  <marker id="out-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+    <polygon class="mk" points="0 0, 8 3, 0 6"/>
+  </marker>
+</defs>
+
+<rect width="100%" height="100%" fill="var(--paper)"/>
+
+<!-- relationships, before the boxes -->
+<line class="ln" x1="288" y1="200" x2="374" y2="200" marker-end="url(#out-arrow)"/>
+<line class="ln" x1="624" y1="140" x2="710" y2="140" marker-end="url(#out-arrow)"/>
+<line class="ln" x1="836" y1="232" x2="836" y2="286" marker-end="url(#out-arrow)"/>
+<line class="ln" x1="500" y1="344" x2="500" y2="406" marker-end="url(#out-arrow)"/>
+
+<rect class="mask" x="308" y="180" width="46" height="12"/><text class="al" x="331" y="189" text-anchor="middle">GOVERNS</text>
+<rect class="mask" x="654" y="120" width="26" height="12"/><text class="al" x="667" y="129" text-anchor="middle">HAS</text>
+<text class="card" x="296" y="196">1</text><text class="card" x="364" y="196">N</text>
+<text class="card" x="632" y="136">1</text><text class="card" x="702" y="136">N</text>
+<text class="card" x="844" y="246">1</text><text class="card" x="844" y="282">0..1</text>
+<text class="card" x="508" y="358">1</text><text class="card" x="508" y="400">N</text>
+
+<!-- POLICY -->
+<rect class="mask" x="40" y="120" width="248" height="184" rx="6"/>
+<rect class="store" x="40" y="120" width="248" height="184" rx="6"/>
+<rect class="tag" x="52" y="130" width="40" height="12" rx="2" stroke="var(--muted)" opacity=".55"/>
+<text class="eb" x="72" y="139" text-anchor="middle">POLICY</text>
+<text class="nm" x="52" y="160">The type, as the pack declares it</text>
+<line class="hd" x1="40" y1="170" x2="288" y2="170"/>
+<text class="fdm" x="52" y="186">pack.json → outputs.&lt;type&gt;</text>
+<text class="fd" x="52" y="204">cardinality  one · many</text>
+<text class="fd" x="52" y="220">limit        how many per run</text>
+<text class="fd" x="52" y="236">anchor       required · none</text>
+<text class="fd" x="52" y="252">dedup        true · false</text>
+<text class="fd" x="52" y="268">evidence     required[] · min</text>
+<text class="fd" x="52" y="284">actions      none · sink</text>
+<text class="fd" x="52" y="300">memory       never · proposes</text>
+
+<!-- OUTPUT (focal) -->
+<rect class="mask" x="376" y="88" width="248" height="256" rx="6"/>
+<rect class="focal" x="376" y="88" width="248" height="256" rx="6"/>
+<rect class="tag" x="388" y="98" width="44" height="12" rx="2" stroke="var(--accent)" opacity=".6"/>
+<text class="eb" x="410" y="107" text-anchor="middle" fill="var(--accent)">OUTPUT</text>
+<text class="nm" x="388" y="128">One thing a specialist claims</text>
+<line class="hd" x1="376" y1="138" x2="624" y2="138"/>
+<text class="fdm" x="388" y="154">finding.v1</text>
+<text class="fda" x="388" y="172">type</text>
+<text class="fda" x="388" y="188">subject { kind, ref }</text>
+<text class="fd" x="388" y="204">severity · title · body</text>
+<text class="fd" x="388" y="220">evidence[]</text>
+<text class="fda" x="388" y="236">actions[]</text>
+<text class="fd" x="388" y="252">score</text>
+<text class="fd" x="388" y="268">state · fingerprint</text>
+<text class="fdm" x="388" y="292">anchor — superseded by an</text>
+<text class="fdm" x="388" y="306">evidence item of kind `code`,</text>
+<text class="fdm" x="388" y="320">still read, no longer written</text>
+
+<!-- EVIDENCE -->
+<rect class="mask" x="712" y="88" width="248" height="144" rx="6"/>
+<rect class="box" x="712" y="88" width="248" height="144" rx="6"/>
+<rect class="tag" x="724" y="98" width="56" height="12" rx="2" stroke="var(--ink)" opacity=".45"/>
+<text class="eb" x="752" y="107" text-anchor="middle">EVIDENCE</text>
+<text class="nm" x="724" y="128">Why anyone should believe it</text>
+<line class="hd" x1="712" y1="138" x2="960" y2="138"/>
+<text class="fd" x="724" y="156">kind     code · document</text>
+<text class="fd" x="724" y="172">         web_snapshot · …</text>
+<text class="fd" x="724" y="188">detail   what it shows</text>
+<text class="fd" x="724" y="204">source   what produced it</text>
+<text class="fda" x="724" y="220">locator  { … }</text>
+
+<!-- LOCATOR -->
+<rect class="mask" x="712" y="286" width="248" height="128" rx="6"/>
+<rect class="box" x="712" y="286" width="248" height="128" rx="6"/>
+<rect class="tag" x="724" y="296" width="52" height="12" rx="2" stroke="var(--ink)" opacity=".45"/>
+<text class="eb" x="750" y="305" text-anchor="middle">LOCATOR</text>
+<text class="nm" x="724" y="326">The exact thing it points at</text>
+<line class="hd" x1="712" y1="336" x2="960" y2="336"/>
+<text class="fd" x="724" y="354">file · line · commit · symbol</text>
+<text class="fd" x="724" y="370">command</text>
+<text class="fd" x="724" y="386">url · artifact · ref</text>
+<text class="fdm" x="724" y="404">checked offline, against the run</text>
+
+<!-- ACTIONS -->
+<rect class="mask" x="376" y="406" width="248" height="128" rx="6"/>
+<rect class="box" x="376" y="406" width="248" height="128" rx="6"/>
+<rect class="tag" x="388" y="416" width="48" height="12" rx="2" stroke="var(--ink)" opacity=".45"/>
+<text class="eb" x="412" y="425" text-anchor="middle">ACTIONS</text>
+<text class="nm" x="388" y="446">What it did in the world</text>
+<line class="hd" x1="376" y1="456" x2="624" y2="456"/>
+<text class="fd" x="388" y="474">kind     the pack's own verb</text>
+<text class="fd" x="388" y="490">result   success · error</text>
+<text class="fd" x="388" y="506">target · remoteId · url · at</text>
+<text class="fdm" x="388" y="524">append-only, failures included</text>
+
+<!-- legend -->
+<line class="hair" x1="40" y1="580" x2="960" y2="580"/>
+<text class="zn" x="40" y="598">LEGEND</text>
+<text class="fda" x="120" y="598">type · subject · actions[]</text>
+<text class="lg" x="292" y="598">THE THREE FIELDS THE OUTPUTS SHIFT ADDED</text>
+<text class="lg" x="640" y="598">EVERYTHING ELSE WAS ALREADY THERE</text>
+</svg>

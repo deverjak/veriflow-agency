@@ -1,0 +1,117 @@
+<svg id="dg-shape" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 760" role="img" aria-labelledby="shape-title shape-desc">
+<title id="shape-title">Where the three parts of Agency live</title>
+<desc id="shape-desc">The VS Code extension and the paired phone read the runner only through its JSON contract; the runner reads the pack, which is a committed skill inside the target project alongside the project's committed memory and its gitignored run records.</desc>
+<style>
+  #dg-shape{--paper:#fbfaf7;--paper2:#ffffff;--ink:#1b1a17;--muted:#6d6a62;--soft:#8f8c83;
+    --rule:rgba(27,26,23,0.12);--rule-solid:#e6e3dc;--accent:#1f6f4a;--accent-tint:rgba(31,111,74,0.08);
+    --wash:rgba(27,26,23,0.02);--wash2:rgba(27,26,23,0.05);--wash3:rgba(27,26,23,0.03);
+    --sans:'Geist',ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+    --mono:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  @media (prefers-color-scheme:dark){#dg-shape{--paper:#14140f;--paper2:#1b1b15;--ink:#eceae3;--muted:#97948a;
+    --soft:#7d7a71;--rule:rgba(236,234,227,0.12);--rule-solid:#2b2a24;--accent:#6cba8e;
+    --accent-tint:rgba(108,186,142,0.12);--wash:rgba(236,234,227,0.03);--wash2:rgba(236,234,227,0.06);
+    --wash3:rgba(236,234,227,0.04)}}
+  #dg-shape text{font-family:var(--sans);fill:var(--ink)}
+  #dg-shape .eb{font-family:var(--mono);font-size:7px;letter-spacing:.08em;fill:var(--muted)}
+  #dg-shape .zn{font-family:var(--mono);font-size:7px;letter-spacing:.14em;fill:var(--soft)}
+  #dg-shape .nm{font-size:12px;font-weight:600}
+  #dg-shape .sub{font-family:var(--mono);font-size:9px;fill:var(--muted)}
+  #dg-shape .al{font-family:var(--mono);font-size:8px;letter-spacing:.06em;fill:var(--soft)}
+  #dg-shape .lg{font-family:var(--mono);font-size:8px;letter-spacing:.06em;fill:var(--muted)}
+  #dg-shape .mask{fill:var(--paper)}
+  #dg-shape .box{fill:var(--paper2);stroke:var(--ink);stroke-width:1}
+  #dg-shape .store{fill:var(--wash2);stroke:var(--muted);stroke-width:1}
+  #dg-shape .opt{fill:var(--wash);stroke:var(--rule-solid);stroke-width:1;stroke-dasharray:4 3}
+  #dg-shape .focal{fill:var(--accent-tint);stroke:var(--accent);stroke-width:1}
+  #dg-shape .zone{fill:var(--wash);stroke:var(--rule);stroke-width:.8}
+  #dg-shape .tag{fill:none;stroke-width:.8}
+  #dg-shape .ln{fill:none;stroke:var(--muted);stroke-width:1.2}
+  #dg-shape .bnd{fill:none;stroke:var(--accent);stroke-width:1;stroke-dasharray:4 4;opacity:.55}
+  #dg-shape .hair{stroke:var(--rule);stroke-width:.8}
+  #dg-shape .mk{fill:var(--muted)}
+</style>
+<defs>
+  <marker id="shape-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+    <polygon class="mk" points="0 0, 8 3, 0 6"/>
+  </marker>
+</defs>
+
+<rect width="100%" height="100%" fill="var(--paper)"/>
+
+<!-- zone: the target project -->
+<rect class="zone" x="40" y="456" width="920" height="184" rx="8"/>
+<rect class="mask" x="60" y="460" width="252" height="12"/>
+<text class="zn" x="68" y="469">TARGET PROJECT — VERSIONED WITH THE CODE</text>
+
+<!-- the one boundary -->
+<line class="bnd" x1="40" y1="252" x2="960" y2="252"/>
+<rect class="mask" x="316" y="244" width="368" height="14"/>
+<text class="zn" x="500" y="255" text-anchor="middle">AGENCY … --JSON · RUN.V1 · FINDING.V1</text>
+
+<!-- connectors, drawn before the boxes -->
+<path class="ln" d="M 260,180 V 264 Q 260,272 268,272 H 432 Q 440,272 440,280 V 310" marker-end="url(#shape-arrow)"/>
+<path class="ln" d="M 740,180 V 264 Q 740,272 732,272 H 568 Q 560,272 560,280 V 310" marker-end="url(#shape-arrow)"/>
+<path class="ln" d="M 500,388 V 508" marker-end="url(#shape-arrow)"/>
+<rect class="mask" x="510" y="428" width="62" height="12"/>
+<text class="al" x="516" y="437">PACK.JSON</text>
+
+<!-- VIEWER -->
+<rect class="mask" x="136" y="104" width="248" height="76" rx="6"/>
+<rect class="box" x="136" y="104" width="248" height="76" rx="6"/>
+<rect class="tag" x="148" y="114" width="40" height="12" rx="2" stroke="var(--ink)" opacity=".45"/>
+<text class="eb" x="168" y="123" text-anchor="middle">VIEWER</text>
+<text class="nm" x="260" y="150" text-anchor="middle">VS Code extension</text>
+<text class="sub" x="260" y="168" text-anchor="middle">read-only</text>
+
+<!-- REMOTE -->
+<rect class="mask" x="616" y="104" width="248" height="76" rx="6"/>
+<rect class="box" x="616" y="104" width="248" height="76" rx="6"/>
+<rect class="tag" x="628" y="114" width="40" height="12" rx="2" stroke="var(--ink)" opacity=".45"/>
+<text class="eb" x="648" y="123" text-anchor="middle">REMOTE</text>
+<text class="nm" x="740" y="150" text-anchor="middle">A paired phone</text>
+<text class="sub" x="740" y="168" text-anchor="middle">agency serve · tailnet</text>
+
+<!-- RUNNER -->
+<rect class="mask" x="376" y="312" width="248" height="76" rx="6"/>
+<rect class="box" x="376" y="312" width="248" height="76" rx="6"/>
+<rect class="tag" x="388" y="322" width="40" height="12" rx="2" stroke="var(--ink)" opacity=".45"/>
+<text class="eb" x="408" y="331" text-anchor="middle">RUNNER</text>
+<text class="nm" x="500" y="358" text-anchor="middle">agency</text>
+<text class="sub" x="500" y="376" text-anchor="middle">run · gate · dedup · memory</text>
+
+<!-- THE PACK (focal) -->
+<rect class="mask" x="352" y="512" width="296" height="88" rx="6"/>
+<rect class="focal" x="352" y="512" width="296" height="88" rx="6"/>
+<rect class="tag" x="364" y="522" width="36" height="12" rx="2" stroke="var(--accent)" opacity=".6"/>
+<text class="eb" x="382" y="531" text-anchor="middle" fill="var(--accent)">SKILL</text>
+<text class="nm" x="500" y="562" text-anchor="middle">The specialist</text>
+<text class="sub" x="500" y="580" text-anchor="middle">.claude/skills/agency-&lt;name&gt;/</text>
+
+<!-- MEMORY -->
+<rect class="mask" x="72" y="512" width="248" height="88" rx="6"/>
+<rect class="store" x="72" y="512" width="248" height="88" rx="6"/>
+<rect class="tag" x="84" y="522" width="60" height="12" rx="2" stroke="var(--muted)" opacity=".55"/>
+<text class="eb" x="114" y="531" text-anchor="middle">COMMITTED</text>
+<text class="nm" x="196" y="562" text-anchor="middle">Memory</text>
+<text class="sub" x="196" y="580" text-anchor="middle">.agency/knowledge/</text>
+
+<!-- RUN RECORDS -->
+<rect class="mask" x="680" y="512" width="248" height="88" rx="6"/>
+<rect class="opt" x="680" y="512" width="248" height="88" rx="6"/>
+<rect class="tag" x="692" y="522" width="64" height="12" rx="2" stroke="var(--rule-solid)"/>
+<text class="eb" x="724" y="531" text-anchor="middle">GITIGNORED</text>
+<text class="nm" x="804" y="562" text-anchor="middle">Run records</text>
+<text class="sub" x="804" y="580" text-anchor="middle">.agency/runs/&lt;ULID&gt;/</text>
+
+<!-- legend -->
+<line class="hair" x1="40" y1="688" x2="960" y2="688"/>
+<text class="zn" x="40" y="706">LEGEND</text>
+<rect class="focal" x="128" y="698" width="14" height="10" rx="2"/>
+<text class="lg" x="150" y="707">A SKILL — NOTHING HIRES IT, NOTHING CONFIGURES IT</text>
+<rect class="store" x="512" y="698" width="14" height="10" rx="2"/>
+<text class="lg" x="534" y="707">IN GIT</text>
+<rect class="opt" x="612" y="698" width="14" height="10" rx="2"/>
+<text class="lg" x="634" y="707">NOT IN GIT</text>
+<line class="bnd" x1="740" y1="703" x2="762" y2="703"/>
+<text class="lg" x="770" y="707">THE ONLY BOUNDARY</text>
+</svg>

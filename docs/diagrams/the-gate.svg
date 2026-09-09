@@ -1,0 +1,124 @@
+<svg id="dg-gate" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 850" role="img" aria-labelledby="gate-title gate-desc">
+<title id="gate-title">The gate, and the reason it refuses</title>
+<desc id="gate-desc">Six checks run in a fixed order over what a specialist wrote — the contract, the declared type, a real file and line, evidence of the right kind, whether the cited work really happened, and last the ceiling for that type — and each refusal is written aside under one of nine named reasons.</desc>
+<style>
+  #dg-gate{--paper:#fbfaf7;--paper2:#ffffff;--ink:#1b1a17;--muted:#6d6a62;--soft:#8f8c83;
+    --rule:rgba(27,26,23,0.12);--rule-solid:#e6e3dc;--accent:#1f6f4a;--accent-tint:rgba(31,111,74,0.08);
+    --wash:rgba(27,26,23,0.02);--wash2:rgba(27,26,23,0.05);
+    --sans:'Geist',ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+    --mono:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  @media (prefers-color-scheme:dark){#dg-gate{--paper:#14140f;--paper2:#1b1b15;--ink:#eceae3;--muted:#97948a;
+    --soft:#7d7a71;--rule:rgba(236,234,227,0.12);--rule-solid:#2b2a24;--accent:#6cba8e;
+    --accent-tint:rgba(108,186,142,0.12);--wash:rgba(236,234,227,0.03);--wash2:rgba(236,234,227,0.06)}}
+  #dg-gate text{font-family:var(--sans);fill:var(--ink)}
+  #dg-gate .zn{font-family:var(--mono);font-size:7px;letter-spacing:.14em;fill:var(--soft)}
+  #dg-gate .nm{font-size:12px;font-weight:600}
+  #dg-gate .sub{font-family:var(--mono);font-size:9px;fill:var(--muted)}
+  #dg-gate .rsn{font-family:var(--mono);font-size:9px;fill:var(--ink)}
+  #dg-gate .rsx{font-family:var(--mono);font-size:9px;fill:var(--muted)}
+  #dg-gate .lg{font-family:var(--mono);font-size:8px;letter-spacing:.06em;fill:var(--muted)}
+  #dg-gate .mask{fill:var(--paper)}
+  #dg-gate .box{fill:var(--paper2);stroke:var(--ink);stroke-width:1}
+  #dg-gate .oval{fill:var(--wash2);stroke:var(--muted);stroke-width:1}
+  #dg-gate .focal{fill:var(--accent-tint);stroke:var(--accent);stroke-width:1}
+  #dg-gate .ln{fill:none;stroke:var(--muted);stroke-width:1.2}
+  #dg-gate .lead{stroke:var(--rule-solid);stroke-width:.8;stroke-dasharray:3 3}
+  #dg-gate .hair{stroke:var(--rule);stroke-width:.8}
+  #dg-gate .mk{fill:var(--muted)}
+</style>
+<defs>
+  <marker id="gate-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+    <polygon class="mk" points="0 0, 8 3, 0 6"/>
+  </marker>
+</defs>
+
+<rect width="100%" height="100%" fill="var(--paper)"/>
+
+<text class="zn" x="104" y="64">THE CHECKS, IN THE ORDER THEY RUN</text>
+<text class="zn" x="560" y="64">THE NAME THE REFUSAL CARRIES</text>
+
+<!-- spine -->
+<line class="ln" x1="252" y1="136" x2="252" y2="164" marker-end="url(#gate-arrow)"/>
+<line class="ln" x1="252" y1="224" x2="252" y2="252" marker-end="url(#gate-arrow)"/>
+<line class="ln" x1="252" y1="312" x2="252" y2="340" marker-end="url(#gate-arrow)"/>
+<line class="ln" x1="252" y1="400" x2="252" y2="428" marker-end="url(#gate-arrow)"/>
+<line class="ln" x1="252" y1="488" x2="252" y2="516" marker-end="url(#gate-arrow)"/>
+<line class="ln" x1="252" y1="576" x2="252" y2="604" marker-end="url(#gate-arrow)"/>
+<line class="ln" x1="252" y1="664" x2="252" y2="692" marker-end="url(#gate-arrow)"/>
+
+<!-- leaders to the reason column -->
+<line class="lead" x1="408" y1="196" x2="548" y2="196"/>
+<line class="lead" x1="408" y1="284" x2="548" y2="284"/>
+<line class="lead" x1="408" y1="372" x2="548" y2="372"/>
+<line class="lead" x1="408" y1="460" x2="548" y2="460"/>
+<line class="lead" x1="408" y1="548" x2="548" y2="548"/>
+<line class="lead" x1="408" y1="636" x2="548" y2="636"/>
+
+<!-- start -->
+<rect class="mask" x="104" y="88" width="296" height="48" rx="24"/>
+<rect class="oval" x="104" y="88" width="296" height="48" rx="24"/>
+<text class="nm" x="252" y="110" text-anchor="middle">What the specialist wrote</text>
+<text class="sub" x="252" y="126" text-anchor="middle">findings.raw.json</text>
+
+<!-- 1 -->
+<rect class="mask" x="104" y="164" width="296" height="60" rx="6"/>
+<rect class="box" x="104" y="164" width="296" height="60" rx="6"/>
+<text class="nm" x="252" y="190" text-anchor="middle">The contract</text>
+<text class="sub" x="252" y="208" text-anchor="middle">finding.v1, field by field</text>
+<text class="rsn" x="560" y="200">schema</text>
+
+<!-- 2 -->
+<rect class="mask" x="104" y="252" width="296" height="60" rx="6"/>
+<rect class="box" x="104" y="252" width="296" height="60" rx="6"/>
+<text class="nm" x="252" y="278" text-anchor="middle">A type this pack declares</text>
+<text class="sub" x="252" y="296" text-anchor="middle">pack.json → outputs</text>
+<text class="rsn" x="560" y="288">unknown-type</text>
+
+<!-- 3 -->
+<rect class="mask" x="104" y="340" width="296" height="60" rx="6"/>
+<rect class="box" x="104" y="340" width="296" height="60" rx="6"/>
+<text class="nm" x="252" y="366" text-anchor="middle">A real file, a real line</text>
+<text class="sub" x="252" y="384" text-anchor="middle">only where the type needs one</text>
+<text class="rsn" x="560" y="360">missing-anchor</text>
+<text class="rsn" x="560" y="376">phantom-file</text>
+<text class="rsn" x="560" y="392">phantom-line</text>
+
+<!-- 4 -->
+<rect class="mask" x="104" y="428" width="296" height="60" rx="6"/>
+<rect class="box" x="104" y="428" width="296" height="60" rx="6"/>
+<text class="nm" x="252" y="454" text-anchor="middle">Evidence of the right kind</text>
+<text class="sub" x="252" y="472" text-anchor="middle">the type outranks the dimension</text>
+<text class="rsn" x="560" y="464">weak-evidence</text>
+
+<!-- 5 -->
+<rect class="mask" x="104" y="516" width="296" height="60" rx="6"/>
+<rect class="box" x="104" y="516" width="296" height="60" rx="6"/>
+<text class="nm" x="252" y="542" text-anchor="middle">It really happened, here</text>
+<text class="sub" x="252" y="560" text-anchor="middle">checked against this run alone</text>
+<text class="rsn" x="560" y="540">unproven-source</text>
+<text class="rsn" x="560" y="556">unverified-evidence</text>
+
+<!-- 6 focal -->
+<rect class="mask" x="104" y="604" width="296" height="60" rx="6"/>
+<rect class="focal" x="104" y="604" width="296" height="60" rx="6"/>
+<text class="nm" x="252" y="630" text-anchor="middle">The ceiling for this type</text>
+<text class="sub" x="252" y="648" text-anchor="middle">last, and over the survivors</text>
+<text class="rsn" x="560" y="640" fill="var(--accent)">over-cardinality</text>
+
+<!-- end -->
+<rect class="mask" x="104" y="692" width="296" height="48" rx="24"/>
+<rect class="oval" x="104" y="692" width="296" height="48" rx="24"/>
+<text class="nm" x="252" y="714" text-anchor="middle">An output</text>
+<text class="sub" x="252" y="730" text-anchor="middle">→ dedup → dispatch → memory</text>
+
+<!-- the one thing score does -->
+<text class="rsx" x="560" y="700">score never refuses an output.</text>
+<text class="rsx" x="560" y="716">Where more came than the ceiling</text>
+<text class="rsx" x="560" y="732">allows, it decides the order —</text>
+<text class="rsx" x="560" y="748">which ones, never whether.</text>
+
+<!-- legend -->
+<line class="hair" x1="104" y1="788" x2="940" y2="788"/>
+<text class="zn" x="104" y="806">LEGEND</text>
+<text class="lg" x="180" y="806">EVERY CHECK ASKS WHETHER THIS CAN BE TRUE. NONE OF THEM ASKS HOW GOOD IT IS.</text>
+</svg>
