@@ -6,6 +6,7 @@
 **Stav k 8. 9. 2026:** **Plán je hotový** — Kroky 1–11 commitnuté, 501 testů zelených, přejímka §7 splněná. Svislý řez `bet` prošel u Kroku 4 a **přeskládal zbytek plánu**; Krok 5 dal outputu `subject` a běhu `scope`, Krok 6 nahradil `sinks` akcemi a cestou opravil dvě místa, kde `agency ingest` nebyl idempotentní, Krok 7 zúžil fold událostí na jeden na lifecycle a oživil `requires`, Krok 8 vyndal `score` z brány a nahradil ho stropem, Krok 9 přestěhoval kotvu do `evidence.kind = code` a Krok 10 provedl přejímku: PO a CEO přestaly jádro obcházet. Živé packy v obou cizích repozitářích jsou dorovnané a `agency doctor` je v nich čistý — čeká se na první ostrý běh. Krok 11 přejmenoval příkaz na `agency outputs` (`findings` zůstává aliasem napořád). Co zbývá, je ostrý provoz — viz „Co může říct jen ostrý provoz“ níž.
 
 **Přejímka:** [`../prejimka-outputs.md`](../prejimka-outputs.md) · **provoz:** [`../overeni-v-provozu.md`](../overeni-v-provozu.md) — pět bodů §7 s tím, kde je každý dokázaný, pět míst, kde plán neměl pravdu, a co může říct jen ostrý provoz.
+**Výklad pro čtenáře:** [`../concepts.md`](../concepts.md) — šest konceptů a šest diagramů; co z tohohle plánu zbylo jako tvar, který se dá vysvětlit.
 
 **Nedělá:** nový generický agent framework. Žádný plugin systém metrik, žádný registr typů, žádná doménová znalost v jádru. Přibývají přesně dvě abstrakce — `TypePolicy` a `Run.scope`.
 

@@ -126,3 +126,5 @@ Pravidlo pro to, co přijde potom: **neopravuj čísla, oprav metodu.** Pack s p
 | kontrakt | [`schemas/finding.v1.json`](../schemas/finding.v1.json), [`schemas/run.v1.json`](../schemas/run.v1.json) |
 
 Plán sám — se všemi retrospektivami po krocích — zůstává v [`plans/outputs.md`](plans/outputs.md). Tenhle dokument je jeho přejímka, ne náhrada: kdo bude řešit *proč* je něco tak, jak to je, najde odpověď tam.
+
+Kdo potřebuje jen vědět, **jak to teď vypadá**, začne u [`concepts.md`](concepts.md): šest konceptů a šest diagramů — kde co bydlí, co je output, co se s ním děje, co brána odmítne, kde output sedí, a jak se z verdiktu stane číslo.
